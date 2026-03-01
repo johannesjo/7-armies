@@ -427,9 +427,10 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
     unit.gunAngle = ((unit.gunAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
     if (unit.gunAngle < -Math.PI) unit.gunAngle += 2 * Math.PI;
 
-    // Accelerate/decelerate
+    // Accelerate/decelerate — only slow down for final destination
     const accel = unit.speed * 1.5 * dt;
-    const targetSpeed = dist > 40 ? unit.speed : unit.speed * (dist / 40);
+    const shouldDecel = dist <= 40 && !hasMoreWaypoints;
+    const targetSpeed = shouldDecel ? unit.speed * (dist / 40) : unit.speed;
     let newSpeed = curSpeed;
     if (newSpeed < targetSpeed) {
       newSpeed = Math.min(newSpeed + accel, targetSpeed);

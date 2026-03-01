@@ -193,7 +193,9 @@ export function assignUnitTargets(battalion: Battalion, units: Unit[], allUnits:
       }
     }
 
-    const unitEngaged = nearest !== null && nearestDist < engageR2;
+    // Lower threshold to engage archers — melee units don't chase them as far
+    const engageThreshold = nearest?.type === 'archer' ? engageR2 * 0.25 : engageR2;
+    const unitEngaged = nearest !== null && nearestDist < engageThreshold;
     if (unitEngaged) anyEngaged = true;
 
     if (unitEngaged && nearest) {

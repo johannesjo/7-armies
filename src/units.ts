@@ -387,8 +387,8 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
   if (unit.type === 'cavalry') {
     const curSpeed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
 
-    // When close to target or slow, use direct movement (no orbiting)
-    if (dist < 30 || curSpeed < unit.speed * 0.3) {
+    // Final approach: direct movement when close to target (no orbiting)
+    if (dist < 30) {
       // Direct move like other units, but update gunAngle to face movement
       const step = unit.speed * 0.5 * dt; // slower approach speed
       const moveX = (dx / dist) * Math.min(step, dist);

@@ -102,7 +102,8 @@ export function createArmyBattalions(team: Team): { battalions: Battalion[]; uni
 
 /** Pop the next waypoint when most units have reached the current target.
  *  Uses majority vote (60%) instead of center average so stragglers
- *  don't stall the whole battalion. */
+ *  don't stall the whole battalion. Keeps the final target so units
+ *  reach their formation positions. */
 export function advanceBattalionWaypoint(battalion: Battalion, units: Unit[]): void {
   const alive = units.filter(u => battalion.unitIds.includes(u.id) && u.alive);
   if (alive.length === 0) return;
@@ -114,8 +115,11 @@ export function advanceBattalionWaypoint(battalion: Battalion, units: Unit[]): v
     return;
   }
 
-  // Count how many units are near the current target
-  const threshold = 40;
+  // No more waypoints — keep final target so units finish moving to formation
+  if (battalion.waypoints.length === 0) return;
+
+  // Count how many units are near the current intermediate waypoint
+  const threshold = 25;
   let nearCount = 0;
   for (const u of alive) {
     const dx = battalion.moveTarget.x - u.pos.x;
@@ -125,9 +129,7 @@ export function advanceBattalionWaypoint(battalion: Battalion, units: Unit[]): v
 
   // Advance when 60% of alive units have arrived (stragglers don't stall)
   if (nearCount >= alive.length * 0.6) {
-    battalion.moveTarget = battalion.waypoints.length > 0
-      ? battalion.waypoints.shift()!
-      : null;
+    battalion.moveTarget = battalion.waypoints.shift()!;
   }
 }
 

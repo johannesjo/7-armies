@@ -347,6 +347,23 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
   }
 
   if (!unit.moveTarget || !unit.alive) {
+    // Cavalry decelerates instead of stopping instantly
+    if (unit.type === 'cavalry') {
+      const curSpeed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
+      if (curSpeed > 1) {
+        const decel = unit.speed * 2 * dt;
+        const newSpeed = Math.max(0, curSpeed - decel);
+        const ratio = newSpeed / curSpeed;
+        unit.vel.x *= ratio;
+        unit.vel.y *= ratio;
+        unit.pos.x += unit.vel.x * dt;
+        unit.pos.y += unit.vel.y * dt;
+        unit.pos.x = clamp(unit.pos.x, unit.radius, MAP_WIDTH - unit.radius);
+        unit.pos.y = clamp(unit.pos.y, unit.radius, MAP_HEIGHT - unit.radius);
+        pushOutOfObstacles(unit.pos, unit.radius, obstacles);
+        return;
+      }
+    }
     unit.vel = { x: 0, y: 0 };
     return;
   }
@@ -358,13 +375,65 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
   if (dist < 2) {
     unit.pos.x = unit.moveTarget.x;
     unit.pos.y = unit.moveTarget.y;
-    unit.vel = { x: 0, y: 0 };
+    // Cavalry keeps a little residual velocity for smooth stop
+    if (unit.type !== 'cavalry') unit.vel = { x: 0, y: 0 };
+    return;
+  }
+
+  let dirX = dx / dist;
+  let dirY = dy / dist;
+
+  // Cavalry momentum: blend current velocity toward desired direction
+  if (unit.type === 'cavalry') {
+    const curSpeed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
+    const desiredX = dirX * unit.speed;
+    const desiredY = dirY * unit.speed;
+    // Steering rate: how fast cavalry can turn (radians/s worth of blending)
+    const steerRate = 3.0 * dt; // ~3 rad/s turning
+    const accel = unit.speed * 1.5 * dt; // acceleration per frame
+    let newVx = unit.vel.x + (desiredX - unit.vel.x) * steerRate;
+    let newVy = unit.vel.y + (desiredY - unit.vel.y) * steerRate;
+    // Also accelerate toward desired speed
+    const targetSpeed = Math.min(unit.speed, dist > 20 ? unit.speed : unit.speed * (dist / 20));
+    let newSpeed = Math.sqrt(newVx * newVx + newVy * newVy);
+    if (newSpeed < targetSpeed) {
+      newSpeed = Math.min(newSpeed + accel, targetSpeed);
+    }
+    if (newSpeed > 0.01) {
+      const ns = Math.sqrt(newVx * newVx + newVy * newVy);
+      if (ns > 0.01) {
+        newVx = (newVx / ns) * newSpeed;
+        newVy = (newVy / ns) * newSpeed;
+      }
+    }
+    unit.vel.x = newVx;
+    unit.vel.y = newVy;
+
+    const moveX = unit.vel.x * dt;
+    const moveY = unit.vel.y * dt;
+    const oldX = unit.pos.x;
+    const oldY = unit.pos.y;
+    let newX = oldX + moveX;
+    let newY = oldY + moveY;
+
+    const blocked = obstacles.some(o => rectContainsCircle(o, { x: newX, y: newY }, unit.radius));
+    if (blocked) {
+      const hOnly = !obstacles.some(o => rectContainsCircle(o, { x: newX, y: oldY }, unit.radius));
+      const vOnly = !obstacles.some(o => rectContainsCircle(o, { x: oldX, y: newY }, unit.radius));
+      if (hOnly) { newY = oldY; unit.vel.y *= 0.3; }
+      else if (vOnly) { newX = oldX; unit.vel.x *= 0.3; }
+      else { pushOutOfObstacles(unit.pos, unit.radius, obstacles); unit.vel.x *= 0.3; unit.vel.y *= 0.3; return; }
+    }
+
+    newX = clamp(newX, unit.radius, MAP_WIDTH - unit.radius);
+    newY = clamp(newY, unit.radius, MAP_HEIGHT - unit.radius);
+    unit.pos.x = newX;
+    unit.pos.y = newY;
+    pushOutOfObstacles(unit.pos, unit.radius, obstacles);
     return;
   }
 
   const step = unit.speed * dt;
-  let dirX = dx / dist;
-  let dirY = dy / dist;
 
   // Steer around nearby enemy units only — friendlies pass through freely
   const lookAhead = unit.radius * 5;

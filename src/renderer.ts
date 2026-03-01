@@ -353,6 +353,9 @@ export class Renderer {
         shape.ellipse(0, 0, r * 0.65, r * 1.3);
         shape.setStrokeStyle({ width: 1, color: darkColor });
         shape.stroke();
+        // Rider dot at front (-Y = facing direction in local coords)
+        shape.circle(0, -r * 0.6, r * 0.35);
+        shape.fill(darkColor);
         // Lance
         weapon.setStrokeStyle({ width: 1, color: this.theme.barrel, alpha: this.theme.barrelAlpha });
         weapon.moveTo(0, 0);
@@ -361,10 +364,10 @@ export class Renderer {
         break;
       }
       case 'archer': {
-        // Circle body + outline
-        shape.circle(0, 0, r);
+        // Oval body — slightly elongated along facing
+        shape.ellipse(0, 0, r * 0.8, r * 1.1);
         shape.fill(color);
-        shape.circle(0, 0, r);
+        shape.ellipse(0, 0, r * 0.8, r * 1.1);
         shape.setStrokeStyle({ width: 1, color: darkColor });
         shape.stroke();
         // D-shaped bow: arc limb + straight bowstring
@@ -383,17 +386,24 @@ export class Renderer {
         break;
       }
       case 'pikeman': {
-        // Circle body + thicker outline (heavier armor)
-        shape.circle(0, 0, r);
+        // Oval body + thicker outline (heavier armor)
+        shape.ellipse(0, 0, r * 0.85, r * 1.15);
         shape.fill(color);
-        shape.circle(0, 0, r);
+        shape.ellipse(0, 0, r * 0.85, r * 1.15);
         shape.setStrokeStyle({ width: 1.5, color: darkColor });
         shape.stroke();
-        // Very long pike
+        // Long pike (3× radius) with spearhead
+        const pikeLen = r * 3;
         weapon.setStrokeStyle({ width: 1, color: this.theme.barrel, alpha: this.theme.barrelAlpha });
         weapon.moveTo(0, 0);
-        weapon.lineTo(r * 2.5, 0);
+        weapon.lineTo(pikeLen, 0);
         weapon.stroke();
+        // Spearhead — small filled triangle at tip
+        weapon.moveTo(pikeLen + 2, 0);
+        weapon.lineTo(pikeLen - 1, -1.2);
+        weapon.lineTo(pikeLen - 1, 1.2);
+        weapon.closePath();
+        weapon.fill({ color: this.theme.barrel, alpha: this.theme.barrelAlpha });
         break;
       }
       default: {

@@ -643,7 +643,7 @@ export function meleeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
   unit.fireTimer = unit.fireCooldown;
 
   const hits: AoeHit[] = [];
-  const knockback = 65;
+  const knockback = unit.damage * 6;
 
   // Cavalry charge: bonus damage when moving fast
   const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);

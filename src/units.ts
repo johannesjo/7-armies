@@ -366,13 +366,13 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
   let dirX = dx / dist;
   let dirY = dy / dist;
 
-  // Steer around nearby units (skip same-battalion to preserve formation)
+  // Steer around nearby enemy units only — friendlies pass through freely
   const lookAhead = unit.radius * 5;
   let steerX = 0;
   let steerY = 0;
   for (const other of allUnits) {
     if (other === unit || !other.alive) continue;
-    if (unit.battalionId && unit.battalionId === other.battalionId) continue;
+    if (other.team === unit.team) continue;
     const ox = other.pos.x - unit.pos.x;
     const oy = other.pos.y - unit.pos.y;
     const oDist = Math.sqrt(ox * ox + oy * oy);
@@ -470,13 +470,20 @@ export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
       for (let j = i + 1; j < alive.length; j++) {
         const a = alive[i];
         const b = alive[j];
+        const sameTeam = a.team === b.team;
+        // Same-team: soft separation (just prevent stacking, no buffer)
+        // Enemy: full separation with buffer
+        const minDist = sameTeam
+          ? a.radius + b.radius
+          : a.radius + b.radius + 1;
         const dx = b.pos.x - a.pos.x;
         const dy = b.pos.y - a.pos.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        const minDist = a.radius + b.radius + 1;
 
         if (dist < minDist && dist > 0.01) {
-          const overlap = (minDist - dist) / 2;
+          // Same-team push is weaker (30%) to allow passing through
+          const strength = sameTeam ? 0.3 : 1;
+          const overlap = ((minDist - dist) / 2) * strength;
           const nx = dx / dist;
           const ny = dy / dist;
           a.pos.x -= nx * overlap;
@@ -484,14 +491,13 @@ export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
           b.pos.x += nx * overlap;
           b.pos.y += ny * overlap;
 
-          // Position-only — no velocity modification
           a.pos.x = clamp(a.pos.x, a.radius, MAP_WIDTH - a.radius);
           a.pos.y = clamp(a.pos.y, a.radius, MAP_HEIGHT - a.radius);
           b.pos.x = clamp(b.pos.x, b.radius, MAP_WIDTH - b.radius);
           b.pos.y = clamp(b.pos.y, b.radius, MAP_HEIGHT - b.radius);
         } else if (dist <= 0.01) {
-          a.pos.x -= 1;
-          b.pos.x += 1;
+          a.pos.x -= 0.5;
+          b.pos.x += 0.5;
         }
       }
     }

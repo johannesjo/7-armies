@@ -25,7 +25,7 @@ export const BATTALION_SIZE = 12;
 
 export const UNIT_ATTACK_COOLDOWN_MS = 1000;
 
-export const ROUND_DURATION_S = 4;
+export const ROUND_DURATION_S = 3;
 export const PATH_SAMPLE_DISTANCE = 18;
 export const UNIT_SELECT_RADIUS = 30;
 export const COVER_SCREEN_DURATION_MS = 1500;

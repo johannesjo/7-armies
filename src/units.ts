@@ -430,7 +430,11 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
     // Accelerate/decelerate — only slow down for final destination
     const accel = unit.speed * 1.5 * dt;
     const shouldDecel = dist <= 40 && !hasMoreWaypoints;
-    const targetSpeed = shouldDecel ? unit.speed * (dist / 40) : unit.speed;
+    // Slow down for sharp turns — prevents circling when heading is misaligned
+    const absAngle = Math.abs(angleDiff);
+    const turnBrake = absAngle > 0.5 ? Math.max(0.25, 1 - absAngle / Math.PI) : 1;
+    const baseSpeed = shouldDecel ? unit.speed * (dist / 40) : unit.speed;
+    const targetSpeed = baseSpeed * turnBrake;
     let newSpeed = curSpeed;
     if (newSpeed < targetSpeed) {
       newSpeed = Math.min(newSpeed + accel, targetSpeed);

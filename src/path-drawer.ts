@@ -322,6 +322,13 @@ export class PathDrawer {
         this.hoverGfx.setStrokeStyle({ width: 1.5, color: teamColor, alpha: 0.6 });
         this.hoverGfx.stroke();
       }
+
+      // Range circle for archer battalions while dragging
+      if (this.selectedBattalion.type === 'archer' && this.rawPoints.length > 0 && alive.length > 0) {
+        const endpoint = this.rawPoints[this.rawPoints.length - 1];
+        this.drawRangeCircle(alive[0], endpoint, teamColor);
+      }
+
       return; // Don't show hover when drawing
     }
 

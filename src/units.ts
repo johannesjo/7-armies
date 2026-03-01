@@ -449,26 +449,8 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
     }
   }
 
-  // Prevent walking into other units (skip same-battalion)
-  const hitsUnit = (px: number, py: number) => allUnits.some(other => {
-    if (other === unit || !other.alive) return false;
-    if (unit.battalionId && unit.battalionId === other.battalionId) return false;
-    const cdx = px - other.pos.x;
-    const cdy = py - other.pos.y;
-    const minR = unit.radius + other.radius;
-    return cdx * cdx + cdy * cdy < minR * minR;
-  });
-  if (hitsUnit(newX, newY)) {
-    if (!hitsUnit(newX, oldY)) {
-      newY = oldY;
-    } else if (!hitsUnit(oldX, newY)) {
-      newX = oldX;
-    } else {
-      // Can't move — stay put
-      unit.vel = { x: 0, y: 0 };
-      return;
-    }
-  }
+  // Unit-unit overlap is resolved by separateUnits() each frame.
+  // No hard collision block here — prevents units from getting stuck.
 
   // Clamp to map bounds
   newX = clamp(newX, unit.radius, MAP_WIDTH - unit.radius);
@@ -510,14 +492,13 @@ export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
           b.pos.x += nx * overlap;
           b.pos.y += ny * overlap;
 
-          // Gentle separation — just stop converging, minimal bounce
+          // Just cancel converging velocity — no bounce
           const relVelDot = (a.vel.x - b.vel.x) * nx + (a.vel.y - b.vel.y) * ny;
           if (relVelDot < 0) {
-            const bounce = 0.1;
-            a.vel.x -= nx * relVelDot * (0.5 + bounce);
-            a.vel.y -= ny * relVelDot * (0.5 + bounce);
-            b.vel.x += nx * relVelDot * (0.5 + bounce);
-            b.vel.y += ny * relVelDot * (0.5 + bounce);
+            a.vel.x -= nx * relVelDot * 0.5;
+            a.vel.y -= ny * relVelDot * 0.5;
+            b.vel.x += nx * relVelDot * 0.5;
+            b.vel.y += ny * relVelDot * 0.5;
           }
 
           // Keep within bounds
@@ -646,7 +627,7 @@ export function meleeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
   // Cavalry charge: bonus damage + big knockback when moving fast
   const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
   const isCharging = unit.type === 'cavalry' && speed >= CAVALRY_CHARGE_SPEED_THRESHOLD;
-  const knockback = isCharging ? 40 : 4;
+  const knockback = isCharging ? 40 : 1;
 
   for (const enemy of units) {
     if (!enemy.alive || enemy.team === unit.team) continue;

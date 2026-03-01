@@ -1,0 +1,528 @@
+import { describe, it, expect } from 'vitest';
+import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked, meleeAoeAttack } from './units';
+import { MAP_WIDTH, MAP_HEIGHT, CAVALRY_CHARGE_SPEED_THRESHOLD } from './constants';
+
+
+describe('createUnit', () => {
+  it('creates a swordsman with correct stats', () => {
+    const unit = createUnit('sw_1', 'swordsman', 'blue', { x: 100, y: 200 });
+    expect(unit.type).toBe('swordsman');
+    expect(unit.hp).toBe(20);
+    expect(unit.maxHp).toBe(20);
+    expect(unit.speed).toBe(80);
+    expect(unit.damage).toBe(4);
+    expect(unit.range).toBe(10);
+    expect(unit.alive).toBe(true);
+    expect(unit.pos).toEqual({ x: 100, y: 200 });
+    expect(unit.team).toBe('blue');
+  });
+
+  it('creates an archer with correct stats', () => {
+    const unit = createUnit('ar_1', 'archer', 'red', { x: 500, y: 300 });
+    expect(unit.hp).toBe(10);
+    expect(unit.speed).toBe(55);
+    expect(unit.damage).toBe(6);
+    expect(unit.range).toBe(200);
+  });
+
+  it('creates a cavalry with correct stats', () => {
+    const unit = createUnit('cav_1', 'cavalry', 'blue', { x: 300, y: 400 });
+    expect(unit.hp).toBe(18);
+    expect(unit.speed).toBe(140);
+    expect(unit.damage).toBe(5);
+    expect(unit.range).toBe(12);
+    expect(unit.radius).toBe(3);
+  });
+
+  it('creates a pikeman with correct stats', () => {
+    const unit = createUnit('pk_1', 'pikeman', 'red', { x: 400, y: 200 });
+    expect(unit.hp).toBe(25);
+    expect(unit.speed).toBe(50);
+    expect(unit.damage).toBe(3);
+    expect(unit.range).toBe(12);
+  });
+});
+
+describe('createArmy', () => {
+  it('creates correct units for blue team on the bottom side', () => {
+    const units = createArmy('blue');
+    expect(units).toHaveLength(6);
+    expect(units.filter(u => u.type === 'swordsman')).toHaveLength(2);
+    expect(units.filter(u => u.type === 'archer')).toHaveLength(2);
+    expect(units.filter(u => u.type === 'cavalry')).toHaveLength(1);
+    expect(units.filter(u => u.type === 'pikeman')).toHaveLength(1);
+    units.forEach(u => {
+      expect(u.team).toBe('blue');
+      expect(u.pos.y).toBeGreaterThan(MAP_HEIGHT * 2 / 3);
+    });
+  });
+
+  it('creates correct units for red team on the top side', () => {
+    const units = createArmy('red');
+    expect(units).toHaveLength(6);
+    units.forEach(u => {
+      expect(u.team).toBe('red');
+      expect(u.pos.y).toBeLessThan(MAP_HEIGHT / 3);
+    });
+  });
+});
+
+describe('moveUnit', () => {
+  it('moves unit toward its target', () => {
+    const unit = createUnit('s1', 'swordsman', 'blue', { x: 100, y: 100 });
+    unit.moveTarget = { x: 300, y: 100 };
+    moveUnit(unit, 1, []);
+    expect(unit.pos.x).toBeGreaterThan(100);
+    expect(unit.pos.y).toBeCloseTo(100, 1);
+  });
+
+  it('does not move past its target', () => {
+    const unit = createUnit('s1', 'swordsman', 'blue', { x: 100, y: 100 });
+    unit.moveTarget = { x: 110, y: 100 };
+    moveUnit(unit, 1, []);
+    expect(unit.pos.x).toBeCloseTo(110, 1);
+  });
+
+  it('does nothing without a target', () => {
+    const unit = createUnit('s1', 'swordsman', 'blue', { x: 50, y: 50 });
+    moveUnit(unit, 1, []);
+    expect(unit.pos).toEqual({ x: 50, y: 50 });
+  });
+});
+
+describe('findTarget', () => {
+  it('returns nearest enemy of preferred type', () => {
+    const attacker = createUnit('s1', 'swordsman', 'blue', { x: 100, y: 100 });
+    const enemy1 = createUnit('e1', 'swordsman', 'red', { x: 200, y: 100 });
+    const enemy2 = createUnit('e2', 'swordsman', 'red', { x: 300, y: 100 });
+    const allUnits = [attacker, enemy1, enemy2];
+
+    const target = findTarget(attacker, allUnits, 'e1');
+    expect(target).toBe(enemy1);
+  });
+
+  it('falls back to nearest enemy if preferred target is dead', () => {
+    const attacker = createUnit('s1', 'swordsman', 'blue', { x: 100, y: 100 });
+    const enemy1 = createUnit('e1', 'swordsman', 'red', { x: 200, y: 100 });
+    enemy1.alive = false;
+    const enemy2 = createUnit('e2', 'swordsman', 'red', { x: 300, y: 100 });
+    const allUnits = [attacker, enemy1, enemy2];
+
+    const target = findTarget(attacker, allUnits, 'e1');
+    expect(target).toBe(enemy2);
+  });
+
+  it('returns null when no enemies alive', () => {
+    const attacker = createUnit('s1', 'swordsman', 'blue', { x: 100, y: 100 });
+    const target = findTarget(attacker, [attacker], null);
+    expect(target).toBeNull();
+  });
+
+  it('prefers visible enemy over closer blocked enemy', () => {
+    const attacker = createUnit('s1', 'swordsman', 'blue', { x: 100, y: 100 });
+    const blocked = createUnit('e1', 'swordsman', 'red', { x: 300, y: 100 });
+    const visible = createUnit('e2', 'swordsman', 'red', { x: 100, y: 400 });
+    const obstacle = { x: 180, y: 80, w: 40, h: 40 }; // blocks horizontal path to e1
+
+    const target = findTarget(attacker, [attacker, blocked, visible], null, [obstacle]);
+    expect(target).toBe(visible);
+  });
+
+  it('falls back to blocked enemy when all are blocked', () => {
+    const attacker = createUnit('s1', 'swordsman', 'blue', { x: 100, y: 100 });
+    const enemy = createUnit('e1', 'swordsman', 'red', { x: 200, y: 100 });
+    const obstacle = { x: 140, y: 80, w: 40, h: 40 };
+
+    const target = findTarget(attacker, [attacker, enemy], null, [obstacle]);
+    expect(target).toBe(enemy);
+  });
+});
+
+describe('applyDamage', () => {
+  it('reduces HP', () => {
+    const unit = createUnit('s1', 'swordsman', 'blue', { x: 0, y: 0 });
+    applyDamage(unit, 10);
+    // Swordsman has 0.2 damage reduction: 10 * 0.8 = 8 damage → 20 - 8 = 12
+    expect(unit.hp).toBe(12);
+  });
+
+  it('marks unit as dead when HP reaches 0', () => {
+    const unit = createUnit('a1', 'archer', 'blue', { x: 0, y: 0 });
+    applyDamage(unit, 10);
+    expect(unit.hp).toBe(0);
+    expect(unit.alive).toBe(false);
+  });
+
+  it('does not go below 0 HP', () => {
+    const unit = createUnit('a1', 'archer', 'blue', { x: 0, y: 0 });
+    applyDamage(unit, 999);
+    expect(unit.hp).toBe(0);
+  });
+
+  it('applies damage reduction for swordsman units', () => {
+    const sword = createUnit('sw1', 'swordsman', 'blue', { x: 0, y: 0 });
+    expect(sword.damageReduction).toBe(0.2);
+    applyDamage(sword, 100);
+    // 100 * (1 - 0.2) = 80 damage → 20 - 80 = 0 (clamped)
+    expect(sword.hp).toBe(0);
+  });
+
+  it('applies full damage to non-swordsman units', () => {
+    const archer = createUnit('a1', 'archer', 'blue', { x: 0, y: 0 });
+    expect(archer.damageReduction).toBeUndefined();
+    applyDamage(archer, 5);
+    expect(archer.hp).toBe(5); // 10 - 5
+  });
+});
+
+describe('segmentHitsRect', () => {
+  const rect = { x: 100, y: 100, w: 50, h: 50 };
+
+  it('returns true when segment passes through rect', () => {
+    expect(segmentHitsRect({ x: 0, y: 125 }, { x: 200, y: 125 }, rect, 0)).toBe(true);
+  });
+
+  it('returns false when segment misses rect', () => {
+    expect(segmentHitsRect({ x: 0, y: 50 }, { x: 200, y: 50 }, rect, 0)).toBe(false);
+  });
+
+  it('returns true when segment ends inside rect', () => {
+    expect(segmentHitsRect({ x: 0, y: 125 }, { x: 120, y: 125 }, rect, 0)).toBe(true);
+  });
+
+  it('returns false when segment is too short to reach rect', () => {
+    expect(segmentHitsRect({ x: 0, y: 125 }, { x: 50, y: 125 }, rect, 0)).toBe(false);
+  });
+
+  it('respects padding to expand hit area', () => {
+    // Segment passes just outside the rect (y=95), but padding=10 extends rect to y=90
+    expect(segmentHitsRect({ x: 0, y: 95 }, { x: 200, y: 95 }, rect, 0)).toBe(false);
+    expect(segmentHitsRect({ x: 0, y: 95 }, { x: 200, y: 95 }, rect, 10)).toBe(true);
+  });
+
+  it('handles vertical segments', () => {
+    expect(segmentHitsRect({ x: 125, y: 0 }, { x: 125, y: 200 }, rect, 0)).toBe(true);
+    expect(segmentHitsRect({ x: 50, y: 0 }, { x: 50, y: 200 }, rect, 0)).toBe(false);
+  });
+});
+
+describe('detourWaypoints', () => {
+  const rect = { x: 100, y: 100, w: 50, h: 50 };
+
+  it('returns empty array for clear path', () => {
+    const result = detourWaypoints({ x: 0, y: 50 }, { x: 200, y: 50 }, [rect], 5);
+    expect(result).toEqual([]);
+  });
+
+  it('returns detour point for blocked path', () => {
+    const result = detourWaypoints({ x: 125, y: 0 }, { x: 125, y: 200 }, [rect], 5);
+    expect(result.length).toBeGreaterThan(0);
+    // Detour point should route around the obstacle (not inside it)
+    for (const p of result) {
+      const inside = p.x > rect.x && p.x < rect.x + rect.w && p.y > rect.y && p.y < rect.y + rect.h;
+      expect(inside).toBe(false);
+    }
+  });
+
+  it('handles multiple obstacles', () => {
+    const obs1 = { x: 100, y: 100, w: 50, h: 50 };
+    const obs2 = { x: 100, y: 200, w: 50, h: 50 };
+    const result = detourWaypoints({ x: 125, y: 0 }, { x: 125, y: 300 }, [obs1, obs2], 5);
+    expect(result.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('tryFireProjectile', () => {
+  it('fires a projectile when archer cooldown is ready', () => {
+    const attacker = createUnit('a1', 'archer', 'blue', { x: 100, y: 100 });
+    const target = createUnit('e1', 'swordsman', 'red', { x: 200, y: 100 });
+    attacker.fireTimer = 0;
+    attacker.gunAngle = 0; // aim right toward target
+    const projectiles = tryFireProjectile(attacker, target, 0.016);
+    expect(projectiles).toHaveLength(1);
+    expect(projectiles[0].damage).toBe(6);
+    expect(projectiles[0].team).toBe('blue');
+    expect(projectiles[0].pos.x).toBeCloseTo(100);
+    expect(projectiles[0].pos.y).toBeCloseTo(100);
+  });
+
+  it('returns empty array when cooldown is not ready', () => {
+    const attacker = createUnit('a1', 'archer', 'blue', { x: 100, y: 100 });
+    const target = createUnit('e1', 'swordsman', 'red', { x: 200, y: 100 });
+    attacker.fireTimer = 0.5;
+    const projectiles = tryFireProjectile(attacker, target, 0.016);
+    expect(projectiles).toHaveLength(0);
+  });
+
+  it('aims at predicted position based on target velocity', () => {
+    const attacker = createUnit('a1', 'archer', 'blue', { x: 100, y: 100 });
+    const target = createUnit('e1', 'swordsman', 'red', { x: 200, y: 100 });
+    target.vel = { x: 0, y: 180 }; // moving down fast
+    attacker.fireTimer = 0;
+    attacker.gunAngle = 0; // aim right toward target
+    const projectiles = tryFireProjectile(attacker, target, 0.016);
+    expect(projectiles).toHaveLength(1);
+    // Projectile should aim below the target's current position
+    expect(projectiles[0].vel.y).toBeGreaterThan(0);
+  });
+
+  it('swordsman returns no projectiles (uses melee AoE instead)', () => {
+    const attacker = createUnit('sw1', 'swordsman', 'blue', { x: 100, y: 100 });
+    const target = createUnit('e1', 'archer', 'red', { x: 120, y: 100 });
+    attacker.fireTimer = 0;
+    attacker.gunAngle = 0;
+    const projectiles = tryFireProjectile(attacker, target, 0.016);
+    expect(projectiles).toHaveLength(0);
+  });
+
+  it('cavalry returns no projectiles (uses melee AoE instead)', () => {
+    const attacker = createUnit('cav1', 'cavalry', 'blue', { x: 100, y: 100 });
+    const target = createUnit('e1', 'archer', 'red', { x: 120, y: 100 });
+    attacker.fireTimer = 0;
+    attacker.gunAngle = 0;
+    const projectiles = tryFireProjectile(attacker, target, 0.016);
+    expect(projectiles).toHaveLength(0);
+  });
+
+  it('pikeman returns no projectiles (uses melee AoE instead)', () => {
+    const attacker = createUnit('pk1', 'pikeman', 'blue', { x: 100, y: 100 });
+    const target = createUnit('e1', 'archer', 'red', { x: 120, y: 100 });
+    attacker.fireTimer = 0;
+    attacker.gunAngle = 0;
+    const projectiles = tryFireProjectile(attacker, target, 0.016);
+    expect(projectiles).toHaveLength(0);
+  });
+});
+
+describe('meleeAoeAttack', () => {
+  it('damages all enemies within range', () => {
+    const sword = createUnit('sw1', 'swordsman', 'blue', { x: 100, y: 100 });
+    const enemy1 = createUnit('e1', 'swordsman', 'red', { x: 108, y: 100 });
+    const enemy2 = createUnit('e2', 'pikeman', 'red', { x: 100, y: 108 });
+    const farEnemy = createUnit('e3', 'archer', 'red', { x: 500, y: 500 });
+    sword.fireTimer = 0;
+    const units = [sword, enemy1, enemy2, farEnemy];
+    const hits = meleeAoeAttack(sword, units, 0.016);
+    expect(hits).toHaveLength(2);
+    expect(enemy1.hp).toBeLessThan(20);
+    expect(enemy2.hp).toBeLessThan(25);
+    expect(farEnemy.hp).toBe(10);
+  });
+
+  it('applies knockback velocity away from attacker', () => {
+    const sword = createUnit('sw1', 'swordsman', 'blue', { x: 100, y: 100 });
+    const enemy = createUnit('e1', 'pikeman', 'red', { x: 108, y: 100 });
+    sword.fireTimer = 0;
+    meleeAoeAttack(sword, [sword, enemy], 0.016);
+    // Enemy should have knockback velocity pointing right (away from attacker)
+    expect(enemy.knockbackVel).toBeDefined();
+    expect(enemy.knockbackVel!.x).toBeGreaterThan(0);
+    expect(Math.abs(enemy.knockbackVel!.y)).toBeLessThan(1);
+  });
+
+  it('does not attack when cooldown is not ready', () => {
+    const sword = createUnit('sw1', 'swordsman', 'blue', { x: 100, y: 100 });
+    const enemy = createUnit('e1', 'pikeman', 'red', { x: 108, y: 100 });
+    sword.fireTimer = 0.5;
+    const hits = meleeAoeAttack(sword, [sword, enemy], 0.016);
+    expect(hits).toHaveLength(0);
+    expect(enemy.hp).toBe(25);
+  });
+
+  it('does not hit allies', () => {
+    const sword = createUnit('sw1', 'swordsman', 'blue', { x: 100, y: 100 });
+    const ally = createUnit('a1', 'archer', 'blue', { x: 108, y: 100 });
+    sword.fireTimer = 0;
+    const hits = meleeAoeAttack(sword, [sword, ally], 0.016);
+    expect(hits).toHaveLength(0);
+    expect(ally.hp).toBe(10);
+  });
+
+  it('archer cannot melee attack', () => {
+    const archer = createUnit('a1', 'archer', 'blue', { x: 100, y: 100 });
+    const enemy = createUnit('e1', 'swordsman', 'red', { x: 105, y: 100 });
+    archer.fireTimer = 0;
+    const hits = meleeAoeAttack(archer, [archer, enemy], 0.016);
+    expect(hits).toHaveLength(0);
+  });
+});
+
+describe('cavalry charge', () => {
+  it('deals double damage when charging at high speed', () => {
+    const cav = createUnit('cav1', 'cavalry', 'blue', { x: 100, y: 100 });
+    const enemy = createUnit('e1', 'swordsman', 'red', { x: 110, y: 100 });
+    cav.fireTimer = 0;
+    // Set velocity above charge threshold
+    cav.vel = { x: CAVALRY_CHARGE_SPEED_THRESHOLD + 10, y: 0 };
+    const hits = meleeAoeAttack(cav, [cav, enemy], 0.016);
+    expect(hits).toHaveLength(1);
+    // Cavalry base damage 5, charge multiplier 2x = 10
+    expect(hits[0].damage).toBe(10);
+  });
+
+  it('deals normal damage when stationary', () => {
+    const cav = createUnit('cav1', 'cavalry', 'blue', { x: 100, y: 100 });
+    const enemy = createUnit('e1', 'archer', 'red', { x: 110, y: 100 });
+    cav.fireTimer = 0;
+    cav.vel = { x: 0, y: 0 };
+    const hits = meleeAoeAttack(cav, [cav, enemy], 0.016);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].damage).toBe(5);
+  });
+});
+
+describe('pikeman anti-cavalry', () => {
+  it('deals double damage to cavalry', () => {
+    const pike = createUnit('pk1', 'pikeman', 'blue', { x: 100, y: 100 });
+    const cav = createUnit('cav1', 'cavalry', 'red', { x: 110, y: 100 });
+    pike.fireTimer = 0;
+    const hits = meleeAoeAttack(pike, [pike, cav], 0.016);
+    expect(hits).toHaveLength(1);
+    // Pikeman base damage 3, anti-cavalry multiplier 2x = 6
+    expect(hits[0].damage).toBe(6);
+  });
+
+  it('deals normal damage to non-cavalry', () => {
+    const pike = createUnit('pk1', 'pikeman', 'blue', { x: 100, y: 100 });
+    const sword = createUnit('sw1', 'swordsman', 'red', { x: 110, y: 100 });
+    pike.fireTimer = 0;
+    const hits = meleeAoeAttack(pike, [pike, sword], 0.016);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].damage).toBe(3);
+  });
+});
+
+describe('isFlanked', () => {
+  it('returns true when projectile hits from behind', () => {
+    // Target faces right (0), projectile travels right (0) = hitting from behind
+    expect(isFlanked(0, 0)).toBe(true);
+  });
+
+  it('returns false when projectile hits head-on', () => {
+    // Target faces right (0), projectile travels left (PI) = head-on
+    expect(isFlanked(Math.PI, 0)).toBe(false);
+  });
+
+  it('returns true when projectile hits from the side at 90°', () => {
+    // Target faces right (0), projectile travels down (PI/2) = side hit
+    expect(isFlanked(Math.PI / 2, 0)).toBe(true);
+  });
+
+  it('handles negative angles correctly', () => {
+    // Target faces left (PI), projectile travels right (0) = comes from left = head-on
+    expect(isFlanked(0, Math.PI)).toBe(false);
+    // Target faces left (PI), projectile travels left (PI) = comes from right = from behind
+    expect(isFlanked(Math.PI, Math.PI)).toBe(true);
+  });
+});
+
+describe('updateProjectiles', () => {
+  it('moves projectiles and removes those past max range', () => {
+    const proj = {
+      pos: { x: 100, y: 100 },
+      vel: { x: 300, y: 0 },
+      target: { x: 200, y: 100 },
+      damage: 10,
+      radius: 5,
+      team: 'blue' as const,
+      maxRange: 50,
+      distanceTraveled: 40,
+    };
+    // This tick should push it past max range
+    const { alive } = updateProjectiles([proj], [], 0.1);
+    expect(alive).toHaveLength(0);
+  });
+
+  it('applies damage on hit and removes the projectile', () => {
+    const target = createUnit('e1', 'archer', 'red', { x: 105, y: 100 });
+    target.gunAngle = Math.PI; // face left toward incoming projectile (head-on)
+    const proj = {
+      pos: { x: 100, y: 100 },
+      vel: { x: 300, y: 0 },
+      target: { x: 105, y: 100 },
+      damage: 5,
+      radius: 5,
+      team: 'blue' as const,
+      maxRange: 200,
+      distanceTraveled: 0,
+    };
+    const { alive, hits } = updateProjectiles([proj], [target], 0.016);
+    expect(alive).toHaveLength(0);
+    expect(target.hp).toBe(5); // 10 - 5
+    expect(hits).toHaveLength(1);
+    expect(hits[0].targetId).toBe('e1');
+    expect(hits[0].killed).toBe(false);
+  });
+
+  it('removes projectile when it hits an obstacle', () => {
+    const obstacle = { x: 110, y: 90, w: 40, h: 40 };
+    const proj = {
+      pos: { x: 100, y: 100 },
+      vel: { x: 300, y: 0 },
+      target: { x: 300, y: 100 },
+      damage: 10,
+      radius: 3,
+      team: 'blue' as const,
+      maxRange: 500,
+      distanceTraveled: 0,
+    };
+    const { alive } = updateProjectiles([proj], [], 0.1, [obstacle]);
+    expect(alive).toHaveLength(0);
+  });
+
+  it('projectile passes when no obstacle blocks it', () => {
+    const obstacle = { x: 150, y: 200, w: 40, h: 40 };
+    const proj = {
+      pos: { x: 100, y: 100 },
+      vel: { x: 300, y: 0 },
+      target: { x: 300, y: 100 },
+      damage: 10,
+      radius: 3,
+      team: 'blue' as const,
+      maxRange: 500,
+      distanceTraveled: 0,
+    };
+    const { alive } = updateProjectiles([proj], [], 0.1, [obstacle]);
+    expect(alive).toHaveLength(1);
+  });
+
+  it('applies 1.5x damage on flanking hit', () => {
+    const target = createUnit('e1', 'archer', 'red', { x: 95, y: 100 });
+    target.gunAngle = Math.PI; // facing left
+    const proj = {
+      pos: { x: 100, y: 100 },
+      vel: { x: -300, y: 0 }, // traveling left — comes from right, hitting from behind
+      target: { x: 95, y: 100 },
+      damage: 6,
+      radius: 5,
+      team: 'blue' as const,
+      maxRange: 200,
+      distanceTraveled: 0,
+    };
+    const { hits } = updateProjectiles([proj], [target], 0.016);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].flanked).toBe(true);
+    expect(hits[0].damage).toBe(9); // 6 * 1.5
+    expect(target.hp).toBe(1); // 10 - 9
+  });
+
+  it('applies normal damage on head-on hit', () => {
+    const target = createUnit('e1', 'archer', 'red', { x: 95, y: 100 });
+    target.gunAngle = 0; // facing right (toward the projectile coming from the left)
+    const proj = {
+      pos: { x: 100, y: 100 },
+      vel: { x: -300, y: 0 }, // traveling left — head-on to target facing right
+      target: { x: 95, y: 100 },
+      damage: 6,
+      radius: 5,
+      team: 'blue' as const,
+      maxRange: 200,
+      distanceTraveled: 0,
+    };
+    const { hits } = updateProjectiles([proj], [target], 0.016);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].flanked).toBe(false);
+    expect(hits[0].damage).toBe(6);
+    expect(target.hp).toBe(4); // 10 - 6
+  });
+});

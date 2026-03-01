@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>7 Armies</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #111;
+      color: #eee;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      overflow: hidden;
+      width: 100vw;
+      height: 100dvh;
+    }
+    .screen { display: none; width: 100%; height: 100%; }
+    .screen.active { display: flex; }
+
+    /* Start Screen — overlay on top of battlefield */
+    #prompt-screen {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      flex-direction: column;
+      align-items: center;
+      justify-content: safe center;
+      gap: 24px;
+      padding: 32px;
+      background: rgba(0,0,0,0.7);
+      z-index: 15;
+      overflow-y: auto;
+    }
+    #prompt-screen h1 {
+      font-size: 48px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+    }
+    #prompt-screen p {
+      font-size: 16px;
+      opacity: 0.7;
+      max-width: 500px;
+      text-align: center;
+      line-height: 1.5;
+    }
+    #battle-btn {
+      padding: 16px 48px;
+      font-size: 20px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 4px;
+      background: #2a2a4a;
+      color: #eee;
+      border: 2px solid #555;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #battle-btn:hover, #ai-btn:hover { background: #3a3a5a; border-color: #777; }
+
+    /* Battle Screen */
+    #battle-screen {
+      position: relative;
+      flex-direction: column;
+      align-items: center;
+    }
+    #pixi-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+    #pixi-container canvas {
+      max-width: 100%;
+      max-height: 100%;
+      display: block;
+      touch-action: none;
+    }
+    #battle-hud {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 16px;
+      background: rgba(0,0,0,0.6);
+      z-index: 10;
+      font-size: 14px;
+    }
+    #round-timer {
+      font-size: 32px;
+      font-weight: bold;
+      font-variant-numeric: tabular-nums;
+      text-shadow: 0 0 10px rgba(255,255,255,0.4);
+    }
+    .speed-controls button {
+      background: #2a2a4a;
+      color: #eee;
+      border: 1px solid #444;
+      padding: 4px 12px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .speed-controls button.active { background: #4a4a7a; border-color: #88f; }
+
+    /* Planning overlay */
+    #planning-overlay {
+      display: none;
+      position: fixed;
+      top: calc(8px + env(safe-area-inset-top, 0px));
+      left: 50%;
+      transform: translateX(-50%);
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      z-index: 12;
+      pointer-events: none;
+    }
+    #planning-overlay.active { display: flex; }
+    #planning-label {
+      font-size: 24px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+    }
+    #planning-instructions {
+      display: none;
+      font-size: 13px;
+      opacity: 0.7;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    }
+    #confirm-btn {
+      display: none;
+      position: fixed;
+      bottom: calc(4px + env(safe-area-inset-bottom, 0px));
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 1px 16px;
+      font-size: 10px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      background: #2a2a4a;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 3px;
+      cursor: pointer;
+      z-index: 12;
+      opacity: 0.7;
+    }
+    #confirm-btn.active { display: block; }
+    #confirm-btn:hover { background: #3a3a5a; border-color: #777; opacity: 1; }
+
+    /* Cover screen */
+    #cover-screen {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.85);
+      z-index: 16;
+      font-size: 36px;
+      font-weight: bold;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+    #cover-screen.active { display: flex; }
+
+    /* Result Screen */
+    #result-screen {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      background: rgba(0,0,0,0.75);
+      z-index: 20;
+    }
+    #result-screen h2 { font-size: 64px; letter-spacing: 4px; }
+    #result-screen .stats { font-size: 18px; opacity: 0.8; }
+    #result-screen .buttons { display: flex; gap: 16px; margin-top: 16px; }
+    #result-screen button {
+      padding: 12px 32px;
+      font-size: 16px;
+      background: #2a2a4a;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #result-screen button:hover { background: #3a3a5a; }
+
+    /* Replay overlay */
+    #replay-overlay {
+      display: none;
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      background: rgba(0,0,0,0.7);
+      z-index: 14;
+    }
+    #replay-overlay.active { display: flex; }
+    #replay-overlay button {
+      background: #2a2a4a;
+      color: #eee;
+      border: 1px solid #555;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      border-radius: 3px;
+    }
+    #replay-overlay button:hover { background: #3a3a5a; border-color: #777; }
+    #replay-overlay button.active { background: #4a4a7a; border-color: #88f; }
+    #replay-progress {
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      opacity: 0.7;
+      min-width: 100px;
+      text-align: center;
+    }
+
+    /* Mobile */
+    @media (max-width: 900px) {
+      #prompt-screen { padding: 24px 16px; gap: 16px; }
+      #prompt-screen h1 { font-size: 28px; letter-spacing: 2px; }
+      #prompt-screen p { font-size: 13px; padding: 0 8px; }
+      #prompt-screen .btn-row { flex-wrap: wrap; justify-content: center; }
+      #prompt-screen .btn-row button {
+        padding: 12px 24px !important;
+        font-size: 16px !important;
+        letter-spacing: 2px !important;
+      }
+      #battle-hud { font-size: 11px; padding: 6px 8px; gap: 4px; }
+      #battle-hud > div { gap: 6px; }
+      #round-timer { font-size: 22px; }
+      #round-counter { font-size: 11px; }
+      #planning-label { font-size: 16px; letter-spacing: 1px; }
+      #planning-instructions { display: none; }
+      #confirm-btn { min-height: 28px; padding: 2px 20px; font-size: 11px; letter-spacing: 1px; }
+      #cover-screen { font-size: 24px; letter-spacing: 2px; padding: 0 16px; text-align: center; }
+      #result-screen { padding: 0 16px; }
+      #result-screen h2 { font-size: 32px; letter-spacing: 2px; }
+      #result-screen .stats { font-size: 15px; }
+      #result-screen .buttons { flex-wrap: wrap; justify-content: center; }
+      #result-screen button { min-height: 48px; padding: 10px 20px; font-size: 14px; }
+      .speed-controls button { min-height: 36px; padding: 6px 10px; font-size: 11px; }
+    }
+
+    /* Day-mode parchment aesthetic */
+    body.day-mode { color: #443322; }
+    body.day-mode #battle-hud { background: rgba(245,240,224,0.7); }
+    body.day-mode #blue-count { color: #2266aa; }
+    body.day-mode #red-count { color: #aa3333; }
+    body.day-mode #confirm-btn { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+    body.day-mode #cover-screen { background: rgba(245,240,224,0.85); color: #443322; }
+    body.day-mode .speed-controls button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+    body.day-mode .speed-controls button.active { background: #d8d0bc; border-color: #886633; }
+    body.day-mode #prompt-screen { background: rgba(245,240,224,0.7); }
+    body.day-mode #result-screen { background: rgba(245,240,224,0.75); }
+    body.day-mode #result-screen button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+    body.day-mode #replay-overlay { background: rgba(245,240,224,0.7); }
+    body.day-mode #replay-overlay button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+    body.day-mode #battle-btn, body.day-mode #ai-btn { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+  </style>
+</head>
+<body>
+  <div id="prompt-screen" class="screen active">
+    <h1>7 Armies</h1>
+    <p>Command your medieval army. Draw paths for each battalion, then watch the battle unfold.</p>
+    <div class="btn-row" style="display:flex;flex-direction:column;align-items:center;gap:12px">
+      <button id="ai-btn" style="padding:16px 48px;font-size:20px;font-weight:bold;text-transform:uppercase;letter-spacing:4px;background:#2a2a4a;color:#eee;border:2px solid #555;border-radius:4px;cursor:pointer">vs AI</button>
+      <button id="battle-btn">vs Player</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;opacity:0.7;cursor:pointer">
+        <input type="checkbox" id="day-mode-cb" style="cursor:pointer" checked />
+        Parchment mode
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;opacity:0.7;cursor:pointer">
+        <input type="checkbox" id="one-shot-cb" style="cursor:pointer" />
+        One-shot kills
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;opacity:0.7;cursor:pointer">
+        <input type="checkbox" id="blood-cb" style="cursor:pointer" checked />
+        Blood effects
+      </label>
+    </div>
+  </div>
+
+  <div id="battle-screen" class="screen">
+    <div id="battle-hud">
+      <span id="blue-count" style="color:#4a9eff">Blue: 96/96</span>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span id="round-counter" style="opacity:0.7">Round 1</span>
+        <span id="round-timer"></span>
+        <div class="speed-controls">
+          <button id="speed-toggle" data-speed="1">3x</button>
+        </div>
+      </div>
+      <span id="red-count" style="color:#ff4a4a">Red: 96/96</span>
+    </div>
+    <div id="pixi-container"></div>
+
+    <div id="planning-overlay">
+      <span id="planning-label">Blue Planning</span>
+      <span id="planning-instructions">Click a battalion, drag to draw its path.</span>
+    </div>
+    <button id="confirm-btn">Done</button>
+
+    <div id="replay-overlay">
+      <button id="replay-restart-btn" title="Restart">&#x23EE;</button>
+      <button id="replay-pause-btn" title="Pause">&#x23F8;</button>
+      <button id="replay-speed-toggle">3x</button>
+      <span id="replay-progress">0.0s / 0.0s</span>
+      <button id="replay-exit-btn" title="Exit">&#x2715;</button>
+    </div>
+  </div>
+
+  <div id="cover-screen">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:16px">
+      <span>Pass device to Red</span>
+      <span style="font-size:16px;opacity:0.5;letter-spacing:1px">Tap to continue</span>
+    </div>
+  </div>
+
+  <div id="result-screen" class="screen">
+    <h2 id="winner-text">Blue Wins!</h2>
+    <div class="stats" id="result-stats"></div>
+    <div class="buttons" style="flex-direction:column;align-items:center">
+      <button id="rematch-btn" style="font-weight:bold;letter-spacing:2px;text-transform:uppercase">Rematch</button>
+      <button id="new-battle-btn" style="opacity:0.7">Back</button>
+      <button id="replay-btn" style="display:none;background:transparent;border:1px solid #555;color:inherit;padding:6px 20px;font-size:13px;border-radius:4px;cursor:pointer;opacity:0.5">Watch Replay</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -383,31 +383,59 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
   let dirX = dx / dist;
   let dirY = dy / dist;
 
-  // Cavalry momentum: blend current velocity toward desired direction
+  // Cavalry heading-based movement: arcs at speed, direct movement when close/slow
   if (unit.type === 'cavalry') {
     const curSpeed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
-    const desiredX = dirX * unit.speed;
-    const desiredY = dirY * unit.speed;
-    // Steering rate: how fast cavalry can turn (radians/s worth of blending)
-    const steerRate = 3.0 * dt; // ~3 rad/s turning
-    const accel = unit.speed * 1.5 * dt; // acceleration per frame
-    let newVx = unit.vel.x + (desiredX - unit.vel.x) * steerRate;
-    let newVy = unit.vel.y + (desiredY - unit.vel.y) * steerRate;
-    // Also accelerate toward desired speed
-    const targetSpeed = Math.min(unit.speed, dist > 20 ? unit.speed : unit.speed * (dist / 20));
-    let newSpeed = Math.sqrt(newVx * newVx + newVy * newVy);
+
+    // When close to target or slow, use direct movement (no orbiting)
+    if (dist < 30 || curSpeed < unit.speed * 0.3) {
+      // Direct move like other units, but update gunAngle to face movement
+      const step = unit.speed * 0.5 * dt; // slower approach speed
+      const moveX = (dx / dist) * Math.min(step, dist);
+      const moveY = (dy / dist) * Math.min(step, dist);
+      unit.pos.x += moveX;
+      unit.pos.y += moveY;
+      unit.pos.x = clamp(unit.pos.x, unit.radius, MAP_WIDTH - unit.radius);
+      unit.pos.y = clamp(unit.pos.y, unit.radius, MAP_HEIGHT - unit.radius);
+      pushOutOfObstacles(unit.pos, unit.radius, obstacles);
+      // Smoothly turn heading toward target
+      const desiredAngle = Math.atan2(dy, dx);
+      updateGunAngle(unit, desiredAngle, dt);
+      // Bleed off velocity
+      unit.vel.x *= 0.9;
+      unit.vel.y *= 0.9;
+      return;
+    }
+
+    // Turn heading toward target — wide arcs at full gallop
+    const desiredAngle = Math.atan2(dy, dx);
+    let angleDiff = desiredAngle - unit.gunAngle;
+    angleDiff = ((angleDiff + Math.PI) % (2 * Math.PI)) - Math.PI;
+    if (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+    const speedFraction = curSpeed / unit.speed;
+    const turnRate = 12 - 9 * speedFraction; // 12 rad/s walking, 3 rad/s galloping
+    const maxTurn = turnRate * dt;
+    if (Math.abs(angleDiff) <= maxTurn) {
+      unit.gunAngle = desiredAngle;
+    } else {
+      unit.gunAngle += Math.sign(angleDiff) * maxTurn;
+    }
+    unit.gunAngle = ((unit.gunAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
+    if (unit.gunAngle < -Math.PI) unit.gunAngle += 2 * Math.PI;
+
+    // Accelerate/decelerate
+    const accel = unit.speed * 1.5 * dt;
+    const targetSpeed = dist > 40 ? unit.speed : unit.speed * (dist / 40);
+    let newSpeed = curSpeed;
     if (newSpeed < targetSpeed) {
       newSpeed = Math.min(newSpeed + accel, targetSpeed);
+    } else if (newSpeed > targetSpeed) {
+      newSpeed = Math.max(newSpeed - accel, targetSpeed);
     }
-    if (newSpeed > 0.01) {
-      const ns = Math.sqrt(newVx * newVx + newVy * newVy);
-      if (ns > 0.01) {
-        newVx = (newVx / ns) * newSpeed;
-        newVy = (newVy / ns) * newSpeed;
-      }
-    }
-    unit.vel.x = newVx;
-    unit.vel.y = newVy;
+
+    // Velocity always follows heading
+    unit.vel.x = Math.cos(unit.gunAngle) * newSpeed;
+    unit.vel.y = Math.sin(unit.gunAngle) * newSpeed;
 
     const moveX = unit.vel.x * dt;
     const moveY = unit.vel.y * dt;
@@ -551,10 +579,16 @@ export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
           const overlap = ((minDist - dist) / 2) * strength;
           const nx = dx / dist;
           const ny = dy / dist;
-          a.pos.x -= nx * overlap;
-          a.pos.y -= ny * overlap;
-          b.pos.x += nx * overlap;
-          b.pos.y += ny * overlap;
+
+          // Fast cavalry resists separation — rides through instead of getting stuck
+          const aSpeed = Math.sqrt(a.vel.x * a.vel.x + a.vel.y * a.vel.y);
+          const bSpeed = Math.sqrt(b.vel.x * b.vel.x + b.vel.y * b.vel.y);
+          const aFactor = (a.type === 'cavalry' && aSpeed > 60) ? 0.1 : 1;
+          const bFactor = (b.type === 'cavalry' && bSpeed > 60) ? 0.1 : 1;
+          a.pos.x -= nx * overlap * aFactor;
+          a.pos.y -= ny * overlap * aFactor;
+          b.pos.x += nx * overlap * bFactor;
+          b.pos.y += ny * overlap * bFactor;
 
           a.pos.x = clamp(a.pos.x, a.radius, MAP_WIDTH - a.radius);
           a.pos.y = clamp(a.pos.y, a.radius, MAP_HEIGHT - a.radius);
@@ -675,9 +709,10 @@ export function meleeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
 
   const hits: AoeHit[] = [];
 
-  // Cavalry charge: bonus damage + big knockback when moving fast
+  // Cavalry speed-based damage: scales linearly from 1× at rest to CHARGE_MULTIPLIER at full speed
   const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
   const isCharging = unit.type === 'cavalry' && speed >= CAVALRY_CHARGE_SPEED_THRESHOLD;
+  const speedRatio = unit.type === 'cavalry' ? Math.min(speed / unit.speed, 1) : 0;
   const knockback = isCharging ? 40 : 1;
 
   for (const enemy of units) {
@@ -690,9 +725,9 @@ export function meleeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
     if (dist <= hitRange) {
       let dmg = unit.damage;
 
-      // Cavalry charge bonus
-      if (isCharging) {
-        dmg *= CAVALRY_CHARGE_DAMAGE_MULTIPLIER;
+      // Cavalry speed-based damage: 1× at rest, up to CHARGE_MULTIPLIER at full speed
+      if (unit.type === 'cavalry') {
+        dmg *= 1 + speedRatio * (CAVALRY_CHARGE_DAMAGE_MULTIPLIER - 1);
       }
 
       // Pikeman anti-cavalry bonus

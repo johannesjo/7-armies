@@ -263,19 +263,22 @@ export class GameEngine {
 
       // Melee units (swordsman, cavalry, pikeman) use AoE attack
       if (unit.type !== 'archer') {
-        // Only face enemy when in melee range; otherwise face movement direction
-        const inMeleeRange = target && (() => {
-          const dx = target.pos.x - unit.pos.x;
-          const dy = target.pos.y - unit.pos.y;
-          return Math.sqrt(dx * dx + dy * dy) <= unit.range + target.radius + unit.radius;
-        })();
-        if (inMeleeRange && target) {
-          const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
-          updateGunAngle(unit, desired, dt);
-        } else {
-          const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
-          if (speed > 1) {
-            updateGunAngle(unit, Math.atan2(unit.vel.y, unit.vel.x), dt);
+        // Cavalry heading is set by moveUnit — never override it here
+        if (unit.type !== 'cavalry') {
+          // Only face enemy when in melee range; otherwise face movement direction
+          const inMeleeRange = target && (() => {
+            const dx = target.pos.x - unit.pos.x;
+            const dy = target.pos.y - unit.pos.y;
+            return Math.sqrt(dx * dx + dy * dy) <= unit.range + target.radius + unit.radius;
+          })();
+          if (inMeleeRange && target) {
+            const desired = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);
+            updateGunAngle(unit, desired, dt);
+          } else {
+            const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
+            if (speed > 1) {
+              updateGunAngle(unit, Math.atan2(unit.vel.y, unit.vel.x), dt);
+            }
           }
         }
         const aoeHits = meleeAoeAttack(unit, this.units, dt);

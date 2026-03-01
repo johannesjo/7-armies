@@ -176,9 +176,10 @@ export function assignUnitTargets(battalion: Battalion, units: Unit[], allUnits:
     const oy = raw.x * sinR + raw.y * cosR;
 
     // Per-unit engagement: is there an enemy within melee range of THIS unit?
+    // Cavalry never chases individually — they follow battalion orders only
     let nearest: Unit | null = null;
     let nearestDist = Infinity;
-    if (unit.type !== 'archer') {
+    if (unit.type !== 'archer' && unit.type !== 'cavalry') {
       for (const enemy of enemies) {
         const dx = enemy.pos.x - unit.pos.x;
         const dy = enemy.pos.y - unit.pos.y;

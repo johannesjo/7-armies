@@ -354,19 +354,30 @@ describe('meleeAoeAttack', () => {
 });
 
 describe('cavalry charge', () => {
-  it('deals double damage when charging at high speed', () => {
+  it('deals more damage at higher speed', () => {
     const cav = createUnit('cav1', 'cavalry', 'blue', { x: 100, y: 100 });
     const enemy = createUnit('e1', 'swordsman', 'red', { x: 110, y: 100 });
     cav.fireTimer = 0;
-    // Set velocity above charge threshold
-    cav.vel = { x: CAVALRY_CHARGE_SPEED_THRESHOLD + 10, y: 0 };
+    // Set velocity to full speed — should get max multiplier (2×)
+    cav.vel = { x: cav.speed, y: 0 };
     const hits = meleeAoeAttack(cav, [cav, enemy], 0.016);
     expect(hits).toHaveLength(1);
-    // Cavalry base damage 5, charge multiplier 2x = 10
+    // Cavalry base damage 5, at full speed multiplier is 2× = 10
     expect(hits[0].damage).toBe(10);
   });
 
-  it('deals normal damage when stationary', () => {
+  it('deals scaled damage at partial speed', () => {
+    const cav = createUnit('cav1', 'cavalry', 'blue', { x: 100, y: 100 });
+    const enemy = createUnit('e1', 'swordsman', 'red', { x: 110, y: 100 });
+    cav.fireTimer = 0;
+    // Half speed — should get 1.5× multiplier
+    cav.vel = { x: cav.speed / 2, y: 0 };
+    const hits = meleeAoeAttack(cav, [cav, enemy], 0.016);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].damage).toBeCloseTo(7.5);
+  });
+
+  it('deals base damage when stationary', () => {
     const cav = createUnit('cav1', 'cavalry', 'blue', { x: 100, y: 100 });
     const enemy = createUnit('e1', 'archer', 'red', { x: 110, y: 100 });
     cav.fireTimer = 0;

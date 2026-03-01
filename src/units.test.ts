@@ -308,15 +308,22 @@ describe('meleeAoeAttack', () => {
     expect(farEnemy.hp).toBe(10);
   });
 
-  it('applies knockback velocity away from attacker', () => {
-    const sword = createUnit('sw1', 'swordsman', 'blue', { x: 100, y: 100 });
+  it('only cavalry charge applies knockback', () => {
+    // Non-charge melee: no knockback
+    const pike = createUnit('pk1', 'pikeman', 'blue', { x: 100, y: 100 });
     const enemy = createUnit('e1', 'pikeman', 'red', { x: 108, y: 100 });
-    sword.fireTimer = 0;
-    meleeAoeAttack(sword, [sword, enemy], 0.016);
-    // Enemy should have knockback velocity pointing right (away from attacker)
-    expect(enemy.knockbackVel).toBeDefined();
-    expect(enemy.knockbackVel!.x).toBeGreaterThan(0);
-    expect(Math.abs(enemy.knockbackVel!.y)).toBeLessThan(1);
+    pike.fireTimer = 0;
+    meleeAoeAttack(pike, [pike, enemy], 0.016);
+    expect(enemy.knockbackVel).toBeUndefined();
+
+    // Cavalry charge: knockback applied
+    const cav = createUnit('cv1', 'cavalry', 'blue', { x: 100, y: 100 });
+    const target = createUnit('e2', 'pikeman', 'red', { x: 110, y: 100 });
+    cav.fireTimer = 0;
+    cav.vel = { x: 150, y: 0 }; // above charge threshold
+    meleeAoeAttack(cav, [cav, target], 0.016);
+    expect(target.knockbackVel).toBeDefined();
+    expect(target.knockbackVel!.x).toBeGreaterThan(0);
   });
 
   it('does not attack when cooldown is not ready', () => {

@@ -336,22 +336,14 @@ function pushOutOfObstacles(pos: Vec2, radius: number, obstacles: Obstacle[]): v
 }
 
 export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits: Unit[] = []): void {
-  // Apply knockback velocity (decays via friction)
+  // Apply knockback as instant position displacement, then clear
   if (unit.knockbackVel) {
-    const kbSpeed = Math.sqrt(unit.knockbackVel.x ** 2 + unit.knockbackVel.y ** 2);
-    if (kbSpeed > 5) {
-      unit.pos.x += unit.knockbackVel.x * dt;
-      unit.pos.y += unit.knockbackVel.y * dt;
-      unit.pos.x = clamp(unit.pos.x, unit.radius, MAP_WIDTH - unit.radius);
-      unit.pos.y = clamp(unit.pos.y, unit.radius, MAP_HEIGHT - unit.radius);
-      pushOutOfObstacles(unit.pos, unit.radius, obstacles);
-      // Decay: lose 90% per second → multiply by 0.1^dt ≈ e^(-2.3*dt)
-      const decay = Math.exp(-8 * dt);
-      unit.knockbackVel.x *= decay;
-      unit.knockbackVel.y *= decay;
-    } else {
-      unit.knockbackVel = undefined;
-    }
+    unit.pos.x += unit.knockbackVel.x * dt;
+    unit.pos.y += unit.knockbackVel.y * dt;
+    unit.pos.x = clamp(unit.pos.x, unit.radius, MAP_WIDTH - unit.radius);
+    unit.pos.y = clamp(unit.pos.y, unit.radius, MAP_HEIGHT - unit.radius);
+    pushOutOfObstacles(unit.pos, unit.radius, obstacles);
+    unit.knockbackVel = undefined;
   }
 
   if (!unit.moveTarget || !unit.alive) {
@@ -492,26 +484,14 @@ export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
           b.pos.x += nx * overlap;
           b.pos.y += ny * overlap;
 
-          // Just cancel converging velocity — no bounce
-          const relVelDot = (a.vel.x - b.vel.x) * nx + (a.vel.y - b.vel.y) * ny;
-          if (relVelDot < 0) {
-            a.vel.x -= nx * relVelDot * 0.5;
-            a.vel.y -= ny * relVelDot * 0.5;
-            b.vel.x += nx * relVelDot * 0.5;
-            b.vel.y += ny * relVelDot * 0.5;
-          }
-
-          // Keep within bounds
+          // Position-only — no velocity modification
           a.pos.x = clamp(a.pos.x, a.radius, MAP_WIDTH - a.radius);
           a.pos.y = clamp(a.pos.y, a.radius, MAP_HEIGHT - a.radius);
           b.pos.x = clamp(b.pos.x, b.radius, MAP_WIDTH - b.radius);
           b.pos.y = clamp(b.pos.y, b.radius, MAP_HEIGHT - b.radius);
         } else if (dist <= 0.01) {
-          // Exactly overlapping — nudge apart diagonally
           a.pos.x -= 1;
-          a.pos.y -= 1;
           b.pos.x += 1;
-          b.pos.y += 1;
         }
       }
     }
@@ -659,8 +639,8 @@ export function meleeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
         damage: dmg,
       });
 
-      // Knockback — only significant for cavalry charge
-      if (dist > 0 && knockback > 0) {
+      // Knockback — cavalry charge only
+      if (isCharging && dist > 0) {
         const kbSpeed = knockback / 0.3;
         enemy.knockbackVel = {
           x: (dx / dist) * kbSpeed,
@@ -701,17 +681,29 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
     predictedY = target.pos.y + target.vel.y * flightTime;
   }
 
+  // Add scatter — volleys spread around target area rather than sniping one unit
+  const scatter = 12;
+  predictedX += (Math.random() - 0.5) * scatter;
+  predictedY += (Math.random() - 0.5) * scatter;
+
   const pdx = predictedX - unit.pos.x;
   const pdy = predictedY - unit.pos.y;
   const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
 
   if (pdist < 1) return [];
 
+  // Angular spread: ±2° random deviation + slight speed variance (±5%)
+  const spread = (Math.random() - 0.5) * 0.07;
+  const speedVar = unit.projectileSpeed * (0.95 + Math.random() * 0.1);
+  const baseAngle = Math.atan2(pdy, pdx) + spread;
+  const vx = Math.cos(baseAngle) * speedVar;
+  const vy = Math.sin(baseAngle) * speedVar;
+
   const maxRange = unit.range * (1 + ELEVATION_RANGE_BONUS * getElevationLevel(unit.pos, elevationZones)) + unit.radius + 40;
 
   return [{
     pos: { x: unit.pos.x, y: unit.pos.y },
-    vel: { x: (pdx / pdist) * unit.projectileSpeed, y: (pdy / pdist) * unit.projectileSpeed },
+    vel: { x: vx, y: vy },
     target: { x: predictedX, y: predictedY },
     damage: unit.damage,
     radius: unit.projectileRadius,
@@ -748,6 +740,13 @@ export function updateProjectiles(
     if (p.pos.x < 0 || p.pos.x > MAP_WIDTH || p.pos.y < 0 || p.pos.y > MAP_HEIGHT) continue;
     if (p.distanceTraveled > p.maxRange) continue;
 
+    // Arrows land near their target — remove if past the target point
+    // Check dot product: positive means arrow has overshot the target
+    const tx = p.target.x - p.pos.x;
+    const ty = p.target.y - p.pos.y;
+    const dotToTarget = tx * p.vel.x + ty * p.vel.y;
+    if (dotToTarget < 0) continue; // arrow flew past target
+
     // Check if projectile hit an obstacle
     if (obstacles.some(o => segmentHitsRect(oldPos, p.pos, o, p.radius))) continue;
 
@@ -765,16 +764,6 @@ export function updateProjectiles(
 
         const flanked = isFlanked(projAngle, unit.gunAngle);
         const actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : p.damage;
-        // Knockback — minimal nudge from arrows
-        const knockbackAmount = p.knockback ?? 2;
-        const projSpeed = Math.sqrt(p.vel.x * p.vel.x + p.vel.y * p.vel.y);
-        if (projSpeed > 0 && knockbackAmount > 0) {
-          const kbSpeed = knockbackAmount / 0.3;
-          unit.knockbackVel = {
-            x: (p.vel.x / projSpeed) * kbSpeed,
-            y: (p.vel.y / projSpeed) * kbSpeed,
-          };
-        }
 
         const wasBefore = unit.hp;
         applyDamage(unit, actualDamage);

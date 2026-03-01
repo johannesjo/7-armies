@@ -253,9 +253,11 @@ export function updateGunAngle(unit: Unit, desiredAngle: number, dt: number): vo
 export function advanceWaypoint(unit: Unit, dt: number = 0): void {
   if (!unit.alive) return;
 
+  // Cavalry at speed needs a wider arrival threshold to avoid orbiting waypoints
+  const arrivalDist = unit.type === 'cavalry' && unit.waypoints.length > 0 ? 20 : 2;
   const atTarget = !unit.moveTarget ||
-    (Math.abs(unit.pos.x - unit.moveTarget.x) < 2 &&
-     Math.abs(unit.pos.y - unit.moveTarget.y) < 2);
+    (Math.abs(unit.pos.x - unit.moveTarget.x) < arrivalDist &&
+     Math.abs(unit.pos.y - unit.moveTarget.y) < arrivalDist);
 
   // Track stuck time — increment when barely moving toward target
   if (unit.moveTarget && dt > 0) {
@@ -388,7 +390,9 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
     const curSpeed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
 
     // Final approach: direct movement when close to target (no orbiting)
-    if (dist < 30) {
+    // Skip slow-down for intermediate waypoints — maintain momentum
+    const hasMoreWaypoints = unit.waypoints.length > 0;
+    if (dist < 30 && !hasMoreWaypoints) {
       // Direct move like other units, but update gunAngle to face movement
       const step = unit.speed * 0.5 * dt; // slower approach speed
       const moveX = (dx / dist) * Math.min(step, dist);

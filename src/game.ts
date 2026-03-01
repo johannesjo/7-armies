@@ -310,12 +310,11 @@ export class GameEngine {
             const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
             mfx?.addBloodSpray(hit.pos, unit.gunAngle, victimTeam, hit.damage);
             if (hit.killed) {
-              mfx?.addKillText(hit.pos, hit.team);
               mfx?.addBloodBurst(hit.pos, unit.gunAngle, victimTeam, hit.damage);
             }
           } else {
             mfx?.addImpactBurst(hit.pos, hit.team);
-            if (hit.killed) mfx?.addKillText(hit.pos, hit.team);
+            // no kill text for melee
           }
         }
         continue;
@@ -392,12 +391,11 @@ export class GameEngine {
         const effectDamage = hit.flanked ? hit.damage * 1.5 : hit.damage;
         fx?.addBloodSpray(hit.pos, hit.angle, victimTeam, effectDamage);
         if (hit.killed) {
-          fx?.addKillText(hit.pos, hit.team);
           fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, effectDamage);
         }
       } else {
         fx?.addImpactBurst(hit.pos, hit.team);
-        if (hit.killed) fx?.addKillText(hit.pos, hit.team);
+        // no kill text for projectile
       }
     }
 

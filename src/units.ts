@@ -463,7 +463,7 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
 /** Push overlapping units apart so they don't stack on the same spot. */
 export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
   const alive = units.filter(u => u.alive);
-  const ITERATIONS = 5;
+  const ITERATIONS = 2;
 
   for (let iter = 0; iter < ITERATIONS; iter++) {
     for (let i = 0; i < alive.length; i++) {
@@ -471,18 +471,14 @@ export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
         const a = alive[i];
         const b = alive[j];
         const sameTeam = a.team === b.team;
-        // Same-team: soft separation (just prevent stacking, no buffer)
-        // Enemy: full separation with buffer
-        const minDist = sameTeam
-          ? a.radius + b.radius
-          : a.radius + b.radius + 1;
+        const minDist = a.radius + b.radius;
         const dx = b.pos.x - a.pos.x;
         const dy = b.pos.y - a.pos.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
         if (dist < minDist && dist > 0.01) {
-          // Same-team push is weaker (30%) to allow passing through
-          const strength = sameTeam ? 0.3 : 1;
+          // Soft push: same-team lighter, enemy slightly stronger
+          const strength = sameTeam ? 0.2 : 0.5;
           const overlap = ((minDist - dist) / 2) * strength;
           const nx = dx / dist;
           const ny = dy / dist;

@@ -304,6 +304,19 @@ export class GameEngine {
             team: hit.team,
             targetId: hit.targetId,
           });
+
+          const mfx = this.renderer.effects;
+          if (this.bloodEnabled) {
+            const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
+            mfx?.addBloodSpray(hit.pos, unit.gunAngle, victimTeam, hit.damage);
+            if (hit.killed) {
+              mfx?.addKillText(hit.pos, hit.team);
+              mfx?.addBloodBurst(hit.pos, unit.gunAngle, victimTeam, hit.damage);
+            }
+          } else {
+            mfx?.addImpactBurst(hit.pos, hit.team);
+            if (hit.killed) mfx?.addKillText(hit.pos, hit.team);
+          }
         }
         continue;
       }

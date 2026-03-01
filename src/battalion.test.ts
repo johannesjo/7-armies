@@ -155,17 +155,15 @@ describe('assignUnitTargets', () => {
     }
   });
 
-  it('regroups to formation around center when idle', () => {
+  it('idle units hold position (no moveTarget) when battalion has no orders', () => {
     const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 600 });
     // No moveTarget, no enemies
     assignUnitTargets(battalion, units, units);
 
     expect(battalion.engaged).toBe(false);
-    // Units should get formation targets around the battalion center (~400, 600)
+    // Idle units should have null moveTarget so they hold position
     for (const u of units) {
-      expect(u.moveTarget).not.toBeNull();
-      expect(Math.abs(u.moveTarget!.x - 400)).toBeLessThan(25);
-      expect(Math.abs(u.moveTarget!.y - 600)).toBeLessThan(25);
+      expect(u.moveTarget).toBeNull();
     }
   });
 

@@ -33,8 +33,6 @@ const rematchBtn = document.getElementById('rematch-btn')!;
 const newBattleBtn = document.getElementById('new-battle-btn')!;
 const replayBtn = document.getElementById('replay-btn')!;
 
-const oneShotCb = document.getElementById('one-shot-cb') as HTMLInputElement;
-const bloodCb = document.getElementById('blood-cb') as HTMLInputElement;
 const dayModeCb = document.getElementById('day-mode-cb') as HTMLInputElement;
 const pixiContainer = document.getElementById('pixi-container')!;
 
@@ -171,8 +169,6 @@ function startGame(): void {
   renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode,
-    oneShot: oneShotCb.checked,
-    blood: bloodCb.checked,
   });
   showScreen('battle');
   speedToggle.classList.remove('active');

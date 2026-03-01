@@ -203,8 +203,8 @@ export function assignUnitTargets(battalion: Battalion, units: Unit[], allUnits:
         y: battalion.moveTarget.y + oy,
       };
     } else {
-      // Regroup to formation around current battalion center
-      unit.moveTarget = { x: cx + ox, y: cy + oy };
+      // Idle — hold position, don't chase shifting center
+      unit.moveTarget = null;
     }
   }
 

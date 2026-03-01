@@ -1,70 +1,9 @@
-import { Graphics, Container, Text } from 'pixi.js';
+import { Graphics, Container } from 'pixi.js';
 import { Vec2, Team } from './types';
 import { Theme, NIGHT_THEME } from './theme';
 
 interface Effect {
   update(dt: number): boolean; // false = expired
-}
-
-class ImpactBurst implements Effect {
-  private gfx: Graphics;
-  private age = 0;
-  private readonly duration = 0.3;
-
-  constructor(container: Container, private pos: Vec2, private color: number) {
-    this.gfx = new Graphics();
-    container.addChild(this.gfx);
-  }
-
-  update(dt: number): boolean {
-    this.age += dt;
-    if (this.age >= this.duration) {
-      this.gfx.destroy();
-      return false;
-    }
-    const t = this.age / this.duration;
-    const radius = 8 + t * 20;
-    const alpha = 1 - t;
-
-    this.gfx.clear();
-    this.gfx.circle(this.pos.x, this.pos.y, radius);
-    this.gfx.setStrokeStyle({ width: 2, color: this.color, alpha });
-    this.gfx.stroke();
-    return true;
-  }
-}
-
-class DeathEffect implements Effect {
-  private gfx: Graphics;
-  private age = 0;
-  private readonly duration = 0.5;
-
-  constructor(
-    container: Container,
-    private pos: Vec2,
-    private radius: number,
-    private color: number,
-  ) {
-    this.gfx = new Graphics();
-    container.addChild(this.gfx);
-  }
-
-  update(dt: number): boolean {
-    this.age += dt;
-    if (this.age >= this.duration) {
-      this.gfx.destroy();
-      return false;
-    }
-    const t = this.age / this.duration;
-    const r = this.radius + t * 30;
-    const alpha = 1 - t;
-
-    this.gfx.clear();
-    this.gfx.circle(this.pos.x, this.pos.y, r);
-    this.gfx.setStrokeStyle({ width: 3, color: this.color, alpha });
-    this.gfx.stroke();
-    return true;
-  }
 }
 
 class HitFlash implements Effect {
@@ -85,42 +24,6 @@ class HitFlash implements Effect {
       shape.tint = this.originalTint;
       return false;
     }
-    return true;
-  }
-}
-
-class KillText implements Effect {
-  private text: Text;
-  private age = 0;
-  private readonly duration = 0.8;
-  private startY: number;
-
-  constructor(container: Container, pos: Vec2, cssColor: string) {
-    this.text = new Text({
-      text: 'KILL',
-      style: {
-        fontSize: 14,
-        fontFamily: 'monospace',
-        fontWeight: 'bold',
-        fill: cssColor,
-      },
-    });
-    this.text.anchor.set(0.5);
-    this.text.x = pos.x;
-    this.text.y = pos.y;
-    this.startY = pos.y;
-    container.addChild(this.text);
-  }
-
-  update(dt: number): boolean {
-    this.age += dt;
-    if (this.age >= this.duration) {
-      this.text.destroy();
-      return false;
-    }
-    const t = this.age / this.duration;
-    this.text.y = this.startY - t * 30;
-    this.text.alpha = 1 - t;
     return true;
   }
 }
@@ -270,23 +173,8 @@ export class EffectsManager {
     this.theme = theme;
   }
 
-  addImpactBurst(pos: Vec2, team: Team): void {
-    const color = team === 'blue' ? this.theme.blueImpact : this.theme.redImpact;
-    this.effects.push(new ImpactBurst(this.container, pos, color));
-  }
-
-  addDeathEffect(pos: Vec2, radius: number, team: Team): void {
-    const color = team === 'blue' ? this.theme.blue : this.theme.red;
-    this.effects.push(new DeathEffect(this.container, pos, radius, color));
-  }
-
   addHitFlash(unitContainer: Container): void {
     this.effects.push(new HitFlash(unitContainer));
-  }
-
-  addKillText(pos: Vec2, team: Team): void {
-    const color = team === 'blue' ? this.theme.blueKill : this.theme.redKill;
-    this.effects.push(new KillText(this.container, pos, color));
   }
 
   addMuzzleFlash(pos: Vec2, angle: number, radius: number): void {

@@ -29,8 +29,6 @@ export class GameEngine {
   private roundNumber = 1;
   private aiMode = false;
   private idleTime = 0;
-  private oneShotEnabled = false;
-  private bloodEnabled = true;
   private endingBattle = false;
   private endDelayTimer = 0;
   private pendingWinner: Team | null = null;
@@ -39,14 +37,10 @@ export class GameEngine {
 
   constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: {
     aiMode?: boolean;
-    oneShot?: boolean;
-    blood?: boolean;
   }) {
     this.renderer = renderer;
     this.onEvent = onEvent;
     this.aiMode = opts?.aiMode ?? false;
-    this.oneShotEnabled = opts?.oneShot ?? false;
-    this.bloodEnabled = opts?.blood ?? true;
   }
 
   get phase(): TurnPhase {
@@ -54,8 +48,6 @@ export class GameEngine {
   }
 
   startBattle(): void {
-    this.renderer.bloodEnabled = this.bloodEnabled;
-
     this.obstacles = generateObstacles();
     this.elevationZones = generateElevationZones();
 
@@ -65,12 +57,6 @@ export class GameEngine {
     this.battalions = [...blue.battalions, ...red.battalions];
     this.units = [...blue.units, ...red.units];
 
-    // One-shot mode: set all damage to 9999
-    if (this.oneShotEnabled) {
-      for (const unit of this.units) {
-        unit.damage = 9999;
-      }
-    }
     this.projectiles = [];
     this.elapsedTime = 0;
     this.roundTimer = 0;
@@ -306,15 +292,10 @@ export class GameEngine {
           });
 
           const mfx = this.renderer.effects;
-          if (this.bloodEnabled) {
-            const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
-            mfx?.addBloodSpray(hit.pos, unit.gunAngle, victimTeam, hit.damage);
-            if (hit.killed) {
-              mfx?.addBloodBurst(hit.pos, unit.gunAngle, victimTeam, hit.damage);
-            }
-          } else {
-            mfx?.addImpactBurst(hit.pos, hit.team);
-            // no kill text for melee
+          const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
+          mfx?.addBloodSpray(hit.pos, unit.gunAngle, victimTeam, hit.damage);
+          if (hit.killed) {
+            mfx?.addBloodBurst(hit.pos, unit.gunAngle, victimTeam, hit.damage);
           }
         }
         continue;
@@ -386,16 +367,11 @@ export class GameEngine {
         targetId: hit.targetId,
       });
 
-      if (this.bloodEnabled) {
-        const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
-        const effectDamage = hit.flanked ? hit.damage * 1.5 : hit.damage;
-        fx?.addBloodSpray(hit.pos, hit.angle, victimTeam, effectDamage);
-        if (hit.killed) {
-          fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, effectDamage);
-        }
-      } else {
-        fx?.addImpactBurst(hit.pos, hit.team);
-        // no kill text for projectile
+      const victimTeam: Team = hit.team === 'blue' ? 'red' : 'blue';
+      const effectDamage = hit.flanked ? hit.damage * 1.5 : hit.damage;
+      fx?.addBloodSpray(hit.pos, hit.angle, victimTeam, effectDamage);
+      if (hit.killed) {
+        fx?.addBloodBurst(hit.pos, hit.angle, victimTeam, effectDamage);
       }
     }
 

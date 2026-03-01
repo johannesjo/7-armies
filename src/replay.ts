@@ -24,7 +24,6 @@ export class ReplayPlayer {
   }
 
   start(): void {
-    this.renderer.bloodEnabled = true;
     this.renderer.renderElevationZones(this.data.elevationZones);
     this.renderer.renderObstacles(this.data.obstacles);
     this.frameIndex = 0;
@@ -121,13 +120,11 @@ export class ReplayPlayer {
         const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
         const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
         fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
-        fx.addImpactBurst(event.pos, event.team);
       } else if (event.type === 'kill') {
         const victimTeam: Team = event.team === 'blue' ? 'red' : 'blue';
         const effectDamage = event.flanked ? event.damage * FLANK_DAMAGE_MULTIPLIER : event.damage;
         fx.addBloodSpray(event.pos, event.angle, victimTeam, effectDamage);
         fx.addBloodBurst(event.pos, event.angle, victimTeam, effectDamage);
-        fx.addKillText(event.pos, event.team);
       }
     }
   }

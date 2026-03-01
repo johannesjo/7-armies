@@ -20,13 +20,9 @@ export interface Theme {
   red: number;
   redDark: number;
 
-  // Effects — projectile / impact / kill text
+  // Effects — projectile
   blueProjectile: number;
   redProjectile: number;
-  blueImpact: number;
-  redImpact: number;
-  blueKill: string;
-  redKill: string;
 
   // Blood colors
   blueBlood: number[];
@@ -87,10 +83,6 @@ export const NIGHT_THEME: Theme = {
 
   blueProjectile: 0x88ccff,
   redProjectile: 0xff8888,
-  blueImpact: 0x88ccff,
-  redImpact: 0xff8888,
-  blueKill: '#88ccff',
-  redKill: '#ff8888',
 
   blueBlood: [0x3377dd, 0x2255bb, 0x5599ee],
   redBlood: [0xdd3333, 0xbb2222, 0xee4444],
@@ -144,10 +136,6 @@ export const DAY_THEME: Theme = {
 
   blueProjectile: 0x4488cc,
   redProjectile: 0xcc5555,
-  blueImpact: 0x4488cc,
-  redImpact: 0xcc5555,
-  blueKill: '#336699',
-  redKill: '#994444',
 
   blueBlood: [0x3388dd, 0x2266bb, 0x55aaee],
   redBlood: [0xcc4433, 0xaa2222, 0xdd6644],

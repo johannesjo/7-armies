@@ -73,8 +73,8 @@ describe('createBattalion', () => {
 describe('createArmyBattalions', () => {
   it('creates correct number of battalions and units per team', () => {
     const { battalions, units } = createArmyBattalions('blue');
-    expect(battalions).toHaveLength(6);
-    expect(units).toHaveLength(6 * BATTALION_SIZE); // 6 × 12 = 72
+    expect(battalions).toHaveLength(5);
+    expect(units).toHaveLength(5 * BATTALION_SIZE); // 5 × 12 = 60
   });
 
   it('blue battalions spawn on bottom side', () => {

@@ -197,15 +197,21 @@ export function assignUnitTargets(battalion: Battalion, units: Unit[], allUnits:
     if (unitEngaged && nearest) {
       // This melee unit has an enemy in range — chase it
       unit.moveTarget = { x: nearest.pos.x, y: nearest.pos.y };
+      unit.waypoints = [];
     } else if (battalion.moveTarget) {
       // Stay in formation, rotated toward enemy
       unit.moveTarget = {
         x: battalion.moveTarget.x + ox,
         y: battalion.moveTarget.y + oy,
       };
+      // Cavalry needs to know about remaining waypoints to maintain momentum
+      if (unit.type === 'cavalry') {
+        unit.waypoints = battalion.waypoints.map(wp => ({ x: wp.x + ox, y: wp.y + oy }));
+      }
     } else {
       // Idle — hold position, don't chase shifting center
       unit.moveTarget = null;
+      unit.waypoints = [];
     }
   }
 

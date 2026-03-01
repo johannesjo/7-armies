@@ -100,7 +100,9 @@ export function createArmyBattalions(team: Team): { battalions: Battalion[]; uni
   return { battalions, units: allUnits };
 }
 
-/** Pop the next waypoint when battalion center reaches current target. */
+/** Pop the next waypoint when most units have reached the current target.
+ *  Uses majority vote (60%) instead of center average so stragglers
+ *  don't stall the whole battalion. */
 export function advanceBattalionWaypoint(battalion: Battalion, units: Unit[]): void {
   const alive = units.filter(u => battalion.unitIds.includes(u.id) && u.alive);
   if (alive.length === 0) return;
@@ -112,17 +114,17 @@ export function advanceBattalionWaypoint(battalion: Battalion, units: Unit[]): v
     return;
   }
 
-  // Compute center of alive units
-  let cx = 0, cy = 0;
-  for (const u of alive) { cx += u.pos.x; cy += u.pos.y; }
-  cx /= alive.length;
-  cy /= alive.length;
+  // Count how many units are near the current target
+  const threshold = 40;
+  let nearCount = 0;
+  for (const u of alive) {
+    const dx = battalion.moveTarget.x - u.pos.x;
+    const dy = battalion.moveTarget.y - u.pos.y;
+    if (dx * dx + dy * dy < threshold * threshold) nearCount++;
+  }
 
-  const dx = battalion.moveTarget.x - cx;
-  const dy = battalion.moveTarget.y - cy;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-
-  if (dist < 15) {
+  // Advance when 60% of alive units have arrived (stragglers don't stall)
+  if (nearCount >= alive.length * 0.6) {
     battalion.moveTarget = battalion.waypoints.length > 0
       ? battalion.waypoints.shift()!
       : null;

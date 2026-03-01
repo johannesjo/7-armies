@@ -248,9 +248,10 @@ export class GameEngine {
       assignUnitTargets(bat, this.units, this.units);
     }
 
-    // Archers stop moving when they can fire (plant feet, draw, shoot)
+    // Archers pause to fire: halt only when cooldown is nearly ready, then resume
     for (const unit of this.units) {
       if (!unit.alive || unit.type !== 'archer') continue;
+      if (unit.fireTimer > 0.3) continue; // still reloading, keep moving
       const target = findTarget(unit, this.units, null, this.obstacles);
       if (target && isInRange(unit, target, this.elevationZones)
         && hasLineOfSight(unit.pos, target.pos, this.obstacles, unit.projectileRadius)) {

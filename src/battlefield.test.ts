@@ -3,10 +3,10 @@ import { generateObstacles, generateElevationZones } from './battlefield';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 
 describe('generateObstacles', () => {
-  it('generates 2-3 obstacles', () => {
+  it('generates 0-3 obstacles', () => {
     for (let i = 0; i < 20; i++) {
       const obstacles = generateObstacles();
-      expect(obstacles.length).toBeGreaterThanOrEqual(2);
+      expect(obstacles.length).toBeGreaterThanOrEqual(0);
       expect(obstacles.length).toBeLessThanOrEqual(3);
     }
   });

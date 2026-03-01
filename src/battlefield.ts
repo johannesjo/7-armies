@@ -9,8 +9,10 @@ function randomInRange(min: number, max: number): number {
 export function generateObstacles(): Obstacle[] {
   const obstacles: Obstacle[] = [];
 
-  const pairCount = randomInRange(1, 2); // 1 pair
-  const hasCenter = Math.random() > 0.5;
+  // 40% no obstacles, 35% one pair, 25% one pair + center
+  const roll = Math.random();
+  const pairCount = roll < 0.4 ? 0 : 1;
+  const hasCenter = roll > 0.75;
 
   for (let i = 0; i < pairCount; i++) {
     const w = randomInRange(30, 60);
@@ -22,7 +24,7 @@ export function generateObstacles(): Obstacle[] {
     obstacles.push({ x, y: MAP_HEIGHT - y - h, w, h });
   }
 
-  if (hasCenter || obstacles.length < 3) {
+  if (hasCenter) {
     const w = randomInRange(30, 60);
     const h = randomInRange(30, 60);
     const x = randomInRange(50, MAP_WIDTH - 50 - w);

@@ -510,11 +510,10 @@ export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
           b.pos.x += nx * overlap;
           b.pos.y += ny * overlap;
 
-          // Bounce — reflect converging velocity outward (soft elastic collision)
-          // Stronger bounce for same-team to prevent friendly stacking
+          // Gentle separation — just stop converging, minimal bounce
           const relVelDot = (a.vel.x - b.vel.x) * nx + (a.vel.y - b.vel.y) * ny;
           if (relVelDot < 0) {
-            const bounce = a.team === b.team ? 0.5 : 0.3;
+            const bounce = 0.1;
             a.vel.x -= nx * relVelDot * (0.5 + bounce);
             a.vel.y -= ny * relVelDot * (0.5 + bounce);
             b.vel.x += nx * relVelDot * (0.5 + bounce);
@@ -643,11 +642,11 @@ export function meleeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
   unit.fireTimer = unit.fireCooldown;
 
   const hits: AoeHit[] = [];
-  const knockback = unit.damage * 6;
 
-  // Cavalry charge: bonus damage when moving fast
+  // Cavalry charge: bonus damage + big knockback when moving fast
   const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
   const isCharging = unit.type === 'cavalry' && speed >= CAVALRY_CHARGE_SPEED_THRESHOLD;
+  const knockback = isCharging ? 40 : 4;
 
   for (const enemy of units) {
     if (!enemy.alive || enemy.team === unit.team) continue;
@@ -679,9 +678,9 @@ export function meleeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
         damage: dmg,
       });
 
-      // Knockback — apply velocity impulse away from attacker
-      if (dist > 0) {
-        const kbSpeed = knockback / 0.15; // reach full distance in ~0.15s
+      // Knockback — only significant for cavalry charge
+      if (dist > 0 && knockback > 0) {
+        const kbSpeed = knockback / 0.3;
         enemy.knockbackVel = {
           x: (dx / dist) * kbSpeed,
           y: (dy / dist) * kbSpeed,
@@ -785,11 +784,11 @@ export function updateProjectiles(
 
         const flanked = isFlanked(projAngle, unit.gunAngle);
         const actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : p.damage;
-        // Knockback — apply velocity impulse in projectile direction
-        const knockbackAmount = p.knockback ?? p.damage * 0.4;
+        // Knockback — minimal nudge from arrows
+        const knockbackAmount = p.knockback ?? 2;
         const projSpeed = Math.sqrt(p.vel.x * p.vel.x + p.vel.y * p.vel.y);
         if (projSpeed > 0 && knockbackAmount > 0) {
-          const kbSpeed = knockbackAmount / 0.15;
+          const kbSpeed = knockbackAmount / 0.3;
           unit.knockbackVel = {
             x: (p.vel.x / projSpeed) * kbSpeed,
             y: (p.vel.y / projSpeed) * kbSpeed,

@@ -11,10 +11,10 @@ describe('scorePosition', () => {
   const elevationZones: ElevationZone[] = [];
 
   it('archers prefer far positions over close ones', () => {
-    const archer = createUnit('a1', 'archer', 'red', { x: 600, y: 100 });
+    const archer = createUnit('a1', 'archer', 'red', { x: 600, y: 400 });
 
     const farScore = scorePosition({
-      candidate: { x: 600, y: 350 },
+      candidate: { x: 600, y: 420 },
       unit: archer,
       enemies,
       obstacles,
@@ -93,11 +93,11 @@ describe('scorePosition', () => {
   });
 
   it('elevated positions score higher for archers', () => {
-    const archer = createUnit('a1', 'archer', 'red', { x: 600, y: 100 });
-    const zone: ElevationZone = { x: 550, y: 280, w: 100, h: 100 };
+    const archer = createUnit('a1', 'archer', 'red', { x: 600, y: 400 });
+    const zone: ElevationZone = { x: 550, y: 380, w: 100, h: 100 };
 
     const elevatedScore = scorePosition({
-      candidate: { x: 600, y: 330 },
+      candidate: { x: 600, y: 430 },
       unit: archer,
       enemies,
       obstacles,
@@ -105,11 +105,11 @@ describe('scorePosition', () => {
     });
 
     const flatScore = scorePosition({
-      candidate: { x: 600, y: 200 },
+      candidate: { x: 600, y: 430 },
       unit: archer,
       enemies,
       obstacles,
-      elevationZones: [zone],
+      elevationZones: [],
     });
 
     expect(elevatedScore).toBeGreaterThan(flatScore);

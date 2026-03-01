@@ -248,6 +248,16 @@ export class GameEngine {
       assignUnitTargets(bat, this.units, this.units);
     }
 
+    // Archers stop moving when they can fire (plant feet, draw, shoot)
+    for (const unit of this.units) {
+      if (!unit.alive || unit.type !== 'archer') continue;
+      const target = findTarget(unit, this.units, null, this.obstacles);
+      if (target && isInRange(unit, target, this.elevationZones)
+        && hasLineOfSight(unit.pos, target.pos, this.obstacles, unit.projectileRadius)) {
+        unit.moveTarget = null;
+      }
+    }
+
     // Move individual units
     for (const unit of this.units) {
       if (!unit.alive) continue;
@@ -461,6 +471,10 @@ export class GameEngine {
         maxRange: p.maxRange,
         distanceTraveled: p.distanceTraveled,
         trail: p.trail ? p.trail.map(t => ({ ...t })) : undefined,
+        arc: p.arc,
+        launchX: p.launchPos?.x,
+        launchY: p.launchPos?.y,
+        totalFlightDist: p.totalFlightDist,
       })),
     };
 

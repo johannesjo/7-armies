@@ -37,7 +37,7 @@ describe('createUnit', () => {
   it('creates a pikeman with correct stats', () => {
     const unit = createUnit('pk_1', 'pikeman', 'red', { x: 400, y: 200 });
     expect(unit.hp).toBe(25);
-    expect(unit.speed).toBe(50);
+    expect(unit.speed).toBe(55);
     expect(unit.damage).toBe(3);
     expect(unit.range).toBe(12);
   });

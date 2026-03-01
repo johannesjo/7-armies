@@ -101,6 +101,9 @@ export class ReplayPlayer {
       maxRange: s.maxRange,
       distanceTraveled: s.distanceTraveled,
       trail: s.trail,
+      arc: s.arc,
+      launchPos: s.launchX != null && s.launchY != null ? { x: s.launchX, y: s.launchY } : undefined,
+      totalFlightDist: s.totalFlightDist,
     }));
 
     this.renderer.renderUnits(units, 1 / this.fps);

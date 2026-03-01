@@ -62,6 +62,9 @@ export interface Projectile {
   piercing?: boolean;
   hitIds?: Set<string>;
   knockback?: number;
+  arc?: boolean;
+  launchPos?: Vec2;
+  totalFlightDist?: number;
 }
 
 export interface Obstacle {
@@ -125,6 +128,10 @@ export interface ReplayProjectileSnapshot {
   maxRange: number;
   distanceTraveled: number;
   trail?: Vec2[];
+  arc?: boolean;
+  launchX?: number;
+  launchY?: number;
+  totalFlightDist?: number;
 }
 
 export interface ReplayEvent {

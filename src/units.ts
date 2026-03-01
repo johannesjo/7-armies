@@ -164,7 +164,7 @@ export function createUnit(id: string, type: UnitType, team: Team, pos: Vec2): U
     vel: { x: 0, y: 0 },
     gunAngle: team === 'blue' ? -Math.PI / 2 : Math.PI / 2,
     turnSpeed: stats.turnSpeed,
-    damageReduction: type === 'swordsman' ? 0.2 : undefined,
+    damageReduction: type === 'swordsman' ? 0.2 : type === 'cavalry' ? 0.3 : undefined,
   };
 }
 
@@ -763,7 +763,13 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
   // Only archers fire projectiles
   if (unit.type !== 'archer') return [];
 
-  unit.fireTimer -= dt;
+  // Must be stationary to fire — refuse if moving
+  const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
+  if (speed > 5) return [];
+
+  // Stationary archers fire faster (60% cooldown)
+  const cooldownRate = speed < 1 ? 1.67 : 1;
+  unit.fireTimer -= dt * cooldownRate;
   if (unit.fireTimer > 0) return [];
 
   // Gun must be aligned with target before firing (makes flanking viable)
@@ -787,8 +793,13 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
     predictedY = target.pos.y + target.vel.y * flightTime;
   }
 
-  // Add scatter — volleys spread around target area rather than sniping one unit
-  const scatter = 12;
+  // Range-scaled inaccuracy: devastating up close, area rain at max range
+  const rawDist = Math.sqrt(
+    (target.pos.x - unit.pos.x) * (target.pos.x - unit.pos.x) +
+    (target.pos.y - unit.pos.y) * (target.pos.y - unit.pos.y),
+  );
+  const distRatio = Math.min(rawDist / unit.range, 1);
+  const scatter = 4 + distRatio * 26;
   predictedX += (Math.random() - 0.5) * scatter;
   predictedY += (Math.random() - 0.5) * scatter;
 
@@ -798,9 +809,10 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
 
   if (pdist < 1) return [];
 
-  // Angular spread: ±2° random deviation + slight speed variance (±5%)
-  const spread = (Math.random() - 0.5) * 0.07;
-  const speedVar = unit.projectileSpeed * (0.95 + Math.random() * 0.1);
+  const angularSpread = 0.01 + distRatio * 0.06;
+  const speedVarRange = 0.02 + distRatio * 0.06;
+  const spread = (Math.random() - 0.5) * angularSpread * 2;
+  const speedVar = unit.projectileSpeed * (1 - speedVarRange + Math.random() * speedVarRange * 2);
   const baseAngle = Math.atan2(pdy, pdx) + spread;
   const vx = Math.cos(baseAngle) * speedVar;
   const vy = Math.sin(baseAngle) * speedVar;
@@ -816,6 +828,9 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
     team: unit.team,
     maxRange,
     distanceTraveled: 0,
+    arc: true,
+    launchPos: { x: unit.pos.x, y: unit.pos.y },
+    totalFlightDist: pdist,
   }];
 }
 
@@ -853,11 +868,18 @@ export function updateProjectiles(
     const dotToTarget = tx * p.vel.x + ty * p.vel.y;
     if (dotToTarget < 0) continue; // arrow flew past target
 
-    // Check if projectile hit an obstacle
-    if (obstacles.some(o => segmentHitsRect(oldPos, p.pos, o, p.radius))) continue;
+    // Arc trajectory: arrows fly over obstacles/units during first 75% of flight
+    const arcProgress = (p.arc && p.totalFlightDist && p.totalFlightDist > 0)
+      ? p.distanceTraveled / p.totalFlightDist
+      : 1; // non-arc projectiles always check collisions
+    const inArc = arcProgress < 0.75;
 
-    // Check hit against enemy units
+    // Check if projectile hit an obstacle (skip during arc)
+    if (!inArc && obstacles.some(o => segmentHitsRect(oldPos, p.pos, o, p.radius))) continue;
+
+    // Check hit against enemy units (skip during arc)
     let consumed = false;
+    if (inArc) { alive.push(p); continue; }
     for (const unit of units) {
       if (!unit.alive || unit.team === p.team) continue;
       // Piercing projectiles skip already-hit units

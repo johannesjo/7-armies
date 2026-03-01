@@ -436,6 +436,19 @@ export class Renderer {
     for (const p of projectiles) {
       const color = p.team === 'blue' ? this.theme.blueProjectile : this.theme.redProjectile;
 
+      // Compute arc height for arcing arrows
+      const arcProgress = (p.arc && p.totalFlightDist && p.totalFlightDist > 0)
+        ? Math.min(p.distanceTraveled / p.totalFlightDist, 1)
+        : 1;
+      const arcHeight = p.arc ? 4 * arcProgress * (1 - arcProgress) : 0; // 0→1→0 parabola
+      const arcScale = 1 + arcHeight * 0.5; // up to 1.5× at apex
+
+      // Draw shadow dot on ground when arrow is high in arc
+      if (arcHeight > 0.1) {
+        g.circle(p.pos.x, p.pos.y, 1.5);
+        g.fill({ color: 0x000000, alpha: 0.15 * arcHeight });
+      }
+
       // Draw trail — thin, fading
       if (p.trail && p.trail.length > 1) {
         for (let i = 1; i < p.trail.length; i++) {
@@ -456,21 +469,24 @@ export class Renderer {
         const px = -ny;
         const py = nx;
 
-        // Tip at current position, tail 10px behind
+        // Scale arrow size by arc height
+        const shaftLen = 10 * arcScale;
+        const headBase = 3 * arcScale;
+        const headWidth = 1 * arcScale;
+
+        // Tip at current position, tail behind (scaled)
         const tipX = p.pos.x;
         const tipY = p.pos.y;
-        const tailX = tipX - nx * 10;
-        const tailY = tipY - ny * 10;
+        const tailX = tipX - nx * shaftLen;
+        const tailY = tipY - ny * shaftLen;
 
         // Shaft — thin line
-        g.setStrokeStyle({ width: 1, color, alpha: 1 });
+        g.setStrokeStyle({ width: 1 * arcScale, color, alpha: 1 });
         g.moveTo(tailX, tailY);
         g.lineTo(tipX, tipY);
         g.stroke();
 
-        // Arrowhead — filled triangle (3px long × 2px wide)
-        const headBase = 3;
-        const headWidth = 1;
+        // Arrowhead — filled triangle
         g.moveTo(tipX, tipY);
         g.lineTo(tipX - nx * headBase + px * headWidth, tipY - ny * headBase + py * headWidth);
         g.lineTo(tipX - nx * headBase - px * headWidth, tipY - ny * headBase - py * headWidth);
@@ -478,7 +494,7 @@ export class Renderer {
         g.fill(color);
 
         // Fletching — two short angled lines at tail
-        const fLen = 2;
+        const fLen = 2 * arcScale;
         const fAngle = 0.5; // ~30°
         const fCos = Math.cos(fAngle);
         const fSin = Math.sin(fAngle);

@@ -16,9 +16,8 @@ export const UNIT_STATS: Record<UnitType, UnitStats> = {
 };
 
 export const ARMY_COMPOSITION: { type: UnitType; count: number }[] = [
-  { type: 'archer', count: 2 },
+  { type: 'archer', count: 4 },
   { type: 'cavalry', count: 1 },
-  { type: 'pikeman', count: 2 },
 ];
 
 export const BATTALION_SIZE = 12;

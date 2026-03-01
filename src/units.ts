@@ -768,14 +768,14 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
   // Only archers fire projectiles
   if (unit.type !== 'archer') return [];
 
-  // Must be stationary to fire — refuse if moving
+  // Timer always ticks (even while moving) so archers fire periodically
   const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
-  if (speed > 5) return [];
-
-  // Stationary archers fire faster (60% cooldown)
   const cooldownRate = speed < 1 ? 1.67 : 1;
   unit.fireTimer -= dt * cooldownRate;
   if (unit.fireTimer > 0) return [];
+
+  // Must be stationary to actually release the shot
+  if (speed > 5) return [];
 
   // Gun must be aligned with target before firing (makes flanking viable)
   const aimAngle = Math.atan2(target.pos.y - unit.pos.y, target.pos.x - unit.pos.x);

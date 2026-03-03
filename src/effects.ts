@@ -188,16 +188,16 @@ export class EffectsManager {
   }
 
   addBloodSpray(pos: Vec2, angle: number, team: Team, damage: number): void {
-    const bloodColors = team === 'blue' ? this.theme.blueBlood : this.theme.redBlood;
-    const stainColor = team === 'blue' ? this.theme.blueStain : this.theme.redStain;
+    const bloodColors = this.theme.redBlood;
+    const stainColor = this.theme.redStain;
     const aMul = this.theme.bloodAlpha;
     const fMul = this.theme.bloodFade;
-    const count = Math.min(Math.floor(damage * 0.5) + 2, 15) + Math.floor(Math.random() * 3);
-    const dmgScale = Math.min(damage / 10, 3);
+    const count = Math.min(Math.floor(damage * 0.2) + 1, 5) + Math.floor(Math.random() * 2);
+    const dmgScale = Math.min(damage / 10, 2);
     for (let i = 0; i < count; i++) {
-      const speed = 80 + Math.random() * 120 * dmgScale;
-      const size = (1.5 + Math.random() * 1.5) * Math.min(dmgScale, 1.5);
-      const duration = 0.25 + Math.random() * 0.2;
+      const speed = 40 + Math.random() * 60 * dmgScale;
+      const size = (1 + Math.random() * 1) * Math.min(dmgScale, 1);
+      const duration = 0.15 + Math.random() * 0.15;
       this.effects.push(new BloodParticle(
         this.container, this.groundStains, pos, angle,
         Math.PI * 0.35, speed, bloodColors, stainColor, size, duration, aMul, fMul,
@@ -206,17 +206,17 @@ export class EffectsManager {
   }
 
   addBloodBurst(pos: Vec2, angle: number, team: Team, damage: number): void {
-    const bloodColors = team === 'blue' ? this.theme.blueBlood : this.theme.redBlood;
-    const stainColor = team === 'blue' ? this.theme.blueStain : this.theme.redStain;
+    const bloodColors = this.theme.redBlood;
+    const stainColor = this.theme.redStain;
     const aMul = this.theme.bloodAlpha;
     const fMul = this.theme.bloodFade;
-    const count = Math.min(Math.floor(damage * 1.2) + 8, 35) + Math.floor(Math.random() * 6);
-    const dmgScale = Math.min(damage / 10, 3);
+    const count = Math.min(Math.floor(damage * 0.4) + 3, 12) + Math.floor(Math.random() * 3);
+    const dmgScale = Math.min(damage / 10, 2);
     for (let i = 0; i < count; i++) {
       const a = angle + (Math.random() - 0.5) * Math.PI * 0.6;
-      const speed = 60 + Math.random() * 160 * dmgScale;
-      const size = (2 + Math.random() * 2) * Math.min(dmgScale, 1.5);
-      const duration = 0.3 + Math.random() * 0.3;
+      const speed = 30 + Math.random() * 80 * dmgScale;
+      const size = (1.5 + Math.random() * 1.5) * Math.min(dmgScale, 1);
+      const duration = 0.2 + Math.random() * 0.2;
       this.effects.push(new BloodParticle(
         this.container, this.groundStains, pos, a,
         0, speed, bloodColors, stainColor, size, duration, aMul, fMul,
@@ -224,18 +224,18 @@ export class EffectsManager {
     }
 
     const stainMul = aMul * (1 - fMul * 0.7);
-    const poolSize = (5 + Math.random() * 4) * Math.min(dmgScale, 2);
+    const poolSize = (2 + Math.random() * 2) * Math.min(dmgScale, 1.5);
     this.groundStains.circle(pos.x, pos.y, poolSize);
-    this.groundStains.fill({ color: stainColor, alpha: (0.5 + Math.random() * 0.2) * stainMul });
+    this.groundStains.fill({ color: stainColor, alpha: (0.3 + Math.random() * 0.15) * stainMul });
 
-    const satellites = Math.min(3 + Math.floor(damage * 0.2), 8);
+    const satellites = Math.min(1 + Math.floor(damage * 0.1), 3);
     for (let i = 0; i < satellites; i++) {
-      const spread = 12 * dmgScale;
+      const spread = 6 * dmgScale;
       const ox = (Math.random() - 0.5) * spread;
       const oy = (Math.random() - 0.5) * spread;
-      const s = (2 + Math.random() * 2) * Math.min(dmgScale, 1.5);
+      const s = (1 + Math.random() * 1.5) * Math.min(dmgScale, 1);
       this.groundStains.circle(pos.x + ox, pos.y + oy, s);
-      this.groundStains.fill({ color: stainColor, alpha: (0.3 + Math.random() * 0.2) * stainMul });
+      this.groundStains.fill({ color: stainColor, alpha: (0.2 + Math.random() * 0.15) * stainMul });
     }
   }
 

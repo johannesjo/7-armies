@@ -714,13 +714,15 @@ export function meleeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
 
   unit.fireTimer -= dt;
   if (unit.fireTimer > 0) return [];
-  unit.fireTimer = unit.fireCooldown;
+  // Charging cavalry attacks much faster — continuous trampling
+  const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
+  const chargingFast = unit.type === 'cavalry' && speed >= CAVALRY_CHARGE_SPEED_THRESHOLD;
+  unit.fireTimer = chargingFast ? 0.15 : unit.fireCooldown;
 
   const hits: AoeHit[] = [];
 
   // Cavalry speed-based damage: scales linearly from 1× at rest to CHARGE_MULTIPLIER at full speed
-  const speed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
-  const isCharging = unit.type === 'cavalry' && speed >= CAVALRY_CHARGE_SPEED_THRESHOLD;
+  const isCharging = chargingFast;
   const speedRatio = unit.type === 'cavalry' ? Math.min(speed / unit.speed, 1) : 0;
   const knockback = isCharging ? 40 : 1;
 
@@ -754,9 +756,10 @@ export function meleeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
         damage: dmg,
       });
 
-      // Knockback — cavalry charge only
-      if (isCharging && dist > 0) {
-        const kbSpeed = knockback / 0.3;
+      // Knockback — any cavalry hit pushes enemies
+      if (unit.type === 'cavalry' && dist > 0) {
+        const kbAmount = isCharging ? knockback : 12;
+        const kbSpeed = kbAmount / 0.3;
         enemy.knockbackVel = {
           x: (dx / dist) * kbSpeed,
           y: (dy / dist) * kbSpeed,

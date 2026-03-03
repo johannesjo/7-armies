@@ -64,7 +64,7 @@ export interface Theme {
 
 export const NIGHT_THEME: Theme = {
   bg: 0x1a1a2e,
-  grid: 0x222244,
+  grid: 0x1a1a2e,
   gridAlpha: 0,
 
   elevationOuter: 0x2e2e48,
@@ -117,8 +117,8 @@ export const NIGHT_THEME: Theme = {
 
 export const DAY_THEME: Theme = {
   bg: 0xf5f0e0,
-  grid: 0xc8bfa0,
-  gridAlpha: 0.4,
+  grid: 0xf5f0e0,
+  gridAlpha: 0,
 
   elevationOuter: 0xc0b890,
   elevationMid: 0xb0a878,

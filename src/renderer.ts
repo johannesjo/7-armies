@@ -1,4 +1,4 @@
-import { Application, Graphics, Container, Text, Texture, TilingSprite } from 'pixi.js';
+import { Application, Graphics, Container, Text } from 'pixi.js';
 import { Unit, Obstacle, Projectile, ElevationZone, Vec2 } from './types';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
@@ -16,7 +16,7 @@ export class Renderer {
   private _effects: EffectsManager | null = null;
   private zoneLabels: { rect: Obstacle; label: Text; hovered: boolean; dragActive: boolean }[] = [];
   private theme: Theme = NIGHT_THEME;
-  private noiseSprite: TilingSprite | null = null;
+  private noiseSprite: Container | null = null;
   private lastElevationZones: ElevationZone[] = [];
   private lastObstacles: Obstacle[] = [];
   constructor() {
@@ -50,47 +50,12 @@ export class Renderer {
       this.bgGraphics.destroy();
     }
     this.bgGraphics = new Graphics();
-    // Scale grid spacing to screen size so density looks like real graph paper
-    const gridSpacing = Math.min(30, Math.round(Math.min(MAP_WIDTH, MAP_HEIGHT) / 24));
-    this.bgGraphics.setStrokeStyle({ width: 1, color: this.theme.grid, alpha: this.theme.gridAlpha });
-    for (let x = 0; x <= MAP_WIDTH; x += gridSpacing) {
-      this.bgGraphics.moveTo(x, 0);
-      this.bgGraphics.lineTo(x, MAP_HEIGHT);
-      this.bgGraphics.stroke();
-    }
-    for (let y = 0; y <= MAP_HEIGHT; y += gridSpacing) {
-      this.bgGraphics.moveTo(0, y);
-      this.bgGraphics.lineTo(MAP_WIDTH, y);
-      this.bgGraphics.stroke();
-    }
     this.app.stage.addChildAt(this.bgGraphics, 0);
 
-    // Paper noise overlay
     if (this.noiseSprite) {
       this.app.stage.removeChild(this.noiseSprite);
       this.noiseSprite.destroy();
       this.noiseSprite = null;
-    }
-    if (this.theme.paperNoise) {
-      const size = 128;
-      const noiseCanvas = document.createElement('canvas');
-      noiseCanvas.width = size;
-      noiseCanvas.height = size;
-      const ctx = noiseCanvas.getContext('2d')!;
-      const imageData = ctx.createImageData(size, size);
-      const data = imageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        if (Math.random() < 0.4) {
-          data[i] = 160;     // R
-          data[i + 1] = 140; // G
-          data[i + 2] = 100; // B
-          data[i + 3] = Math.floor(5 + Math.random() * 10); // alpha 0.02–0.06
-        }
-      }
-      ctx.putImageData(imageData, 0, 0);
-      const texture = Texture.from(noiseCanvas);
-      this.noiseSprite = new TilingSprite({ texture, width: MAP_WIDTH, height: MAP_HEIGHT });
-      this.app.stage.addChildAt(this.noiseSprite, 1);
     }
   }
 

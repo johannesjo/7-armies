@@ -577,7 +577,7 @@ export function separateUnits(units: Unit[], obstacles: Obstacle[] = []): void {
         const a = alive[i];
         const b = alive[j];
         const sameTeam = a.team === b.team;
-        const minDist = (a.radius + b.radius) * 0.3;
+        const minDist = (a.radius + b.radius) * (sameTeam ? 0.7 : 0.5);
         const dx = b.pos.x - a.pos.x;
         const dy = b.pos.y - a.pos.y;
         const dist = Math.sqrt(dx * dx + dy * dy);

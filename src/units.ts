@@ -417,7 +417,7 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
     angleDiff = ((angleDiff + Math.PI) % (2 * Math.PI)) - Math.PI;
     if (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
     const speedFraction = curSpeed / unit.speed;
-    const turnRate = 12 - 9 * speedFraction; // 12 rad/s walking, 3 rad/s galloping
+    const turnRate = 12 - 6 * speedFraction; // 12 rad/s walking, 6 rad/s galloping
     const maxTurn = turnRate * dt;
     if (Math.abs(angleDiff) <= maxTurn) {
       unit.gunAngle = desiredAngle;
@@ -432,7 +432,7 @@ export function moveUnit(unit: Unit, dt: number, obstacles: Obstacle[], allUnits
     const shouldDecel = dist <= 40 && !hasMoreWaypoints;
     // Slow down for sharp turns — prevents circling when heading is misaligned
     const absAngle = Math.abs(angleDiff);
-    const turnBrake = absAngle > 0.5 ? Math.max(0.25, 1 - absAngle / Math.PI) : 1;
+    const turnBrake = absAngle > 0.8 ? Math.max(0.5, 1 - absAngle / Math.PI) : 1;
     const baseSpeed = shouldDecel ? unit.speed * (dist / 40) : unit.speed;
     const targetSpeed = baseSpeed * turnBrake;
     let newSpeed = curSpeed;

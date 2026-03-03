@@ -151,6 +151,9 @@ async function initRenderer(): Promise<void> {
   battleScreen.classList.add('active'); // visible before init so container has dimensions
   renderer = new Renderer();
   await renderer.init(pixiContainer);
+  window.addEventListener('resize', () => {
+    renderer?.resize(pixiContainer.clientWidth, pixiContainer.clientHeight);
+  });
 }
 
 function showPreview(): void {

@@ -78,7 +78,7 @@ export function createBattalion(
 /** Create all 7 battalions + 140 units for a team. */
 export function createArmyBattalions(team: Team): { battalions: Battalion[]; units: Unit[] } {
   const isBlue = team === 'blue';
-  const baseY = isBlue ? MAP_HEIGHT * 0.92 : MAP_HEIGHT * 0.08;
+  const baseY = isBlue ? MAP_HEIGHT * 0.95 : MAP_HEIGHT * 0.05;
   const totalBattalions = ARMY_COMPOSITION.reduce((sum, c) => sum + c.count, 0);
   const spacing = MAP_WIDTH / (totalBattalions + 1);
 

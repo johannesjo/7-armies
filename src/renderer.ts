@@ -1,6 +1,6 @@
 import { Application, Graphics, Container, Text, Texture, TilingSprite } from 'pixi.js';
 import { Unit, Obstacle, Projectile, ElevationZone, Vec2 } from './types';
-import { MAP_WIDTH, MAP_HEIGHT, setMapSize } from './constants';
+import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
 import { mergeObstacles } from './obstacle-merge';
 import { Theme, NIGHT_THEME } from './theme';
@@ -24,19 +24,24 @@ export class Renderer {
   }
 
   async init(container: HTMLElement): Promise<void> {
-    const w = container.clientWidth || window.innerWidth;
-    const h = container.clientHeight || window.innerHeight;
-    setMapSize(w, h);
-
     await this.app.init({
       width: MAP_WIDTH,
       height: MAP_HEIGHT,
       backgroundColor: this.theme.bg,
       antialias: true,
+      resolution: window.devicePixelRatio || 1,
+      autoDensity: true,
     });
     container.appendChild(this.app.canvas);
     this.drawBackground();
     this._effects = createEffectsManager(this.app.stage);
+    this.resize(container.clientWidth, container.clientHeight);
+  }
+
+  resize(containerW: number, containerH: number): void {
+    const scale = Math.min(containerW / MAP_WIDTH, containerH / MAP_HEIGHT);
+    this.app.renderer.resize(MAP_WIDTH * scale, MAP_HEIGHT * scale);
+    this.app.stage.scale.set(scale);
   }
 
   private drawBackground(): void {

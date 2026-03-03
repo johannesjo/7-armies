@@ -1,12 +1,7 @@
 import { UnitStats, UnitType } from './types';
 
-export let MAP_WIDTH = 1200;
-export let MAP_HEIGHT = 800;
-
-export function setMapSize(w: number, h: number): void {
-  MAP_WIDTH = w;
-  MAP_HEIGHT = h;
-}
+export const MAP_WIDTH = 1200;
+export const MAP_HEIGHT = 675;
 
 export const UNIT_STATS: Record<UnitType, UnitStats> = {
   swordsman: { hp: 20,  speed: 80,  damage: 4,  range: 10,  radius: 2.5, fireCooldown: 0.8, projectileSpeed: 300, projectileRadius: 2, turnSpeed: 2.5 },

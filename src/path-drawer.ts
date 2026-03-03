@@ -202,6 +202,13 @@ export class PathDrawer {
       this.gfx.setStrokeStyle({ width: 1, color, alpha: alpha * 0.3 });
       this.gfx.stroke();
 
+      // Facing direction chevron at endpoint
+      const fullPts: Vec2[] = [center, ...bat.waypoints];
+      const facingAngle = PathDrawer.stableAngle(fullPts, 20);
+      if (facingAngle !== null) {
+        this.drawFacingChevron(last, facingAngle, formRadius * 0.5, color, alpha * 0.6);
+      }
+
       // Tick marks at 1-second intervals + time label
       const fullPath: Vec2[] = [center, ...bat.waypoints];
       const pathLen = polylineLength(fullPath);
@@ -270,6 +277,12 @@ export class PathDrawer {
       this.gfx.circle(endpoint.x, endpoint.y, drawFormRadius);
       this.gfx.setStrokeStyle({ width: 1.5, color, alpha: 0.4 });
       this.gfx.stroke();
+
+      // Facing direction chevron at drag endpoint
+      const rawFacing = PathDrawer.stableAngle(this.rawPoints, 20);
+      if (rawFacing !== null) {
+        this.drawFacingChevron(endpoint, rawFacing, drawFormRadius * 0.5, color, 0.7);
+      }
     } else {
       this.onZoneHighlight?.(null);
     }
@@ -406,6 +419,41 @@ export class PathDrawer {
   /** Call each frame to animate pulsing indicators during planning. */
   updateHover(): void {
     if (this.enabled) this.renderHoverLayer();
+  }
+
+  /** Walk backwards from the end of `pts` to find a point at least `minDist` away from the last point. */
+  private static stableAngle(pts: Vec2[], minDist: number): number | null {
+    if (pts.length < 2) return null;
+    const end = pts[pts.length - 1];
+    for (let i = pts.length - 2; i >= 0; i--) {
+      const dx = end.x - pts[i].x;
+      const dy = end.y - pts[i].y;
+      if (dx * dx + dy * dy >= minDist * minDist) {
+        return Math.atan2(dy, dx);
+      }
+    }
+    // All points within minDist — fall back to first→last
+    const dx = end.x - pts[0].x;
+    const dy = end.y - pts[0].y;
+    if (dx * dx + dy * dy > 1) return Math.atan2(dy, dx);
+    return null;
+  }
+
+  /** Draw a chevron (">" shape) at `pos` pointing in `angle` direction. */
+  private drawFacingChevron(pos: Vec2, angle: number, size: number, color: number, alpha: number): void {
+    const halfAngle = Math.PI / 4;
+    const tipX = pos.x + Math.cos(angle) * size;
+    const tipY = pos.y + Math.sin(angle) * size;
+    const arm1X = tipX - Math.cos(angle - halfAngle) * size * 0.7;
+    const arm1Y = tipY - Math.sin(angle - halfAngle) * size * 0.7;
+    const arm2X = tipX - Math.cos(angle + halfAngle) * size * 0.7;
+    const arm2Y = tipY - Math.sin(angle + halfAngle) * size * 0.7;
+
+    this.gfx.setStrokeStyle({ width: 2, color, alpha });
+    this.gfx.moveTo(arm1X, arm1Y);
+    this.gfx.lineTo(tipX, tipY);
+    this.gfx.lineTo(arm2X, arm2Y);
+    this.gfx.stroke();
   }
 
   private drawRangeCircle(unit: Unit, pos: Vec2, color: number): void {

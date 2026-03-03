@@ -166,6 +166,7 @@ export interface Battalion {
   moveTarget: Vec2 | null;
   formationOffsets: Vec2[];
   engaged: boolean;
+  lastFacingAngle?: number;
 }
 
 export type GameMode = 'pvp' | 'ai';

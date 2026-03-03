@@ -149,6 +149,7 @@ export function assignUnitTargets(battalion: Battalion, units: Unit[], allUnits:
   cy /= alive.length;
 
   // Orient formation toward movement direction (not nearest enemy)
+  const defaultFacing = battalion.team === 'blue' ? -Math.PI / 2 : Math.PI / 2;
   let facingAngle: number;
   if (battalion.moveTarget) {
     const dx = battalion.moveTarget.x - cx;
@@ -157,12 +158,12 @@ export function assignUnitTargets(battalion: Battalion, units: Unit[], allUnits:
     // Only use move direction if far enough away to be meaningful
     if (dist > 5) {
       facingAngle = Math.atan2(dy, dx);
+      battalion.lastFacingAngle = facingAngle;
     } else {
-      facingAngle = battalion.team === 'blue' ? -Math.PI / 2 : Math.PI / 2;
+      facingAngle = battalion.lastFacingAngle ?? defaultFacing;
     }
   } else {
-    // Idle — default team direction
-    facingAngle = battalion.team === 'blue' ? -Math.PI / 2 : Math.PI / 2;
+    facingAngle = battalion.lastFacingAngle ?? defaultFacing;
   }
   const rotation = facingAngle + Math.PI / 2;
   const cosR = Math.cos(rotation);

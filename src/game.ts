@@ -1,4 +1,4 @@
-import { Unit, Battalion, Obstacle, Team, BattleResult, Projectile, TurnPhase, ElevationZone, ReplayFrame, ReplayEvent, ReplayData } from './types';
+import { Unit, Battalion, Obstacle, Team, Vec2, BattleResult, Projectile, TurnPhase, ElevationZone, ReplayFrame, ReplayEvent, ReplayData } from './types';
 import { ROUND_DURATION_S, COVER_SCREEN_DURATION_MS, MAP_WIDTH, MAP_HEIGHT, BATTALION_SIZE, ARMY_COMPOSITION } from './constants';
 import { moveUnit, separateUnits, findTarget, isInRange, hasLineOfSight, tryFireProjectile, updateProjectiles, advanceWaypoint, updateGunAngle, detourWaypoints, segmentHitsRect, meleeAoeAttack } from './units';
 import { generateObstacles, generateElevationZones } from './battlefield';
@@ -132,15 +132,28 @@ export class GameEngine {
     this.onEvent('phase-change', { phase, round: this.roundNumber });
   }
 
-  /** Clear all battalion waypoints for a team. */
+  /** Reset battalion paths for a team, preserving unfinished routes. */
   private clearBattalionPaths(team: Team): void {
     for (const bat of this.battalions) {
-      if (bat.team === team) {
-        bat.waypoints = [];
-        bat.moveTarget = null;
+      if (bat.team !== team) continue;
+
+      // Reconstruct remaining path from current moveTarget + queued waypoints
+      const remaining: Vec2[] = [];
+      if (bat.moveTarget) {
+        const center = updateBattalionCenter(bat, this.units);
+        const dx = bat.moveTarget.x - center.x;
+        const dy = bat.moveTarget.y - center.y;
+        // Only keep if battalion hasn't arrived yet
+        if (dx * dx + dy * dy > 25 * 25) {
+          remaining.push(bat.moveTarget);
+        }
       }
+      remaining.push(...bat.waypoints);
+
+      bat.waypoints = remaining;
+      bat.moveTarget = null;
     }
-    // Also clear individual unit targets
+    // Clear individual unit targets (reassigned each frame by assignUnitTargets)
     for (const unit of this.units) {
       if (unit.team === team && unit.alive) {
         unit.waypoints = [];

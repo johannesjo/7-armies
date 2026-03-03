@@ -508,6 +508,11 @@ export class PathDrawer {
     e.preventDefault();
   };
 
+  /** Convert screen-space global coords to world coords (accounting for stage scale). */
+  private worldPos(global: { x: number; y: number }): Vec2 {
+    return this.stage.toLocal(global);
+  }
+
   private findNearestOwnUnit(px: number, py: number): Unit | null {
     if (!this.team) return null;
     let closest: Unit | null = null;
@@ -544,9 +549,10 @@ export class PathDrawer {
     if (!this.enabled || !this.team) return;
     // Ignore right clicks for path drawing
     if (e.button === 2) return;
+    const pos = this.worldPos(e.global);
 
     // Find nearest own unit → look up parent battalion
-    const closest = this.findNearestOwnUnit(e.global.x, e.global.y);
+    const closest = this.findNearestOwnUnit(pos.x, pos.y);
     if (closest) {
       const bat = findBattalionForUnit(closest.id, this.battalions);
       if (bat) {
@@ -562,7 +568,7 @@ export class PathDrawer {
     }
 
     // Tap on enemy → show their battalion
-    const enemy = this.findNearestEnemyUnit(e.global.x, e.global.y);
+    const enemy = this.findNearestEnemyUnit(pos.x, pos.y);
     if (enemy) {
       this.hoveredEnemyBattalion = findBattalionForUnit(enemy.id, this.battalions);
     } else {
@@ -573,16 +579,17 @@ export class PathDrawer {
 
   private onPointerMove = (e: { global: { x: number; y: number } }): void => {
     if (!this.enabled) return;
+    const pos = this.worldPos(e.global);
 
     // Update hover state
     if (!this.selectedBattalion) {
       const prev = this.hoveredBattalion;
-      const nearUnit = this.findNearestOwnUnit(e.global.x, e.global.y);
+      const nearUnit = this.findNearestOwnUnit(pos.x, pos.y);
       this.hoveredBattalion = nearUnit ? findBattalionForUnit(nearUnit.id, this.battalions) : null;
 
       const prevEnemy = this.hoveredEnemyBattalion;
       if (!this.hoveredBattalion) {
-        const enemyUnit = this.findNearestEnemyUnit(e.global.x, e.global.y);
+        const enemyUnit = this.findNearestEnemyUnit(pos.x, pos.y);
         this.hoveredEnemyBattalion = enemyUnit ? findBattalionForUnit(enemyUnit.id, this.battalions) : null;
       } else {
         this.hoveredEnemyBattalion = null;
@@ -592,7 +599,7 @@ export class PathDrawer {
 
     // Drawing mode
     if (this.selectedBattalion) {
-      this.rawPoints.push({ x: e.global.x, y: e.global.y });
+      this.rawPoints.push({ x: pos.x, y: pos.y });
       this.renderPaths();
     }
   };
@@ -611,8 +618,9 @@ export class PathDrawer {
 
   private onRightDown = (e: { global: { x: number; y: number } }): void => {
     if (!this.enabled || !this.team) return;
+    const pos = this.worldPos(e.global);
 
-    const unit = this.findNearestOwnUnit(e.global.x, e.global.y);
+    const unit = this.findNearestOwnUnit(pos.x, pos.y);
     if (unit) {
       const bat = findBattalionForUnit(unit.id, this.battalions);
       if (bat) {

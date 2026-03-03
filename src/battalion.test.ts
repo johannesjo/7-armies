@@ -40,7 +40,7 @@ describe('generateFormationOffsets', () => {
 
 describe('createBattalion', () => {
   it('creates a battalion with correct number of units', () => {
-    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 600 });
+    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 300 });
     expect(battalion.unitIds).toHaveLength(BATTALION_SIZE);
     expect(units).toHaveLength(BATTALION_SIZE);
     expect(battalion.type).toBe('swordsman');
@@ -48,15 +48,15 @@ describe('createBattalion', () => {
   });
 
   it('units are positioned near the center', () => {
-    const { units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 600 });
+    const { units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 300 });
     for (const u of units) {
       expect(Math.abs(u.pos.x - 400)).toBeLessThan(25);
-      expect(Math.abs(u.pos.y - 600)).toBeLessThan(25);
+      expect(Math.abs(u.pos.y - 300)).toBeLessThan(25);
     }
   });
 
   it('units have battalionId set', () => {
-    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 600 });
+    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 300 });
     for (const u of units) {
       expect(u.battalionId).toBe('bat1');
     }
@@ -96,7 +96,7 @@ describe('createArmyBattalions', () => {
 
 describe('advanceBattalionWaypoint', () => {
   it('pops first waypoint into moveTarget when no current target', () => {
-    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 600 });
+    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 300 });
     battalion.waypoints = [{ x: 400, y: 400 }, { x: 400, y: 200 }];
     advanceBattalionWaypoint(battalion, units);
     expect(battalion.moveTarget).toEqual({ x: 400, y: 400 });
@@ -115,7 +115,7 @@ describe('advanceBattalionWaypoint', () => {
 
 describe('assignUnitTargets', () => {
   it('assigns formation positions when not engaged', () => {
-    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 600 });
+    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 300 });
     battalion.moveTarget = { x: 400, y: 400 };
 
     const farEnemies = [createUnit('e1', 'swordsman', 'red', { x: 400, y: 100 })];
@@ -131,7 +131,7 @@ describe('assignUnitTargets', () => {
   });
 
   it('only individually nearby melee units chase enemies', () => {
-    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 600 });
+    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 300 });
     battalion.moveTarget = { x: 400, y: 500 };
 
     // Move one unit far away from the group, near a distant enemy
@@ -156,7 +156,7 @@ describe('assignUnitTargets', () => {
   });
 
   it('idle units hold position (no moveTarget) when battalion has no orders', () => {
-    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 600 });
+    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 300 });
     // No moveTarget, no enemies
     assignUnitTargets(battalion, units, units);
 
@@ -178,22 +178,22 @@ describe('assignUnitTargets', () => {
     // Archers should still target formation positions, not the enemy
     for (const u of units) {
       expect(u.moveTarget).not.toBeNull();
-      expect(Math.abs(u.moveTarget!.x - 400)).toBeLessThan(25);
-      expect(Math.abs(u.moveTarget!.y - 300)).toBeLessThan(25);
+      expect(Math.abs(u.moveTarget!.x - 400)).toBeLessThan(35);
+      expect(Math.abs(u.moveTarget!.y - 300)).toBeLessThan(35);
     }
   });
 });
 
 describe('updateBattalionCenter', () => {
   it('returns average position of alive units', () => {
-    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 600 });
+    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 300 });
     const center = updateBattalionCenter(battalion, units);
     expect(Math.abs(center.x - 400)).toBeLessThan(25);
-    expect(Math.abs(center.y - 600)).toBeLessThan(25);
+    expect(Math.abs(center.y - 300)).toBeLessThan(25);
   });
 
   it('excludes dead units from center calculation', () => {
-    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 600 });
+    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 300 });
     // Kill all but first unit, set it to a known position
     for (let i = 1; i < units.length; i++) {
       units[i].alive = false;
@@ -207,7 +207,7 @@ describe('updateBattalionCenter', () => {
 
 describe('getBattalionAlive', () => {
   it('counts alive units in battalion', () => {
-    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 600 });
+    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 300 });
     expect(getBattalionAlive(battalion, units)).toBe(BATTALION_SIZE);
     units[0].alive = false;
     units[1].alive = false;

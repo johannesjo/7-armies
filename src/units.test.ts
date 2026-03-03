@@ -31,7 +31,7 @@ describe('createUnit', () => {
     expect(unit.speed).toBe(140);
     expect(unit.damage).toBe(5);
     expect(unit.range).toBe(12);
-    expect(unit.radius).toBe(3);
+    expect(unit.radius).toBe(4.5);
   });
 
   it('creates a pikeman with correct stats', () => {

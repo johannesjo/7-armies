@@ -12,14 +12,14 @@ export function generateFormationOffsets(count: number, type: UnitType = 'swords
 
   if (type === 'archer') {
     cols = 6;
-    spacing = 7;
+    spacing = 10;
   } else if (type === 'cavalry') {
     cols = 4;
-    spacing = 9;
+    spacing = 13;
   } else {
     // swordsman, pikeman — standard ranks
     cols = 4;
-    spacing = 8;
+    spacing = 12;
   }
 
   const rows = Math.ceil(count / cols);
@@ -78,9 +78,11 @@ export function createBattalion(
 /** Create all 7 battalions + 140 units for a team. */
 export function createArmyBattalions(team: Team): { battalions: Battalion[]; units: Unit[] } {
   const isBlue = team === 'blue';
-  const baseY = isBlue ? MAP_HEIGHT * 0.95 : MAP_HEIGHT * 0.05;
+  const baseY = isBlue ? MAP_HEIGHT * 0.92 : MAP_HEIGHT * 0.08;
   const totalBattalions = ARMY_COMPOSITION.reduce((sum, c) => sum + c.count, 0);
-  const spacing = MAP_WIDTH / (totalBattalions + 1);
+  const groupWidth = MAP_WIDTH * 0.5;
+  const startX = (MAP_WIDTH - groupWidth) / 2;
+  const spacing = groupWidth / (totalBattalions + 1);
 
   const battalions: Battalion[] = [];
   const allUnits: Unit[] = [];
@@ -88,7 +90,7 @@ export function createArmyBattalions(team: Team): { battalions: Battalion[]; uni
 
   for (const { type, count } of ARMY_COMPOSITION) {
     for (let i = 0; i < count; i++) {
-      const x = spacing * (index + 1);
+      const x = startX + spacing * (index + 1);
       const batId = `${team}_bat_${type}_${i}`;
       const { battalion, units } = createBattalion(batId, type, team, { x, y: baseY });
       battalions.push(battalion);

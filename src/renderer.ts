@@ -258,7 +258,7 @@ export class Renderer {
       // Rotate gun barrel / weapon indicator
       (container.getChildAt(1) as Graphics).rotation = unit.gunAngle;
       // Rotate body with the facing direction
-      (container.getChildAt(0) as Graphics).rotation = unit.gunAngle + Math.PI / 2;
+      (container.getChildAt(0) as Graphics).rotation = unit.gunAngle;
 
       // HP feedback via alpha + scale (no per-unit health bars at this scale)
       const hpRatio = unit.hp / unit.maxHp;
@@ -308,14 +308,14 @@ export class Renderer {
 
     switch (unit.type) {
       case 'cavalry': {
-        // Ellipse body — elongated along facing direction (-Y in local coords)
-        shape.ellipse(0, 0, r * 0.65, r * 1.3);
+        // Ellipse body — elongated along X (facing direction)
+        shape.ellipse(0, 0, r * 1.3, r * 0.65);
         shape.fill(color);
-        shape.ellipse(0, 0, r * 0.65, r * 1.3);
+        shape.ellipse(0, 0, r * 1.3, r * 0.65);
         shape.setStrokeStyle({ width: 1, color: darkColor });
         shape.stroke();
-        // Rider dot at front (-Y = facing direction in local coords)
-        shape.circle(0, -r * 0.6, r * 0.35);
+        // Rider dot at front (+X = facing direction)
+        shape.circle(r * 0.6, 0, r * 0.35);
         shape.fill(darkColor);
         // Lance
         weapon.setStrokeStyle({ width: 1, color: this.theme.barrel, alpha: this.theme.barrelAlpha });
@@ -325,10 +325,10 @@ export class Renderer {
         break;
       }
       case 'archer': {
-        // Oval body — slightly elongated along facing
-        shape.ellipse(0, 0, r * 0.8, r * 1.1);
+        // Oval body — wide shoulders, narrow front-to-back
+        shape.ellipse(0, 0, r * 0.6, r * 1.2);
         shape.fill(color);
-        shape.ellipse(0, 0, r * 0.8, r * 1.1);
+        shape.ellipse(0, 0, r * 0.6, r * 1.2);
         shape.setStrokeStyle({ width: 1, color: darkColor });
         shape.stroke();
         // D-shaped bow: arc limb + straight bowstring
@@ -348,9 +348,9 @@ export class Renderer {
       }
       case 'pikeman': {
         // Oval body + thicker outline (heavier armor)
-        shape.ellipse(0, 0, r * 0.85, r * 1.15);
+        shape.ellipse(0, 0, r * 0.65, r * 1.2);
         shape.fill(color);
-        shape.ellipse(0, 0, r * 0.85, r * 1.15);
+        shape.ellipse(0, 0, r * 0.65, r * 1.2);
         shape.setStrokeStyle({ width: 1.5, color: darkColor });
         shape.stroke();
         // Long pike (3× radius) with spearhead
@@ -368,10 +368,10 @@ export class Renderer {
         break;
       }
       default: {
-        // Swordsman: circle + outline + shield
-        shape.circle(0, 0, r);
+        // Swordsman: oval body + outline + shield
+        shape.ellipse(0, 0, r * 0.7, r * 1.15);
         shape.fill(color);
-        shape.circle(0, 0, r);
+        shape.ellipse(0, 0, r * 0.7, r * 1.15);
         shape.setStrokeStyle({ width: 1, color: darkColor });
         shape.stroke();
         // Shield: filled semicircle on local +X side (perpendicular to facing)

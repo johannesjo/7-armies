@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createBattalion, createArmyBattalions, generateFormationOffsets, advanceBattalionWaypoint, assignUnitTargets, updateBattalionCenter, getBattalionAlive, findBattalionForUnit } from './battalion';
 import { createUnit } from './units';
-import { BATTALION_SIZE } from './constants';
+import { BATTALION_SIZE, ARMY_COMPOSITION } from './constants';
 
 describe('generateFormationOffsets', () => {
   it('generates the correct number of offsets', () => {
@@ -41,8 +41,8 @@ describe('generateFormationOffsets', () => {
 describe('createBattalion', () => {
   it('creates a battalion with correct number of units', () => {
     const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 300 });
-    expect(battalion.unitIds).toHaveLength(BATTALION_SIZE);
-    expect(units).toHaveLength(BATTALION_SIZE);
+    expect(battalion.unitIds).toHaveLength(BATTALION_SIZE['swordsman']);
+    expect(units).toHaveLength(BATTALION_SIZE['swordsman']);
     expect(battalion.type).toBe('swordsman');
     expect(battalion.team).toBe('blue');
   });
@@ -73,8 +73,10 @@ describe('createBattalion', () => {
 describe('createArmyBattalions', () => {
   it('creates correct number of battalions and units per team', () => {
     const { battalions, units } = createArmyBattalions('blue');
-    expect(battalions).toHaveLength(5);
-    expect(units).toHaveLength(5 * BATTALION_SIZE); // 5 × 12 = 60
+    const expectedBattalions = ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0);
+    expect(battalions).toHaveLength(expectedBattalions);
+    const expectedTotal = ARMY_COMPOSITION.reduce((s, c) => s + c.count * BATTALION_SIZE[c.type], 0);
+    expect(units).toHaveLength(expectedTotal);
   });
 
   it('blue battalions spawn on bottom side', () => {
@@ -155,15 +157,34 @@ describe('assignUnitTargets', () => {
     }
   });
 
-  it('idle units hold position (no moveTarget) when battalion has no orders', () => {
+  it('idle units already in formation stay still', () => {
     const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 300 });
-    // No moveTarget, no enemies
     assignUnitTargets(battalion, units, units);
 
     expect(battalion.engaged).toBe(false);
-    // Idle units should have null moveTarget so they hold position
+    // Units already at formation positions should have no moveTarget
     for (const u of units) {
       expect(u.moveTarget).toBeNull();
+    }
+  });
+
+  it('scattered idle units regroup into formation', () => {
+    const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 300 });
+    // Scatter units randomly away from their formation positions
+    for (let i = 0; i < units.length; i++) {
+      units[i].pos.x += (i % 2 === 0 ? 30 : -30);
+      units[i].pos.y += (i % 3 === 0 ? 20 : -20);
+    }
+    assignUnitTargets(battalion, units, units);
+
+    expect(battalion.engaged).toBe(false);
+    // Scattered units should get a moveTarget to regroup
+    const cx = units.reduce((s, u) => s + u.pos.x, 0) / units.length;
+    const cy = units.reduce((s, u) => s + u.pos.y, 0) / units.length;
+    for (const u of units) {
+      expect(u.moveTarget).not.toBeNull();
+      expect(Math.abs(u.moveTarget!.x - cx)).toBeLessThan(25);
+      expect(Math.abs(u.moveTarget!.y - cy)).toBeLessThan(25);
     }
   });
 
@@ -208,10 +229,10 @@ describe('updateBattalionCenter', () => {
 describe('getBattalionAlive', () => {
   it('counts alive units in battalion', () => {
     const { battalion, units } = createBattalion('bat1', 'swordsman', 'blue', { x: 400, y: 300 });
-    expect(getBattalionAlive(battalion, units)).toBe(BATTALION_SIZE);
+    expect(getBattalionAlive(battalion, units)).toBe(BATTALION_SIZE['swordsman']);
     units[0].alive = false;
     units[1].alive = false;
-    expect(getBattalionAlive(battalion, units)).toBe(BATTALION_SIZE - 2);
+    expect(getBattalionAlive(battalion, units)).toBe(BATTALION_SIZE['swordsman'] - 2);
   });
 });
 

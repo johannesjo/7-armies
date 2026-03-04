@@ -44,11 +44,12 @@ export function createBattalion(
   team: Team,
   centerPos: Vec2,
 ): { battalion: Battalion; units: Unit[] } {
-  const offsets = generateFormationOffsets(BATTALION_SIZE, type);
+  const size = BATTALION_SIZE[type];
+  const offsets = generateFormationOffsets(size, type);
   const units: Unit[] = [];
   const unitIds: string[] = [];
 
-  for (let i = 0; i < BATTALION_SIZE; i++) {
+  for (let i = 0; i < size; i++) {
     const unitId = `${id}_u${i}`;
     const pos = {
       x: Math.max(4, Math.min(MAP_WIDTH - 4, centerPos.x + offsets[i].x)),
@@ -220,10 +221,28 @@ export function assignUnitTargets(battalion: Battalion, units: Unit[], allUnits:
         unit.waypoints = battalion.waypoints.map(wp => ({ x: wp.x + ox, y: wp.y + oy }));
       }
     } else {
-      // Idle — hold position, don't chase shifting center
-      unit.moveTarget = null;
+      // Idle — regroup into formation only if scattered
+      // Use a stable center: lock it once on first idle frame, clear when given orders
+      if (!battalion.regroupCenter) {
+        battalion.regroupCenter = { x: cx, y: cy };
+      }
+      const rc = battalion.regroupCenter;
+      const fx = rc.x + ox;
+      const fy = rc.y + oy;
+      const dx = fx - unit.pos.x;
+      const dy = fy - unit.pos.y;
+      if (dx * dx + dy * dy > 25) {
+        unit.moveTarget = { x: fx, y: fy };
+      } else {
+        unit.moveTarget = null;
+      }
       unit.waypoints = [];
     }
+  }
+
+  // Clear regroup center when battalion gets new orders
+  if (battalion.moveTarget) {
+    battalion.regroupCenter = undefined;
   }
 
   battalion.engaged = anyEngaged;

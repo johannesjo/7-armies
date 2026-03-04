@@ -20,18 +20,18 @@ describe('createUnit', () => {
   it('creates an archer with correct stats', () => {
     const unit = createUnit('ar_1', 'archer', 'red', { x: 500, y: 300 });
     expect(unit.hp).toBe(10);
-    expect(unit.speed).toBe(55);
-    expect(unit.damage).toBe(6);
+    expect(unit.speed).toBe(65);
+    expect(unit.damage).toBe(10);
     expect(unit.range).toBe(200);
   });
 
   it('creates a cavalry with correct stats', () => {
     const unit = createUnit('cav_1', 'cavalry', 'blue', { x: 300, y: 400 });
     expect(unit.hp).toBe(18);
-    expect(unit.speed).toBe(140);
+    expect(unit.speed).toBe(160);
     expect(unit.damage).toBe(5);
     expect(unit.range).toBe(12);
-    expect(unit.radius).toBe(4.5);
+    expect(unit.radius).toBe(5.5);
   });
 
   it('creates a pikeman with correct stats', () => {
@@ -46,8 +46,10 @@ describe('createUnit', () => {
 describe('createArmy', () => {
   it('creates correct units for blue team on the bottom side', () => {
     const units = createArmy('blue');
-    expect(units).toHaveLength(5);
-    expect(units.filter(u => u.type === 'archer')).toHaveLength(4);
+    expect(units).toHaveLength(7);
+    expect(units.filter(u => u.type === 'swordsman')).toHaveLength(2);
+    expect(units.filter(u => u.type === 'archer')).toHaveLength(3);
+    expect(units.filter(u => u.type === 'pikeman')).toHaveLength(1);
     expect(units.filter(u => u.type === 'cavalry')).toHaveLength(1);
     units.forEach(u => {
       expect(u.team).toBe('blue');
@@ -238,7 +240,7 @@ describe('tryFireProjectile', () => {
     attacker.gunAngle = 0; // aim right toward target
     const projectiles = tryFireProjectile(attacker, target, 0.016);
     expect(projectiles).toHaveLength(1);
-    expect(projectiles[0].damage).toBe(6);
+    expect(projectiles[0].damage).toBe(10);
     expect(projectiles[0].team).toBe('blue');
     expect(projectiles[0].pos.x).toBeCloseTo(100);
     expect(projectiles[0].pos.y).toBeCloseTo(100);

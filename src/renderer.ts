@@ -414,7 +414,7 @@ export class Renderer {
     const g = this.projectileGraphics;
 
     for (const p of projectiles) {
-      const color = p.team === 'blue' ? this.theme.blueProjectile : this.theme.redProjectile;
+      const color = 0x111111;
 
       // Compute arc height for arcing arrows
       const arcProgress = (p.arc && p.totalFlightDist && p.totalFlightDist > 0)
@@ -450,9 +450,9 @@ export class Renderer {
         const py = nx;
 
         // Scale arrow size by arc height
-        const shaftLen = 10 * arcScale;
-        const headBase = 3 * arcScale;
-        const headWidth = 1 * arcScale;
+        const shaftLen = 5 * arcScale;
+        const headBase = 2 * arcScale;
+        const headWidth = 0.5 * arcScale;
 
         // Tip at current position, tail behind (scaled)
         const tipX = p.pos.x;
@@ -461,7 +461,7 @@ export class Renderer {
         const tailY = tipY - ny * shaftLen;
 
         // Shaft — thin line
-        g.setStrokeStyle({ width: 1 * arcScale, color, alpha: 1 });
+        g.setStrokeStyle({ width: 0.5 * arcScale, color, alpha: 1 });
         g.moveTo(tailX, tailY);
         g.lineTo(tipX, tipY);
         g.stroke();

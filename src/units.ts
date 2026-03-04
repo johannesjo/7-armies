@@ -835,7 +835,7 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
     (target.pos.y - unit.pos.y) * (target.pos.y - unit.pos.y),
   );
   const distRatio = Math.min(rawDist / unit.range, 1);
-  const scatter = 4 + distRatio * 26;
+  const scatter = 2 + distRatio * 16;
   predictedX += (Math.random() - 0.5) * scatter;
   predictedY += (Math.random() - 0.5) * scatter;
 
@@ -845,8 +845,8 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
 
   if (pdist < 1) return [];
 
-  const angularSpread = 0.01 + distRatio * 0.06;
-  const speedVarRange = 0.02 + distRatio * 0.06;
+  const angularSpread = 0.005 + distRatio * 0.03;
+  const speedVarRange = 0.01 + distRatio * 0.03;
   const spread = (Math.random() - 0.5) * angularSpread * 2;
   const speedVar = unit.projectileSpeed * (1 - speedVarRange + Math.random() * speedVarRange * 2);
   const baseAngle = Math.atan2(pdy, pdx) + spread;

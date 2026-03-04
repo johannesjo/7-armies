@@ -8,7 +8,7 @@ import { Theme, NIGHT_THEME } from './theme';
 export class Renderer {
   private app: Application;
   private unitGraphics: Map<string, Container> = new Map();
-  private dyingUnits: Map<string, { container: Container; age: number }> = new Map();
+  private dyingUnits: Map<string, { container: Container; age: number; vel: { x: number; y: number } }> = new Map();
   private elevationGraphics: Container | null = null;
   private obstacleGraphics: Container | null = null;
   private bgGraphics: Graphics | null = null;
@@ -229,16 +229,17 @@ export class Renderer {
     }
   }
 
-  renderUnits(units: Unit[], dt = 0): void {
+  renderUnits(units: Unit[], dt = 0, deadVelocities?: Map<string, Vec2>): void {
     const activeIds = new Set<string>();
 
     for (const unit of units) {
       if (!unit.alive) {
         const existing = this.unitGraphics.get(unit.id);
         if (existing) {
-          // Move to dying pool instead of removing immediately
+          // Move to dying pool with fly-away velocity
           this.unitGraphics.delete(unit.id);
-          this.dyingUnits.set(unit.id, { container: existing, age: 0 });
+          const vel = deadVelocities?.get(unit.id) ?? { x: 0, y: 0 };
+          this.dyingUnits.set(unit.id, { container: existing, age: 0, vel });
         }
         continue;
       }
@@ -275,11 +276,20 @@ export class Renderer {
       }
     }
 
-    // Update dying units — fade out over 0.3s
-    const DEATH_DURATION = 0.3;
+    // Update dying units — fade out over 0.5s with fly-away + spin
+    const DEATH_DURATION = 0.5;
     for (const [id, dying] of this.dyingUnits) {
       dying.age += dt;
       const t = Math.min(dying.age / DEATH_DURATION, 1);
+      // Move by velocity (decelerating)
+      const decel = 1 - t * 0.8; // slows to 20% speed at end
+      dying.container.x += dying.vel.x * dt * decel;
+      dying.container.y += dying.vel.y * dt * decel;
+      // Spin based on velocity magnitude
+      const speed = Math.sqrt(dying.vel.x * dying.vel.x + dying.vel.y * dying.vel.y);
+      if (speed > 10) {
+        dying.container.rotation += (speed / 40) * dt;
+      }
       dying.container.alpha = 1 - t;
       dying.container.scale.set(1 - 0.5 * t);
       if (t >= 1) {

@@ -756,14 +756,38 @@ export function meleeAoeAttack(unit: Unit, units: Unit[], dt: number): AoeHit[] 
         damage: dmg,
       });
 
-      // Knockback — any cavalry hit pushes enemies
+      // Knockback — cavalry pushes enemies laterally to split formations
       if (unit.type === 'cavalry' && dist > 0) {
-        const kbAmount = isCharging ? knockback : 12;
+        const kbAmount = isCharging ? 60 : 12;
         const kbSpeed = kbAmount / 0.3;
-        enemy.knockbackVel = {
-          x: (dx / dist) * kbSpeed,
-          y: (dy / dist) * kbSpeed,
-        };
+
+        // Forward direction (away from cavalry center)
+        const fwdX = dx / dist;
+        const fwdY = dy / dist;
+
+        if (isCharging) {
+          // Compute cavalry movement direction
+          const cavSpeed = Math.sqrt(unit.vel.x * unit.vel.x + unit.vel.y * unit.vel.y);
+          if (cavSpeed > 1) {
+            const cavDirX = unit.vel.x / cavSpeed;
+            const cavDirY = unit.vel.y / cavSpeed;
+            // Perpendicular to cavalry path (left-hand normal)
+            const perpX = -cavDirY;
+            const perpY = cavDirX;
+            // Cross product determines which side of the charge line the enemy is on
+            const cross = cavDirX * dy - cavDirY * dx;
+            const side = cross >= 0 ? 1 : -1;
+            // 40% forward, 60% lateral
+            enemy.knockbackVel = {
+              x: (fwdX * 0.4 + perpX * side * 0.6) * kbSpeed,
+              y: (fwdY * 0.4 + perpY * side * 0.6) * kbSpeed,
+            };
+          } else {
+            enemy.knockbackVel = { x: fwdX * kbSpeed, y: fwdY * kbSpeed };
+          }
+        } else {
+          enemy.knockbackVel = { x: fwdX * kbSpeed, y: fwdY * kbSpeed };
+        }
       }
     }
   }

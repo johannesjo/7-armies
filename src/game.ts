@@ -34,6 +34,7 @@ export class GameEngine {
   private pendingWinner: Team | null = null;
   private replayFrames: ReplayFrame[] = [];
   private replayEvents: ReplayEvent[] = [];
+  private deadVelocities: Map<string, Vec2> = new Map();
 
   constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: {
     aiMode?: boolean;
@@ -235,7 +236,7 @@ export class GameEngine {
     const dt = this._phase === 'playing' ? rawDt * this.speedMultiplier : rawDt;
 
     // Always render units (even during planning, need dt for death fade)
-    this.renderer.renderUnits(this.units, dt);
+    this.renderer.renderUnits(this.units, dt, this.deadVelocities);
 
     // Animate pulsing indicators during planning
     this.pathDrawer?.updateHover();
@@ -307,6 +308,16 @@ export class GameEngine {
         }
         const aoeHits = meleeAoeAttack(unit, this.units, dt);
         for (const hit of aoeHits) {
+          // Store death fly-away velocity from melee hit direction
+          if (hit.killed) {
+            const dx = hit.pos.x - unit.pos.x;
+            const dy = hit.pos.y - unit.pos.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const flySpeed = 180;
+            if (dist > 0.01) {
+              this.deadVelocities.set(hit.targetId, { x: (dx / dist) * flySpeed, y: (dy / dist) * flySpeed });
+            }
+          }
           this.replayEvents.push({
             frame: this.replayFrames.length,
             type: hit.killed ? 'kill' : 'hit',
@@ -380,6 +391,13 @@ export class GameEngine {
     // Trigger effects for hits + record replay events
     const fx = this.renderer.effects;
     for (const hit of hits) {
+      // Store death fly-away velocity from projectile direction
+      if (hit.killed) {
+        const flySpeed = 150;
+        const cos = Math.cos(hit.angle);
+        const sin = Math.sin(hit.angle);
+        this.deadVelocities.set(hit.targetId, { x: cos * flySpeed, y: sin * flySpeed });
+      }
       const unitGfx = this.renderer.getUnitContainer(hit.targetId);
       if (unitGfx) fx?.addHitFlash(unitGfx);
 
@@ -516,7 +534,7 @@ export class GameEngine {
 
     const blueAlive = this.units.filter(u => u.alive && u.team === 'blue').length;
     const redAlive = this.units.filter(u => u.alive && u.team === 'red').length;
-    const totalPerSide = ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0) * BATTALION_SIZE;
+    const totalPerSide = ARMY_COMPOSITION.reduce((s, c) => s + c.count * BATTALION_SIZE[c.type], 0);
 
     this.onEvent('end', {
       winner,
@@ -540,7 +558,7 @@ export class GameEngine {
   }
 
   getTotalPerSide(): number {
-    return ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0) * BATTALION_SIZE;
+    return ARMY_COMPOSITION.reduce((s, c) => s + c.count * BATTALION_SIZE[c.type], 0);
   }
 
   getUnits(): Unit[] {

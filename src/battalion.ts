@@ -221,21 +221,8 @@ export function assignUnitTargets(battalion: Battalion, units: Unit[], allUnits:
         unit.waypoints = battalion.waypoints.map(wp => ({ x: wp.x + ox, y: wp.y + oy }));
       }
     } else {
-      // Idle — regroup into formation only if scattered
-      // Use a stable center: lock it once on first idle frame, clear when given orders
-      if (!battalion.regroupCenter) {
-        battalion.regroupCenter = { x: cx, y: cy };
-      }
-      const rc = battalion.regroupCenter;
-      const fx = rc.x + ox;
-      const fy = rc.y + oy;
-      const dx = fx - unit.pos.x;
-      const dy = fy - unit.pos.y;
-      if (dx * dx + dy * dy > 25) {
-        unit.moveTarget = { x: fx, y: fy };
-      } else {
-        unit.moveTarget = null;
-      }
+      // Idle — handled below after the loop
+      unit.moveTarget = null;
       unit.waypoints = [];
     }
   }
@@ -243,6 +230,29 @@ export function assignUnitTargets(battalion: Battalion, units: Unit[], allUnits:
   // Clear regroup center when battalion gets new orders
   if (battalion.moveTarget) {
     battalion.regroupCenter = undefined;
+  }
+
+  // Idle regroup: compute compact formation for survivors only
+  const idleUnits = alive.filter(u => u.moveTarget === null && u.waypoints.length === 0);
+  if (idleUnits.length > 0 && !battalion.moveTarget) {
+    if (!battalion.regroupCenter) {
+      battalion.regroupCenter = { x: cx, y: cy };
+    }
+    const rc = battalion.regroupCenter;
+    // Compact grid for just the survivors
+    const compactOffsets = generateFormationOffsets(idleUnits.length, battalion.type);
+    for (let i = 0; i < idleUnits.length; i++) {
+      const raw = compactOffsets[i];
+      const ox = raw.x * cosR - raw.y * sinR;
+      const oy = raw.x * sinR + raw.y * cosR;
+      const fx = rc.x + ox;
+      const fy = rc.y + oy;
+      const dx = fx - idleUnits[i].pos.x;
+      const dy = fy - idleUnits[i].pos.y;
+      if (dx * dx + dy * dy > 25) {
+        idleUnits[i].moveTarget = { x: fx, y: fy };
+      }
+    }
   }
 
   battalion.engaged = anyEngaged;

@@ -20,8 +20,10 @@ class HitFlash implements Effect {
   update(dt: number): boolean {
     this.age += dt;
     if (this.age >= this.duration) {
-      const shape = this.target.getChildAt(0) as Graphics;
-      shape.tint = this.originalTint;
+      if (!this.target.destroyed) {
+        const shape = this.target.getChildAt(0) as Graphics;
+        shape.tint = this.originalTint;
+      }
       return false;
     }
     return true;
@@ -244,7 +246,7 @@ export class EffectsManager {
   }
 
   clear(): void {
-    this.container.removeChildren();
+    for (const child of this.container.removeChildren()) child.destroy({ children: true });
     this.groundStains.clear();
     this.effects = [];
   }

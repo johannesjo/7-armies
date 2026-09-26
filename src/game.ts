@@ -13,6 +13,7 @@ export type GameEventCallback = (
 ) => void;
 
 export class GameEngine {
+  private static readonly MAX_REPLAY_FRAMES = 1800;
   private units: Unit[] = [];
   private battalions: Battalion[] = [];
   private obstacles: Obstacle[] = [];
@@ -34,6 +35,7 @@ export class GameEngine {
   private pendingWinner: Team | null = null;
   private replayFrames: ReplayFrame[] = [];
   private replayEvents: ReplayEvent[] = [];
+  private replayRecording = true;
   private deadVelocities: Map<string, Vec2> = new Map();
 
   constructor(renderer: Renderer, onEvent: GameEventCallback, opts?: {
@@ -49,6 +51,8 @@ export class GameEngine {
   }
 
   startBattle(): void {
+    this.renderer.clearUnits();
+    this.renderer.renderProjectiles([]);
     this.obstacles = generateObstacles();
     this.elevationZones = generateElevationZones();
 
@@ -61,7 +65,13 @@ export class GameEngine {
     this.projectiles = [];
     this.elapsedTime = 0;
     this.roundTimer = 0;
+    this.replayFrames = [];
+    this.replayEvents = [];
+    this.replayRecording = true;
+    this.deadVelocities.clear();
     this.running = true;
+
+    this.recordFrame();
 
     this.pathDrawer = new PathDrawer(this.renderer.stage, this.renderer.canvas, (pos) => this.renderer.highlightZonesAt(pos));
     this.pathDrawer.theme = this.renderer.currentTheme;
@@ -169,14 +179,6 @@ export class GameEngine {
     const redBattalions = this.battalions.filter(b => b.team === 'red');
     const enemies = this.units.filter(u => u.alive && u.team === 'blue');
 
-    // Generate candidates once using a representative unit
-    const repUnit = this.units.find(u => u.alive && u.team === 'red');
-    const candidates = generateCandidates(
-      repUnit ?? { pos: { x: MAP_WIDTH / 2, y: MAP_HEIGHT / 2 }, speed: 100, radius: 10 } as Unit,
-      this.obstacles,
-      this.elevationZones,
-    );
-
     for (const bat of redBattalions) {
       const center = updateBattalionCenter(bat, this.units);
       const batUnit = {
@@ -187,6 +189,7 @@ export class GameEngine {
       } as Unit;
 
       const padding = batUnit.radius + 8;
+      const candidates = generateCandidates(batUnit, this.obstacles, this.elevationZones);
 
       // Score each candidate
       const scored: { pos: typeof center; score: number }[] = [];
@@ -318,7 +321,7 @@ export class GameEngine {
               this.deadVelocities.set(hit.targetId, { x: (dx / dist) * flySpeed, y: (dy / dist) * flySpeed });
             }
           }
-          this.replayEvents.push({
+          if (this.replayRecording) this.replayEvents.push({
             frame: this.replayFrames.length,
             type: hit.killed ? 'kill' : 'hit',
             pos: hit.pos,
@@ -350,7 +353,7 @@ export class GameEngine {
         if (projectiles.length > 0) {
           this.projectiles.push(...projectiles);
           this.renderer.effects?.addMuzzleFlash(unit.pos, unit.gunAngle, unit.radius);
-          this.replayEvents.push({
+          if (this.replayRecording) this.replayEvents.push({
             frame: this.replayFrames.length,
             type: 'fire',
             pos: { x: unit.pos.x, y: unit.pos.y },
@@ -401,7 +404,7 @@ export class GameEngine {
       const unitGfx = this.renderer.getUnitContainer(hit.targetId);
       if (unitGfx) fx?.addHitFlash(unitGfx);
 
-      this.replayEvents.push({
+      if (this.replayRecording) this.replayEvents.push({
         frame: this.replayFrames.length,
         type: hit.killed ? 'kill' : 'hit',
         pos: { ...hit.pos },
@@ -477,7 +480,9 @@ export class GameEngine {
   };
 
   private recordFrame(): void {
+    if (!this.replayRecording) return;
     const frame: ReplayFrame = {
+      time: this.elapsedTime,
       units: this.units.map(u => ({
         id: u.id,
         type: u.type,
@@ -511,10 +516,16 @@ export class GameEngine {
     };
 
     this.replayFrames.push(frame);
+    if (this.replayFrames.length >= GameEngine.MAX_REPLAY_FRAMES) {
+      // Keep the battle running without retaining an incomplete replay.
+      this.replayFrames = [];
+      this.replayEvents = [];
+      this.replayRecording = false;
+    }
   }
 
   getReplayData(): ReplayData | null {
-    if (this.replayFrames.length === 0) return null;
+    if (!this.replayRecording || this.replayFrames.length === 0) return null;
     return {
       frames: this.replayFrames,
       events: this.replayEvents,
@@ -575,6 +586,10 @@ export class GameEngine {
 
   stop(): void {
     this.running = false;
+    if (this.coverTimeout) {
+      clearTimeout(this.coverTimeout);
+      this.coverTimeout = null;
+    }
     this.renderer.ticker.remove(this.tick, this);
     this.pathDrawer?.destroy();
     this.pathDrawer = null;

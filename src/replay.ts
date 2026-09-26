@@ -9,12 +9,12 @@ export class ReplayPlayer {
   private data: ReplayData;
   private onEvent: ReplayEventCallback;
   private frameIndex = 0;
-  private accumulator = 0;
+  private playhead = 0;
   private speed = 1;
   private paused = false;
   private running = false;
+  private ended = false;
   private tickBound: (ticker: { deltaMS: number }) => void;
-  private readonly fps = 60; // assumed recording rate
 
   constructor(renderer: Renderer, data: ReplayData, onEvent: ReplayEventCallback) {
     this.renderer = renderer;
@@ -24,13 +24,17 @@ export class ReplayPlayer {
   }
 
   start(): void {
+    this.renderer.clearUnits();
+    this.renderer.renderProjectiles([]);
     this.renderer.renderElevationZones(this.data.elevationZones);
     this.renderer.renderObstacles(this.data.obstacles);
     this.frameIndex = 0;
-    this.accumulator = 0;
+    this.playhead = 0;
     this.paused = false;
     this.running = true;
-    this.renderFrame(0);
+    this.ended = false;
+    this.renderFrame(0, 0);
+    this.reportProgress();
     this.renderer.ticker.add(this.tickBound);
   }
 
@@ -38,31 +42,36 @@ export class ReplayPlayer {
     if (!this.running || this.paused) return;
 
     const dt = (ticker.deltaMS / 1000) * this.speed;
-    this.accumulator += dt;
+    const duration = this.data.frames.at(-1)?.time ?? 0;
+    this.playhead = Math.min(this.playhead + dt, duration);
 
-    const frameDuration = 1 / this.fps;
-    while (this.accumulator >= frameDuration && this.frameIndex < this.data.frames.length - 1) {
+    while (this.frameIndex < this.data.frames.length - 1
+      && this.data.frames[this.frameIndex + 1].time <= this.playhead) {
       this.frameIndex++;
-      this.accumulator -= frameDuration;
       this.triggerEvents(this.frameIndex);
     }
 
-    this.renderFrame(this.frameIndex);
-
-    const time = this.frameIndex / this.fps;
-    const duration = this.data.frames.length / this.fps;
-    this.onEvent('frame', { time, duration });
+    this.renderFrame(this.frameIndex, dt);
+    this.reportProgress();
 
     // Update effects
-    this.renderer.effects?.update(ticker.deltaMS / 1000);
+    this.renderer.effects?.update(dt);
 
-    if (this.frameIndex >= this.data.frames.length - 1) {
+    if (this.playhead >= duration) {
       this.onEvent('end', { time: duration, duration });
       this.paused = true;
+      this.ended = true;
     }
   }
 
-  private renderFrame(index: number): void {
+  private reportProgress(): void {
+    this.onEvent('frame', {
+      time: this.playhead,
+      duration: this.data.frames.at(-1)?.time ?? 0,
+    });
+  }
+
+  private renderFrame(index: number, dt: number): void {
     const frame = this.data.frames[index];
     if (!frame) return;
 
@@ -106,7 +115,7 @@ export class ReplayPlayer {
       totalFlightDist: s.totalFlightDist,
     }));
 
-    this.renderer.renderUnits(units, 1 / this.fps);
+    this.renderer.renderUnits(units, dt);
     this.renderer.renderProjectiles(projectiles);
   }
 
@@ -137,11 +146,16 @@ export class ReplayPlayer {
   }
 
   resume(): void {
+    if (this.ended) {
+      this.restart();
+      return;
+    }
     this.paused = false;
   }
 
   togglePause(): void {
-    this.paused = !this.paused;
+    if (this.paused) this.resume();
+    else this.pause();
   }
 
   get isPaused(): boolean {
@@ -154,18 +168,19 @@ export class ReplayPlayer {
 
   restart(): void {
     this.frameIndex = 0;
-    this.accumulator = 0;
+    this.playhead = 0;
     this.paused = false;
-    this.renderer.effects?.clear();
-    this.renderFrame(0);
+    this.ended = false;
+    this.renderer.clearUnits();
+    this.renderer.renderProjectiles([]);
+    this.renderFrame(0, 0);
+    this.reportProgress();
   }
 
   stop(): void {
     this.running = false;
     this.renderer.ticker.remove(this.tickBound);
-    this.renderer.effects?.clear();
+    this.renderer.clearUnits();
     this.renderer.renderProjectiles([]);
-    // Render empty units to clean up
-    this.renderer.renderUnits([], 0);
   }
 }

@@ -294,6 +294,7 @@ export class Renderer {
       dying.container.scale.set(1 - 0.5 * t);
       if (t >= 1) {
         this.app.stage.removeChild(dying.container);
+        dying.container.destroy({ children: true });
         this.dyingUnits.delete(id);
       }
     }
@@ -302,6 +303,7 @@ export class Renderer {
     for (const [id, container] of this.unitGraphics) {
       if (!activeIds.has(id)) {
         this.app.stage.removeChild(container);
+        container.destroy({ children: true });
         this.unitGraphics.delete(id);
       }
     }
@@ -411,7 +413,7 @@ export class Renderer {
     g.clear();
 
     for (const p of projectiles) {
-      const color = 0x111111;
+      const color = p.team === 'blue' ? this.theme.blueProjectile : this.theme.redProjectile;
 
       // Compute arc height for arcing arrows
       const arcProgress = (p.arc && p.totalFlightDist && p.totalFlightDist > 0)
@@ -514,13 +516,24 @@ export class Renderer {
     // Re-render terrain with new colors
     if (this.lastElevationZones.length > 0) this.renderElevationZones(this.lastElevationZones);
     if (this.lastObstacles.length > 0) this.renderObstacles(this.lastObstacles);
-    // Rebuild unit graphics with new colors
-    for (const [, container] of this.unitGraphics) {
-      this.app.stage.removeChild(container);
-    }
-    this.unitGraphics.clear();
+    // Rebuild unit graphics with new colors after releasing active effects.
+    this.clearUnits();
     // Update effects theme
     this._effects?.setTheme(theme);
+  }
+
+  clearUnits(): void {
+    this._effects?.clear();
+    for (const container of this.unitGraphics.values()) {
+      this.app.stage.removeChild(container);
+      container.destroy({ children: true });
+    }
+    for (const dying of this.dyingUnits.values()) {
+      this.app.stage.removeChild(dying.container);
+      dying.container.destroy({ children: true });
+    }
+    this.unitGraphics.clear();
+    this.dyingUnits.clear();
   }
 
   get effects(): EffectsManager | null {
@@ -540,7 +553,9 @@ export class Renderer {
   }
 
   destroy(): void {
-    this.unitGraphics.clear();
+    this.clearUnits();
+    this._effects?.destroy();
+    this._effects = null;
     this.app.destroy(true);
   }
 }

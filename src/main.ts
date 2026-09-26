@@ -23,7 +23,9 @@ const speedToggle = document.getElementById('speed-toggle') as HTMLButtonElement
 
 const planningOverlay = document.getElementById('planning-overlay')!;
 const planningLabel = document.getElementById('planning-label')!;
+const planningInstructions = document.getElementById('planning-instructions')!;
 const confirmBtn = document.getElementById('confirm-btn')!;
+const leaveBattleBtn = document.getElementById('leave-battle-btn')!;
 const coverScreen = document.getElementById('cover-screen')!;
 const roundCounterEl = document.getElementById('round-counter')!;
 
@@ -61,7 +63,10 @@ const totalPerSide = ARMY_COMPOSITION.reduce((s, c) => s + c.count * BATTALION_S
 function showScreen(screen: 'prompt' | 'battle' | 'result') {
   promptScreen.classList.toggle('active', screen === 'prompt');
   battleScreen.classList.add('active'); // always visible once initialized
+  battleScreen.inert = screen !== 'battle';
   resultScreen.classList.toggle('active', screen === 'result');
+  leaveBattleBtn.classList.toggle('active', screen === 'battle');
+  if (screen !== 'battle') battleHud.style.display = 'none';
 }
 
 function showGameError(): void {
@@ -87,11 +92,30 @@ function showGameError(): void {
   renderer?.ticker?.stop();
 }
 
-function onPhaseChange(phase: TurnPhase): void {
+function updateCounts(): void {
+  const counts = engine?.getAliveCount() ?? { blue: totalPerSide, red: totalPerSide };
+  blueCountEl.textContent = `Blue: ${counts.blue}/${totalPerSide}`;
+  redCountEl.textContent = `Red: ${counts.red}/${totalPerSide}`;
+}
+
+function updateSpeedControl(button: HTMLButtonElement, speed: number): void {
+  button.dataset.speed = String(speed);
+  button.classList.toggle('active', speed !== 1);
+  button.textContent = `${speed}×`;
+  button.title = speed === 1 ? 'Switch to 3× speed' : 'Switch to normal speed';
+}
+
+function updateReplayPauseControl(paused: boolean): void {
+  replayPauseBtn.textContent = paused ? '\u25B6' : '\u23F8';
+  replayPauseBtn.title = paused ? 'Play replay' : 'Pause replay';
+  replayPauseBtn.setAttribute('aria-label', replayPauseBtn.title);
+}
+
+function onPhaseChange(phase: TurnPhase, round: number): void {
   const planning = phase === 'blue-planning' || phase === 'red-planning';
 
-  // Hide HUD during planning so the Done button doesn't overlap
   battleHud.style.display = planning ? 'none' : '';
+  updateCounts();
 
   // Planning overlay
   if (planning) {
@@ -102,6 +126,7 @@ function onPhaseChange(phase: TurnPhase): void {
       : (isDayMode ? '#aa3333' : '#ff4a4a');
     planningLabel.textContent = `${team} Planning`;
     planningLabel.style.color = color;
+    planningInstructions.textContent = `Round ${round} · Drag to draw a route.`;
     planningOverlay.classList.add('active');
     confirmBtn.classList.add('active');
     roundTimerEl.textContent = '';
@@ -112,6 +137,9 @@ function onPhaseChange(phase: TurnPhase): void {
 
   // Cover screen
   coverScreen.classList.toggle('active', phase === 'cover');
+  battleScreen.inert = phase === 'cover';
+  if (phase === 'cover') coverScreen.focus();
+  else if (planning) confirmBtn.focus();
 }
 
 function captureReplayData(): void {
@@ -125,7 +153,7 @@ function onGameEvent(
   if (gameFailed) return;
 
   if (event === 'phase-change' && data && 'phase' in data) {
-    onPhaseChange(data.phase);
+    onPhaseChange(data.phase, data.round ?? 1);
     if (data.round !== undefined) {
       roundCounterEl.textContent = `Round ${data.round}`;
     }
@@ -133,9 +161,7 @@ function onGameEvent(
   }
 
   if (event === 'update' && engine) {
-    const counts = engine.getAliveCount();
-    blueCountEl.textContent = `Blue: ${counts.blue}/${totalPerSide}`;
-    redCountEl.textContent = `Red: ${counts.red}/${totalPerSide}`;
+    updateCounts();
 
     if (data && 'timeLeft' in data && data.timeLeft !== undefined) {
       const timeLeft = data.timeLeft;
@@ -156,21 +182,26 @@ function onGameEvent(
     captureReplayData();
     const result = data as BattleResult;
 
-    const color = result.winner === 'blue' ? '#4a9eff' : '#ff4a4a';
+    const color = result.winner === 'blue'
+      ? (dayModeCb.checked ? '#2266aa' : '#4a9eff')
+      : (dayModeCb.checked ? '#aa3333' : '#ff4a4a');
     winnerTextEl.innerHTML = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
     winnerTextEl.style.color = color;
 
-    resultStatsEl.innerHTML = [
+    const stats = [
       `Duration: ${result.duration.toFixed(1)}s`,
       `Blue survivors: ${result.blueAlive}/${totalPerSide}`,
       `Red survivors: ${result.redAlive}/${totalPerSide}`,
-    ].join('<br>');
+    ];
+    if (!lastReplayData) stats.push('Replay unavailable for this long battle.');
+    resultStatsEl.innerHTML = stats.join('<br>');
 
     rematchBtn.textContent = 'Rematch';
     newBattleBtn.textContent = 'Back';
     replayBtn.style.display = lastReplayData ? '' : 'none';
 
     showScreen('result');
+    rematchBtn.focus();
   }
 }
 
@@ -190,6 +221,7 @@ async function initRenderer(): Promise<void> {
 
 function showPreview(): void {
   if (!renderer) return;
+  renderer.clearUnits();
   renderer.renderElevationZones(generateElevationZones());
   renderer.renderObstacles(generateObstacles());
   const blue = createArmyBattalions('blue');
@@ -207,9 +239,10 @@ function startGame(): void {
     aiMode,
   });
   showScreen('battle');
-  speedToggle.classList.remove('active');
-  speedToggle.dataset.speed = '1';
-  speedToggle.textContent = '3x';
+  updateSpeedControl(speedToggle, 1);
+  roundTimerEl.textContent = '';
+  roundTimerEl.style.color = '';
+  roundTimerEl.style.transform = '';
   roundCounterEl.textContent = 'Round 1';
   engine.startBattle();
 }
@@ -217,6 +250,7 @@ function startGame(): void {
 // --- Replay functions ---
 
 function startReplay(data: ReplayData): void {
+  replayPlayer?.stop();
   // Hide other overlays
   resultScreen.classList.remove('active');
   planningOverlay.classList.remove('active');
@@ -224,20 +258,21 @@ function startReplay(data: ReplayData): void {
   battleHud.style.display = 'none';
 
   showScreen('battle');
+  leaveBattleBtn.classList.remove('active');
   replayOverlay.classList.add('active');
-  replayPauseBtn.textContent = '\u23F8';
-  replaySpeedToggle.textContent = '3x';
-  replaySpeedToggle.classList.remove('active');
+  updateReplayPauseControl(false);
+  updateSpeedControl(replaySpeedToggle, 1);
 
   replayPlayer = new ReplayPlayer(renderer!, data, (event, eventData) => {
     if (event === 'frame' && eventData) {
       replayProgress.textContent = `${eventData.time.toFixed(1)}s / ${eventData.duration.toFixed(1)}s`;
     }
     if (event === 'end') {
-      replayPauseBtn.textContent = '\u25B6';
+      updateReplayPauseControl(true);
     }
   });
   replayPlayer.start();
+  replayPauseBtn.focus();
 }
 
 function stopReplay(): void {
@@ -245,11 +280,33 @@ function stopReplay(): void {
   replayPlayer = null;
   replayOverlay.classList.remove('active');
   showScreen('result');
+  replayBtn.focus();
+}
+
+function returnToMenu(): void {
+  replayPlayer?.stop();
+  replayPlayer = null;
+  engine?.stop();
+  engine = null;
+  planningOverlay.classList.remove('active');
+  confirmBtn.classList.remove('active');
+  coverScreen.classList.remove('active');
+  replayOverlay.classList.remove('active');
+  roundTimerEl.textContent = '';
+  lastReplayData = null;
+  renderer?.renderProjectiles([]);
+
+  showPreview();
+  showScreen('prompt');
+  aiBtn.focus();
 }
 
 dayModeCb.addEventListener('change', () => {
   document.body.classList.toggle('day-mode', dayModeCb.checked);
-  if (renderer) renderer.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+  if (renderer) {
+    renderer.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+    showPreview();
+  }
 });
 
 // --- Event listeners ---
@@ -280,9 +337,7 @@ coverScreen.addEventListener('click', () => {
 speedToggle.addEventListener('click', () => {
   const isfast = speedToggle.dataset.speed === '3';
   const newSpeed = isfast ? 1 : 3;
-  speedToggle.dataset.speed = String(newSpeed);
-  speedToggle.classList.toggle('active', !isfast);
-  speedToggle.textContent = isfast ? '3x' : '1x';
+  updateSpeedControl(speedToggle, newSpeed);
   engine?.setSpeed(newSpeed);
 });
 
@@ -291,17 +346,9 @@ rematchBtn.addEventListener('click', async () => {
   startGame();
 });
 
-newBattleBtn.addEventListener('click', () => {
-  engine?.stop();
-  engine = null;
-  planningOverlay.classList.remove('active');
-  confirmBtn.classList.remove('active');
-  coverScreen.classList.remove('active');
-  roundTimerEl.textContent = '';
-  lastReplayData = null;
-
-  showPreview();
-  showScreen('prompt');
+newBattleBtn.addEventListener('click', returnToMenu);
+leaveBattleBtn.addEventListener('click', () => {
+  if (window.confirm('Leave this battle and return to the menu?')) returnToMenu();
 });
 
 // Replay button on result screen
@@ -314,13 +361,13 @@ replayBtn.addEventListener('click', () => {
 // Replay control buttons
 replayRestartBtn.addEventListener('click', () => {
   replayPlayer?.restart();
-  replayPauseBtn.textContent = '\u23F8';
+  updateReplayPauseControl(false);
 });
 
 replayPauseBtn.addEventListener('click', () => {
   if (!replayPlayer) return;
   replayPlayer.togglePause();
-  replayPauseBtn.textContent = replayPlayer.isPaused ? '\u25B6' : '\u23F8';
+  updateReplayPauseControl(replayPlayer.isPaused);
 });
 
 replayExitBtn.addEventListener('click', () => {
@@ -328,10 +375,9 @@ replayExitBtn.addEventListener('click', () => {
 });
 
 replaySpeedToggle.addEventListener('click', () => {
-  const isActive = replaySpeedToggle.classList.toggle('active');
-  const speed = isActive ? 3 : 1;
+  const speed = replaySpeedToggle.dataset.speed === '3' ? 1 : 3;
   replayPlayer?.setSpeed(speed);
-  replaySpeedToggle.textContent = isActive ? '1x' : '3x';
+  updateSpeedControl(replaySpeedToggle, speed);
 });
 
 // Initialize renderer and show battlefield preview behind start screen

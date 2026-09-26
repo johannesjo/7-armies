@@ -78,6 +78,8 @@ export class PathDrawer {
   private gfx: Graphics;
   private hoverGfx: Graphics;
   private selectedBattalion: Battalion | null = null;
+  private activePointerId: number | null = null;
+  private dragStart: Vec2 | null = null;
   private hoveredBattalion: Battalion | null = null;
   private hoveredEnemyBattalion: Battalion | null = null;
   private rawPoints: Vec2[] = [];
@@ -111,6 +113,8 @@ export class PathDrawer {
     if (canvas) {
       this.canvas = canvas;
       this.canvas.addEventListener('contextmenu', this.onContextMenu);
+      this.canvas.addEventListener('pointercancel', this.onPointerCancel);
+      this.canvas.addEventListener('touchcancel', this.onTouchCancel);
     }
 
     // Make stage interactive for canvas-wide pointer events
@@ -149,6 +153,8 @@ export class PathDrawer {
     this.elevationZones = elevationZones;
     this.enabled = true;
     this.selectedBattalion = null;
+    this.activePointerId = null;
+    this.dragStart = null;
     this.hoveredBattalion = null;
     this.hoveredEnemyBattalion = null;
     this.rawPoints = [];
@@ -159,6 +165,8 @@ export class PathDrawer {
     this.enabled = false;
     this.team = null;
     this.selectedBattalion = null;
+    this.activePointerId = null;
+    this.dragStart = null;
     this.hoveredBattalion = null;
     this.hoveredEnemyBattalion = null;
     this.rawPoints = [];
@@ -172,7 +180,8 @@ export class PathDrawer {
     this.labelIndex = 0;
 
     for (const bat of this.battalions) {
-      if (bat.waypoints.length === 0) continue;
+      if (bat.team !== this.team || bat.waypoints.length === 0 ||
+        (bat === this.selectedBattalion && this.rawPoints.length > 1)) continue;
       const batAlive = this.units.filter(u => bat.unitIds.includes(u.id) && u.alive);
       if (batAlive.length === 0) continue;
 
@@ -396,20 +405,9 @@ export class PathDrawer {
       const alive = this.units.filter(u => bat.unitIds.includes(u.id) && u.alive);
       if (alive.length > 0) {
         const enemyColor = bat.team === 'red' ? this.theme.redPath : this.theme.bluePath;
-        const center = updateBattalionCenter(bat, this.units);
-
         for (const u of alive) {
           this.hoverGfx.circle(u.pos.x, u.pos.y, u.radius + 2);
           this.hoverGfx.setStrokeStyle({ width: 1, color: enemyColor, alpha: 0.3 });
-          this.hoverGfx.stroke();
-        }
-
-        if (bat.waypoints.length > 0) {
-          this.hoverGfx.setStrokeStyle({ width: 2, color: enemyColor, alpha: 0.5 });
-          this.hoverGfx.moveTo(center.x, center.y);
-          for (const wp of bat.waypoints) {
-            this.hoverGfx.lineTo(wp.x, wp.y);
-          }
           this.hoverGfx.stroke();
         }
       }
@@ -493,6 +491,8 @@ export class PathDrawer {
     this.stage.off('rightdown', this.onRightDown);
     if (this.canvas) {
       this.canvas.removeEventListener('contextmenu', this.onContextMenu);
+      this.canvas.removeEventListener('pointercancel', this.onPointerCancel);
+      this.canvas.removeEventListener('touchcancel', this.onTouchCancel);
     }
     this.stage.removeChild(this.gfx);
     this.stage.removeChild(this.hoverGfx);
@@ -500,7 +500,7 @@ export class PathDrawer {
     this.stage.removeChild(this.hoverLabel);
     this.gfx.destroy();
     this.hoverGfx.destroy();
-    this.labelContainer.destroy();
+    this.labelContainer.destroy({ children: true });
     this.hoverLabel.destroy();
   }
 
@@ -545,8 +545,8 @@ export class PathDrawer {
     return closest;
   }
 
-  private onPointerDown = (e: { global: { x: number; y: number }; button?: number }): void => {
-    if (!this.enabled || !this.team) return;
+  private onPointerDown = (e: { global: { x: number; y: number }; button?: number; pointerId: number }): void => {
+    if (!this.enabled || !this.team || this.activePointerId !== null) return;
     // Ignore right clicks for path drawing
     if (e.button === 2) return;
     const pos = this.worldPos(e.global);
@@ -558,8 +558,8 @@ export class PathDrawer {
       if (bat) {
         this.hoveredEnemyBattalion = null;
         this.selectedBattalion = bat;
-        bat.waypoints = [];
-        bat.moveTarget = null;
+        this.activePointerId = e.pointerId;
+        this.dragStart = pos;
         const center = updateBattalionCenter(bat, this.units);
         this.rawPoints = [{ x: center.x, y: center.y }];
         this.renderPaths();
@@ -577,8 +577,9 @@ export class PathDrawer {
     this.renderHoverLayer();
   };
 
-  private onPointerMove = (e: { global: { x: number; y: number } }): void => {
+  private onPointerMove = (e: { global: { x: number; y: number }; pointerId: number }): void => {
     if (!this.enabled) return;
+    if (this.activePointerId !== null && e.pointerId !== this.activePointerId) return;
     const pos = this.worldPos(e.global);
 
     // Update hover state
@@ -598,22 +599,51 @@ export class PathDrawer {
     }
 
     // Drawing mode
-    if (this.selectedBattalion) {
+    if (this.selectedBattalion && this.dragStart && distancePt(pos, this.dragStart) >= 6) {
       this.rawPoints.push({ x: pos.x, y: pos.y });
       this.renderPaths();
     }
   };
 
-  private onPointerUp = (): void => {
-    if (!this.enabled || !this.selectedBattalion) return;
+  private onPointerUp = (e: { global: { x: number; y: number }; pointerId: number }): void => {
+    if (!this.enabled || !this.selectedBattalion || e.pointerId !== this.activePointerId) return;
 
-    const waypoints = samplePath(this.rawPoints, PATH_SAMPLE_DISTANCE);
-    // Skip the first point (battalion center position)
-    this.selectedBattalion.waypoints = waypoints.slice(1);
+    const release = this.worldPos(e.global);
+    if (this.dragStart && distancePt(release, this.dragStart) >= 6) {
+      this.rawPoints.push({
+        x: Math.max(0, Math.min(MAP_WIDTH, release.x)),
+        y: Math.max(0, Math.min(MAP_HEIGHT, release.y)),
+      });
+    }
+    if (this.rawPoints.length > 1) {
+      const waypoints = samplePath(this.rawPoints, PATH_SAMPLE_DISTANCE);
+      // Skip the first point (battalion center position)
+      this.selectedBattalion.waypoints = waypoints.slice(1);
+      this.selectedBattalion.moveTarget = null;
+    }
 
     this.selectedBattalion = null;
+    this.activePointerId = null;
+    this.dragStart = null;
     this.rawPoints = [];
     this.renderPaths();
+  };
+
+  private cancelPointer(pointerId: number): void {
+    if (pointerId !== this.activePointerId) return;
+    this.selectedBattalion = null;
+    this.activePointerId = null;
+    this.dragStart = null;
+    this.rawPoints = [];
+    this.renderPaths();
+  }
+
+  private onPointerCancel = (e: PointerEvent): void => {
+    this.cancelPointer(e.pointerId);
+  };
+
+  private onTouchCancel = (e: TouchEvent): void => {
+    for (const touch of e.changedTouches) this.cancelPointer(touch.identifier);
   };
 
   private onRightDown = (e: { global: { x: number; y: number } }): void => {

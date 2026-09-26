@@ -18,6 +18,8 @@
     }
     .screen { display: none; width: 100%; height: 100%; }
     .screen.active { display: flex; }
+    button { min-width: 44px; min-height: 44px; }
+    button:focus-visible { outline: 3px solid #4a9eff; outline-offset: 3px; }
 
     /* Start Screen — overlay on top of battlefield */
     #prompt-screen {
@@ -44,7 +46,7 @@
       text-align: center;
       line-height: 1.5;
     }
-    #battle-btn {
+    #battle-btn, #ai-btn {
       padding: 16px 48px;
       font-size: 20px;
       font-weight: bold;
@@ -63,6 +65,7 @@
       position: relative;
       flex-direction: column;
       align-items: center;
+      padding-top: calc(52px + env(safe-area-inset-top, 0px));
     }
     #pixi-container {
       display: flex;
@@ -85,7 +88,8 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 8px 16px;
+      min-height: 52px;
+      padding: calc(4px + env(safe-area-inset-top, 0px)) 16px 4px;
       background: rgba(0,0,0,0.6);
       z-index: 10;
       font-size: 14px;
@@ -96,6 +100,8 @@
       font-variant-numeric: tabular-nums;
       text-shadow: 0 0 10px rgba(255,255,255,0.4);
     }
+    #blue-count { color: #4a9eff; }
+    #red-count { color: #ff4a4a; }
     .speed-controls button {
       background: #2a2a4a;
       color: #eee;
@@ -110,12 +116,14 @@
     #planning-overlay {
       display: none;
       position: fixed;
-      top: calc(8px + env(safe-area-inset-top, 0px));
+      top: calc(4px + env(safe-area-inset-top, 0px));
       left: 50%;
       transform: translateX(-50%);
       flex-direction: column;
       align-items: center;
-      gap: 6px;
+      gap: 3px;
+      width: calc(100% - 192px);
+      text-align: center;
       z-index: 12;
       pointer-events: none;
     }
@@ -128,19 +136,16 @@
       text-shadow: 0 2px 8px rgba(0,0,0,0.8);
     }
     #planning-instructions {
-      display: none;
-      font-size: 13px;
-      opacity: 0.7;
-      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+      font-size: 12px;
+      opacity: 0.85;
     }
     #confirm-btn {
       display: none;
       position: fixed;
-      top: 50%;
-      right: 12px;
-      transform: translateY(-50%);
+      top: calc(4px + env(safe-area-inset-top, 0px));
+      right: max(12px, env(safe-area-inset-right, 0px));
       padding: 6px 12px;
-      font-size: 10px;
+      font-size: 12px;
       font-weight: bold;
       text-transform: uppercase;
       letter-spacing: 2px;
@@ -150,16 +155,34 @@
       border-radius: 3px;
       cursor: pointer;
       z-index: 12;
-      opacity: 0.7;
     }
     #confirm-btn.active { display: block; }
     #confirm-btn:hover { background: #3a3a5a; border-color: #777; opacity: 1; }
+    #leave-battle-btn {
+      display: none;
+      position: fixed;
+      bottom: max(12px, env(safe-area-inset-bottom, 0px));
+      left: max(12px, env(safe-area-inset-left, 0px));
+      padding: 8px 16px;
+      background: #2a2a4a;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 4px;
+      cursor: pointer;
+      z-index: 17;
+    }
+    #leave-battle-btn.active { display: block; }
 
     /* Cover screen */
     #cover-screen {
       display: none;
       position: absolute;
       top: 0; left: 0; right: 0; bottom: 0;
+      width: 100%; height: 100%;
+      border: 0;
+      color: inherit;
+      font-family: inherit;
+      cursor: pointer;
       align-items: center;
       justify-content: center;
       background: rgba(0,0,0,0.85);
@@ -183,8 +206,8 @@
       z-index: 20;
     }
     #result-screen h2 { font-size: 64px; letter-spacing: 4px; }
-    #result-screen .stats { font-size: 18px; opacity: 0.8; }
-    #result-screen .buttons { display: flex; gap: 16px; margin-top: 16px; }
+    #result-screen .stats { font-size: 18px; opacity: 0.8; text-align: center; }
+    #result-screen .buttons { display: flex; flex-direction: column; align-items: center; gap: 16px; margin-top: 16px; }
     #result-screen button {
       padding: 12px 32px;
       font-size: 16px;
@@ -205,8 +228,9 @@
       right: 0;
       justify-content: center;
       align-items: center;
-      gap: 12px;
-      padding: 10px 16px;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 8px 12px max(8px, env(safe-area-inset-bottom, 0px));
       background: rgba(0,0,0,0.7);
       z-index: 14;
     }
@@ -237,32 +261,42 @@
       #prompt-screen p { font-size: 13px; padding: 0 8px; }
       #prompt-screen .btn-row { flex-wrap: wrap; justify-content: center; }
       #prompt-screen .btn-row button {
-        padding: 12px 24px !important;
-        font-size: 16px !important;
-        letter-spacing: 2px !important;
+        padding: 12px 24px;
+        font-size: 16px;
+        letter-spacing: 2px;
       }
-      #battle-hud { font-size: 11px; padding: 6px 8px; gap: 4px; }
+      #battle-hud { font-size: 11px; padding: calc(4px + env(safe-area-inset-top, 0px)) 8px 4px; gap: 4px; }
       #battle-hud > div { gap: 6px; }
       #round-timer { font-size: 22px; }
       #round-counter { font-size: 11px; }
       #planning-label { font-size: 16px; letter-spacing: 1px; }
-      #planning-instructions { display: none; }
-      #confirm-btn { min-height: 28px; padding: 4px 14px; font-size: 11px; letter-spacing: 1px; }
+      #planning-instructions { font-size: 11px; }
+      #confirm-btn { padding: 4px 14px; font-size: 12px; letter-spacing: 1px; }
       #cover-screen { font-size: 24px; letter-spacing: 2px; padding: 0 16px; text-align: center; }
       #result-screen { padding: 0 16px; }
       #result-screen h2 { font-size: 32px; letter-spacing: 2px; }
       #result-screen .stats { font-size: 15px; }
       #result-screen .buttons { flex-wrap: wrap; justify-content: center; }
       #result-screen button { min-height: 48px; padding: 10px 20px; font-size: 14px; }
-      .speed-controls button { min-height: 36px; padding: 6px 10px; font-size: 11px; }
+      .speed-controls button { padding: 6px 10px; font-size: 12px; }
+    }
+
+    @media (max-width: 480px) {
+      #planning-overlay { width: calc(100% - 160px); }
+      #replay-progress { order: -1; flex-basis: 100%; }
+    }
+    @media (max-height: 440px) {
+      #result-screen { gap: 8px; }
+      #result-screen .buttons { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
     }
 
     /* Day-mode parchment aesthetic */
-    body.day-mode { color: #443322; }
+    body.day-mode { color: #443322; background: #e8e0cc; }
     body.day-mode #battle-hud { background: rgba(245,240,224,0.7); }
     body.day-mode #blue-count { color: #2266aa; }
     body.day-mode #red-count { color: #aa3333; }
-    body.day-mode #confirm-btn { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+    body.day-mode #confirm-btn, body.day-mode #leave-battle-btn { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+    body.day-mode #planning-label { text-shadow: none; }
     body.day-mode #cover-screen { background: rgba(245,240,224,0.85); color: #443322; }
     body.day-mode .speed-controls button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
     body.day-mode .speed-controls button.active { background: #d8d0bc; border-color: #886633; }
@@ -279,7 +313,7 @@
     <h1>7 Armies</h1>
     <p>Command your medieval army. Draw paths for each battalion, then watch the battle unfold.</p>
     <div class="btn-row" style="display:flex;flex-direction:column;align-items:center;gap:12px">
-      <button id="ai-btn" style="padding:16px 48px;font-size:20px;font-weight:bold;text-transform:uppercase;letter-spacing:4px;background:#2a2a4a;color:#eee;border:2px solid #555;border-radius:4px;cursor:pointer">vs AI</button>
+      <button id="ai-btn">vs AI</button>
       <button id="battle-btn">vs Player</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
@@ -290,46 +324,48 @@
     </div>
   </div>
 
-  <div id="battle-screen" class="screen">
-    <div id="battle-hud">
-      <span id="blue-count" style="color:#4a9eff">Blue: 96/96</span>
+  <div id="battle-screen" class="screen" inert>
+    <div id="battle-hud" style="display:none">
+      <span id="blue-count">Blue</span>
       <div style="display:flex;align-items:center;gap:12px">
         <span id="round-counter" style="opacity:0.7">Round 1</span>
         <span id="round-timer"></span>
         <div class="speed-controls">
-          <button id="speed-toggle" data-speed="1">3x</button>
+          <button id="speed-toggle" data-speed="1" title="Switch to 3× speed">1×</button>
         </div>
       </div>
-      <span id="red-count" style="color:#ff4a4a">Red: 96/96</span>
+      <span id="red-count">Red</span>
     </div>
     <div id="pixi-container"></div>
 
     <div id="planning-overlay">
-      <span id="planning-label">Blue Planning</span>
-      <span id="planning-instructions">Click a battalion, drag to draw its path.</span>
+      <span id="planning-label" aria-live="polite">Blue Planning</span>
+      <span id="planning-instructions">Drag to draw a route.</span>
     </div>
     <button id="confirm-btn">Done</button>
 
     <div id="replay-overlay">
-      <button id="replay-restart-btn" title="Restart">&#x23EE;</button>
-      <button id="replay-pause-btn" title="Pause">&#x23F8;</button>
-      <button id="replay-speed-toggle">3x</button>
+      <button id="replay-restart-btn" title="Restart replay" aria-label="Restart replay">&#x23EE;</button>
+      <button id="replay-pause-btn" title="Pause replay" aria-label="Pause replay">&#x23F8;</button>
+      <button id="replay-speed-toggle" title="Switch to 3× speed">1×</button>
       <span id="replay-progress">0.0s / 0.0s</span>
-      <button id="replay-exit-btn" title="Exit">&#x2715;</button>
+      <button id="replay-exit-btn" title="Back to results" aria-label="Back to results">&#x2715;</button>
     </div>
   </div>
 
-  <div id="cover-screen">
-    <div style="display:flex;flex-direction:column;align-items:center;gap:16px">
+  <button id="leave-battle-btn" title="Leave battle">Menu</button>
+
+  <button id="cover-screen">
+    <span style="display:flex;flex-direction:column;align-items:center;gap:16px">
       <span>Pass device to Red</span>
       <span style="font-size:16px;opacity:0.5;letter-spacing:1px">Tap to continue</span>
-    </div>
-  </div>
+    </span>
+  </button>
 
-  <div id="result-screen" class="screen">
+  <div id="result-screen" class="screen" role="dialog" aria-modal="true" aria-labelledby="winner-text" aria-describedby="result-stats">
     <h2 id="winner-text">Blue Wins!</h2>
     <div class="stats" id="result-stats"></div>
-    <div class="buttons" style="flex-direction:column;align-items:center">
+    <div class="buttons">
       <button id="rematch-btn" style="font-weight:bold;letter-spacing:2px;text-transform:uppercase">Rematch</button>
       <button id="new-battle-btn" style="opacity:0.7">Back</button>
       <button id="reload-btn" hidden>Reload game</button>

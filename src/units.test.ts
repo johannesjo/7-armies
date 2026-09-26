@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createUnit, createArmy, moveUnit, findTarget, applyDamage, tryFireProjectile, updateProjectiles, segmentHitsRect, detourWaypoints, hasLineOfSight, isFlanked, meleeAoeAttack } from './units';
 import { MAP_WIDTH, MAP_HEIGHT, CAVALRY_CHARGE_SPEED_THRESHOLD } from './constants';
+import type { Projectile } from './types';
 
 
 describe('createUnit', () => {
@@ -435,6 +436,64 @@ describe('isFlanked', () => {
 });
 
 describe('updateProjectiles', () => {
+  it('hits a target crossed by a fast arrow before it lands', () => {
+    const target = createUnit('target', 'archer', 'red', { x: 200, y: 100 });
+    const projectile = {
+      pos: { x: 190, y: 100 }, vel: { x: 220, y: 0 }, target: { x: 200, y: 100 },
+      damage: 5, radius: 3, team: 'blue' as const, maxRange: 200, distanceTraveled: 90,
+    };
+    const result = updateProjectiles([projectile], [target], 0.05);
+    expect(result.hits.map(hit => hit.targetId)).toEqual(['target']);
+    expect(result.alive).toHaveLength(0);
+  });
+
+  it('resolves the first impact along a frame, including obstacles', () => {
+    const target = createUnit('target', 'archer', 'red', { x: 130, y: 100 });
+    const obstacle = { x: 150, y: 90, w: 10, h: 20 };
+    const projectile = {
+      pos: { x: 100, y: 100 }, vel: { x: 200, y: 0 }, target: { x: 200, y: 100 },
+      damage: 5, radius: 3, team: 'blue' as const, maxRange: 200, distanceTraveled: 0,
+    };
+    expect(updateProjectiles([{ ...projectile }], [target], 0.5, [obstacle]).hits).toHaveLength(1);
+
+    target.hp = target.maxHp;
+    const blocked = updateProjectiles([{ ...projectile }], [target], 0.5, [{ ...obstacle, x: 110 }]);
+    expect(blocked.hits).toHaveLength(0);
+    expect(target.hp).toBe(target.maxHp);
+  });
+
+  it('limits collision checks to the remaining range and the descending arc', () => {
+    const target = createUnit('target', 'archer', 'red', { x: 187, y: 100 });
+    const projectile = {
+      pos: { x: 170, y: 100 }, vel: { x: 200, y: 0 }, target: { x: 200, y: 100 },
+      damage: 5, radius: 3, team: 'blue' as const, maxRange: 200, distanceTraveled: 70,
+      arc: true, totalFlightDist: 100,
+    };
+    // The obstacle ends before the arrow descends at x=175.
+    const clear = updateProjectiles([{ ...projectile }], [target], 0.1, [{ x: 170, y: 90, w: 1, h: 20 }]);
+    expect(clear.hits.map(hit => hit.targetId)).toEqual(['target']);
+
+    target.hp = target.maxHp;
+    const short = updateProjectiles([{ ...projectile, maxRange: 76 }], [target], 0.1);
+    expect(short.hits).toHaveLength(0);
+    expect(short.alive).toHaveLength(0);
+  });
+
+  it('lets piercing arrows hit multiple units before an obstacle and remembers hit IDs', () => {
+    const enemies = [120, 140, 170].map((x, i) => createUnit(`enemy-${i}`, 'archer', 'red', { x, y: 100 }));
+    for (const enemy of enemies) enemy.gunAngle = Math.PI;
+    const projectile: Projectile = {
+      pos: { x: 100, y: 100 }, vel: { x: 200, y: 0 }, target: { x: 200, y: 100 },
+      damage: 10, radius: 3, team: 'blue' as const, maxRange: 200, distanceTraveled: 0,
+      piercing: true,
+    };
+    const result = updateProjectiles([projectile], enemies, 0.5, [{ x: 155, y: 90, w: 5, h: 20 }]);
+    expect(result.hits.map(hit => hit.targetId)).toEqual(['enemy-0', 'enemy-1']);
+    expect(result.hits.map(hit => hit.damage)).toEqual([10, 5]);
+    expect(projectile.hitIds).toEqual(new Set(['enemy-0', 'enemy-1']));
+    expect(result.alive).toHaveLength(0);
+  });
+
   it('moves projectiles and removes those past max range', () => {
     const proj = {
       pos: { x: 100, y: 100 },

@@ -870,6 +870,42 @@ export function tryFireProjectile(unit: Unit, target: Unit, dt: number, elevatio
   }];
 }
 
+function segmentRectHitFraction(a: Vec2, b: Vec2, rect: Obstacle, padding: number): number | null {
+  let enter = 0;
+  let exit = 1;
+  for (const [start, delta, min, max] of [
+    [a.x, b.x - a.x, rect.x - padding, rect.x + rect.w + padding],
+    [a.y, b.y - a.y, rect.y - padding, rect.y + rect.h + padding],
+  ]) {
+    if (Math.abs(delta) < 1e-8) {
+      if (start < min || start > max) return null;
+      continue;
+    }
+    const t1 = (min - start) / delta;
+    const t2 = (max - start) / delta;
+    enter = Math.max(enter, Math.min(t1, t2));
+    exit = Math.min(exit, Math.max(t1, t2));
+    if (enter > exit) return null;
+  }
+  return enter;
+}
+
+function segmentCircleHitFraction(a: Vec2, b: Vec2, center: Vec2, radius: number): number | null {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const ox = a.x - center.x;
+  const oy = a.y - center.y;
+  const c = ox * ox + oy * oy - radius * radius;
+  if (c <= 0) return 0;
+  const length2 = dx * dx + dy * dy;
+  if (length2 === 0) return null;
+  const halfB = ox * dx + oy * dy;
+  const discriminant = halfB * halfB - length2 * c;
+  if (discriminant < 0) return null;
+  const t = (-halfB - Math.sqrt(discriminant)) / length2;
+  return t >= 0 && t <= 1 ? t : null;
+}
+
 export function updateProjectiles(
   projectiles: Projectile[],
   units: Unit[],
@@ -880,79 +916,90 @@ export function updateProjectiles(
   const hits: ProjectileHit[] = [];
 
   for (const p of projectiles) {
-    // Move projectile
     const oldPos = { x: p.pos.x, y: p.pos.y };
     const moveX = p.vel.x * dt;
     const moveY = p.vel.y * dt;
-    p.pos.x += moveX;
-    p.pos.y += moveY;
-    p.distanceTraveled += Math.sqrt(moveX * moveX + moveY * moveY);
+    const stepLength = Math.hypot(moveX, moveY);
+    if (stepLength === 0) { alive.push(p); continue; }
+    const dirX = moveX / stepLength;
+    const dirY = moveY / stepLength;
+
+    // Land at the target projection, map edge, or range limit, whichever comes first.
+    const targetDistance = (p.target.x - oldPos.x) * dirX + (p.target.y - oldPos.y) * dirY;
+    const boundsDistance = Math.min(
+      dirX > 0 ? (MAP_WIDTH - oldPos.x) / dirX : dirX < 0 ? -oldPos.x / dirX : Infinity,
+      dirY > 0 ? (MAP_HEIGHT - oldPos.y) / dirY : dirY < 0 ? -oldPos.y / dirY : Infinity,
+    );
+    const limit = Math.min(p.maxRange - p.distanceTraveled, targetDistance, boundsDistance);
+    const travel = Math.max(0, Math.min(stepLength, limit));
+    const landed = limit <= stepLength;
+    const end = { x: oldPos.x + dirX * travel, y: oldPos.y + dirY * travel };
+    const previousDistance = p.distanceTraveled;
+    p.distanceTraveled += travel;
+    p.pos = end;
 
     // Track trail (max 5 entries)
     if (!p.trail) p.trail = [];
-    p.trail.push({ x: p.pos.x, y: p.pos.y });
+    p.trail.push({ ...end });
     if (p.trail.length > 5) p.trail.shift();
 
-    // Check if out of bounds or past max range
-    if (p.pos.x < 0 || p.pos.x > MAP_WIDTH || p.pos.y < 0 || p.pos.y > MAP_HEIGHT) continue;
-    if (p.distanceTraveled > p.maxRange) continue;
-
-    // Arrows land near their target — remove if past the target point
-    // Check dot product: positive means arrow has overshot the target
-    const tx = p.target.x - p.pos.x;
-    const ty = p.target.y - p.pos.y;
-    const dotToTarget = tx * p.vel.x + ty * p.vel.y;
-    if (dotToTarget < 0) continue; // arrow flew past target
-
     // Arc trajectory: arrows fly over obstacles/units during first 75% of flight
-    const arcProgress = (p.arc && p.totalFlightDist && p.totalFlightDist > 0)
-      ? p.distanceTraveled / p.totalFlightDist
-      : 1; // non-arc projectiles always check collisions
-    const inArc = arcProgress < 0.75;
-
-    // Check if projectile hit an obstacle (skip during arc)
-    if (!inArc && obstacles.some(o => segmentHitsRect(oldPos, p.pos, o, p.radius))) continue;
-
-    // Check hit against enemy units (skip during arc)
-    let consumed = false;
-    if (inArc) { alive.push(p); continue; }
+    const arcEndDistance = p.arc && p.totalFlightDist ? p.totalFlightDist * 0.75 : 0;
+    const activeStart = Math.max(0, arcEndDistance - previousDistance);
+    if (activeStart > travel) {
+      if (!landed) alive.push(p);
+      continue;
+    }
+    const start = { x: oldPos.x + dirX * activeStart, y: oldPos.y + dirY * activeStart };
+    type Impact = { fraction: number; unit: Unit | null };
+    const impacts: Impact[] = [];
+    for (const obstacle of obstacles) {
+      const fraction = segmentRectHitFraction(start, end, obstacle, p.radius);
+      if (fraction !== null) impacts.push({ fraction, unit: null });
+    }
     for (const unit of units) {
-      if (!unit.alive || unit.team === p.team) continue;
-      // Piercing projectiles skip already-hit units
-      if (p.piercing && p.hitIds?.has(unit.id)) continue;
-      const dx = p.pos.x - unit.pos.x;
-      const dy = p.pos.y - unit.pos.y;
-      const hitDist = p.radius + unit.radius;
-      if (dx * dx + dy * dy <= hitDist * hitDist) {
-        const projAngle = Math.atan2(p.vel.y, p.vel.x);
+      if (!unit.alive || unit.team === p.team || (p.piercing && p.hitIds?.has(unit.id))) continue;
+      const fraction = segmentCircleHitFraction(start, end, unit.pos, p.radius + unit.radius);
+      if (fraction !== null) impacts.push({ fraction, unit });
+    }
+    impacts.sort((a, b) => a.fraction - b.fraction || Number(a.unit !== null) - Number(b.unit !== null));
 
-        const flanked = isFlanked(projAngle, unit.gunAngle);
-        const actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : p.damage;
+    let consumed = false;
+    for (const impact of impacts) {
+      if (!impact.unit) { consumed = true; break; }
+      const unit = impact.unit;
+      if (!unit.alive) continue;
+      const hitPos = {
+        x: start.x + (end.x - start.x) * impact.fraction,
+        y: start.y + (end.y - start.y) * impact.fraction,
+      };
+      const projAngle = Math.atan2(p.vel.y, p.vel.x);
+      const flanked = isFlanked(projAngle, unit.gunAngle);
+      const actualDamage = flanked ? p.damage * FLANK_DAMAGE_MULTIPLIER : p.damage;
 
-        const wasBefore = unit.hp;
-        applyDamage(unit, actualDamage);
-        hits.push({
-          pos: { x: p.pos.x, y: p.pos.y },
-          targetId: unit.id,
-          killed: wasBefore > 0 && !unit.alive,
-          team: p.team,
-          angle: projAngle,
-          flanked,
-          damage: actualDamage,
-        });
+      const wasBefore = unit.hp;
+      applyDamage(unit, actualDamage);
+      hits.push({
+        pos: hitPos,
+        targetId: unit.id,
+        killed: wasBefore > 0 && !unit.alive,
+        team: p.team,
+        angle: projAngle,
+        flanked,
+        damage: actualDamage,
+      });
 
-        if (p.piercing) {
-          if (!p.hitIds) p.hitIds = new Set();
-          p.hitIds.add(unit.id);
-          p.damage *= 0.5;
-        } else {
-          consumed = true;
-          break;
-        }
+      if (p.piercing) {
+        if (!p.hitIds) p.hitIds = new Set();
+        p.hitIds.add(unit.id);
+        p.damage *= 0.5;
+      } else {
+        consumed = true;
+        break;
       }
     }
 
-    if (!consumed) alive.push(p);
+    if (!consumed && !landed) alive.push(p);
   }
 
   return { alive, hits };

@@ -146,6 +146,7 @@ export interface ReplayEvent {
 }
 
 export interface ReplayFrame {
+  time: number;
   units: ReplayUnitSnapshot[];
   projectiles: ReplayProjectileSnapshot[];
 }

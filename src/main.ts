@@ -32,6 +32,7 @@ const resultStatsEl = document.getElementById('result-stats')!;
 const rematchBtn = document.getElementById('rematch-btn')!;
 const newBattleBtn = document.getElementById('new-battle-btn')!;
 const replayBtn = document.getElementById('replay-btn')!;
+const reloadBtn = document.getElementById('reload-btn')!;
 
 const dayModeCb = document.getElementById('day-mode-cb') as HTMLInputElement;
 const pixiContainer = document.getElementById('pixi-container')!;
@@ -46,19 +47,44 @@ const replaySpeedToggle = document.getElementById('replay-speed-toggle') as HTML
 
 // State
 let renderer: Renderer | null = null;
+let rendererReady: Promise<void> | null = null;
 let engine: GameEngine | null = null;
 let aiMode = false;
+let gameFailed = false;
 
 // Replay state
 let replayPlayer: ReplayPlayer | null = null;
 let lastReplayData: ReplayData | null = null;
 
-const totalPerSide = ARMY_COMPOSITION.reduce((s, c) => s + c.count, 0) * BATTALION_SIZE;
+const totalPerSide = ARMY_COMPOSITION.reduce((s, c) => s + c.count * BATTALION_SIZE[c.type], 0);
 
 function showScreen(screen: 'prompt' | 'battle' | 'result') {
   promptScreen.classList.toggle('active', screen === 'prompt');
   battleScreen.classList.add('active'); // always visible once initialized
   resultScreen.classList.toggle('active', screen === 'result');
+}
+
+function showGameError(): void {
+  if (gameFailed) return;
+  gameFailed = true;
+
+  // Keep recovery in the DOM so it works even when the renderer has failed.
+  winnerTextEl.textContent = 'Game interrupted';
+  winnerTextEl.style.color = '';
+  resultStatsEl.textContent = 'Reload the game to start a new battle.';
+  rematchBtn.style.display = 'none';
+  newBattleBtn.style.display = 'none';
+  replayBtn.style.display = 'none';
+  reloadBtn.hidden = false;
+  planningOverlay.classList.remove('active');
+  confirmBtn.classList.remove('active');
+  coverScreen.classList.remove('active');
+  replayOverlay.classList.remove('active');
+  battleHud.style.display = 'none';
+  showScreen('result');
+  reloadBtn.focus();
+
+  renderer?.ticker?.stop();
 }
 
 function onPhaseChange(phase: TurnPhase): void {
@@ -96,6 +122,8 @@ function onGameEvent(
   event: 'update' | 'end' | 'phase-change',
   data?: BattleResult | { phase: TurnPhase; timeLeft?: number; round?: number },
 ) {
+  if (gameFailed) return;
+
   if (event === 'phase-change' && data && 'phase' in data) {
     onPhaseChange(data.phase);
     if (data.round !== undefined) {
@@ -147,13 +175,17 @@ function onGameEvent(
 }
 
 async function initRenderer(): Promise<void> {
-  if (renderer) return;
+  if (rendererReady) return rendererReady;
   battleScreen.classList.add('active'); // visible before init so container has dimensions
-  renderer = new Renderer();
-  await renderer.init(pixiContainer);
-  window.addEventListener('resize', () => {
-    renderer?.resize(pixiContainer.clientWidth, pixiContainer.clientHeight);
+  const nextRenderer = new Renderer();
+  rendererReady = nextRenderer.init(pixiContainer).then(() => {
+    renderer = nextRenderer;
+    renderer.canvas.addEventListener('webglcontextlost', showGameError);
+    window.addEventListener('resize', () => {
+      if (!gameFailed) renderer?.resize(pixiContainer.clientWidth, pixiContainer.clientHeight);
+    });
   });
+  return rendererReady;
 }
 
 function showPreview(): void {
@@ -166,6 +198,7 @@ function showPreview(): void {
 }
 
 function startGame(): void {
+  if (gameFailed) return;
   lastReplayData = null;
   engine?.stop();
   document.body.classList.toggle('day-mode', dayModeCb.checked);
@@ -220,6 +253,10 @@ dayModeCb.addEventListener('change', () => {
 });
 
 // --- Event listeners ---
+window.addEventListener('error', showGameError);
+window.addEventListener('unhandledrejection', showGameError);
+reloadBtn.addEventListener('click', () => window.location.reload());
+
 battleBtn.addEventListener('click', async () => {
   aiMode = false;
   await initRenderer();
@@ -300,6 +337,7 @@ replaySpeedToggle.addEventListener('click', () => {
 // Initialize renderer and show battlefield preview behind start screen
 (async () => {
   await initRenderer();
+  if (gameFailed) return;
   document.body.classList.toggle('day-mode', dayModeCb.checked);
   if (dayModeCb.checked) renderer!.setTheme(DAY_THEME);
   showPreview();

@@ -407,11 +407,8 @@ export class Renderer {
   }
 
   renderProjectiles(projectiles: Projectile[]): void {
-    if (this.projectileGraphics) {
-      this.app.stage.removeChild(this.projectileGraphics);
-    }
-    this.projectileGraphics = new Graphics();
-    const g = this.projectileGraphics;
+    const g = this.projectileGraphics ??= new Graphics();
+    g.clear();
 
     for (const p of projectiles) {
       const color = 0x111111;

@@ -47,8 +47,13 @@ apply_changes() (
 
 for attempt in 1 2 3 4 5; do
   rm -rf "$work/site"
-  if git ls-remote --exit-code --heads "$remote" "$pages_branch" >/dev/null 2>&1; then
+  status=0
+  git -c http.extraheader="$auth_header" ls-remote --exit-code --heads "$remote" "$pages_branch" >/dev/null || status=$?
+  if [ "$status" -eq 0 ]; then
     git -c http.extraheader="$auth_header" clone --quiet --depth 1 --branch "$pages_branch" "$remote" "$work/site"
+  elif [ "$status" -ne 2 ]; then
+    echo "Could not query $pages_branch on origin (exit $status)." >&2
+    exit 1
   else
     git init --quiet "$work/site"
     git -C "$work/site" checkout --quiet --orphan "$pages_branch"

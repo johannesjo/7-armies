@@ -62,7 +62,7 @@ jobs:
           DIR: ${{ steps.target.outputs.dir }}
           SHA: ${{ github.sha }}
           BRANCH: ${{ github.ref_name }}
-        run: ./.github/scripts/publish-pages.sh deploy "$DIR" dist "Deploy $BRANCH@${SHA::7}"
+        run: bash .github/scripts/publish-pages.sh deploy "$DIR" dist "Deploy $BRANCH@${SHA::7}"
 
       - name: Summary
         run: |
@@ -82,4 +82,4 @@ jobs:
           BRANCH: ${{ github.event.ref }}
         run: |
           slug=$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g')
-          ./.github/scripts/publish-pages.sh remove "branches/$slug" "" "Remove preview for $BRANCH"
+          bash .github/scripts/publish-pages.sh remove "branches/$slug" "" "Remove preview for $BRANCH"

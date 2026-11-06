@@ -327,8 +327,9 @@ function onChargeEnd(result: ChargeResult): void {
     `Enemies ridden down: ${result.kills}`,
     `Battalions routed by your charges: ${result.routs}`,
     `Best trample combo: ${result.bestCombo}`,
-    `Riders lost: ${result.ridersLost}`,
+    `Riders recruited: ${result.joined} · lost: ${result.ridersLost}`,
     `Time: ${mins}:${secs}`,
+    result.newBest ? '<b>New best score!</b>' : `Best: ${result.best.toLocaleString()}`,
   ].join('<br>');
   rematchBtn.textContent = 'Ride again';
   rematchBtn.style.display = '';

@@ -1,5 +1,5 @@
 import { CHARGE as C } from './config';
-import { BattalionSpec, Wave } from './sim';
+import { BattalionSpec, SquadSpec, Wave } from './sim';
 
 const DOWN = Math.PI / 2;
 const UP = -Math.PI / 2;
@@ -55,7 +55,28 @@ export function createWaves(): Wave[] {
     ({ team: 'red', type, role: type === 'archer' ? 'archer' : 'front', x, y, facing: DOWN, count, cols: 4 });
   return [
     { time: 45, specs: [col('swordsman', cx - 600), col('pikeman', cx - 520), col('archer', cx + 560, 16)] },
-    { time: 100, specs: [col('swordsman', cx + 520), col('swordsman', cx + 600), col('pikeman', cx - 80), col('pikeman', cx + 80)] },
-    { time: 160, specs: [col('swordsman', cx - 640), col('pikeman', cx - 560), col('swordsman', cx + 560), col('pikeman', cx + 640), col('archer', cx, 16)] },
+    {
+      time: 100,
+      specs: [col('swordsman', cx + 520), col('swordsman', cx + 600), col('pikeman', cx - 80), col('pikeman', cx + 80)],
+      // Knights that ride straight for your banner.
+      squads: [{ team: 'red', ai: 'hunter', x: cx - 300, y: 30, facing: DOWN, count: 8 }],
+    },
+    {
+      time: 160,
+      specs: [col('swordsman', cx - 640), col('pikeman', cx - 560), col('swordsman', cx + 560), col('pikeman', cx + 640), col('archer', cx, 16)],
+      squads: [{ team: 'red', ai: 'hunter', x: cx + 300, y: 30, facing: DOWN, count: 10 }],
+    },
+  ];
+}
+
+/**
+ * Cavalry on the field from the start: an allied troop already raiding on the far
+ * flank (ride into it to take command) and red knights guarding the enemy rear.
+ */
+export function createSquadSpecs(): SquadSpec[] {
+  const cx = C.WORLD_W / 2;
+  return [
+    { team: 'blue', ai: 'raider', x: cx + 860, y: C.FRONT_Y + 360, facing: UP, count: 8 },
+    { team: 'red', ai: 'guard', x: cx + 640, y: C.FRONT_Y - 430, facing: DOWN, count: 8 },
   ];
 }

@@ -188,7 +188,8 @@ describe('reinforcements', () => {
     const waves = createWaves();
     const sim = new ChargeSim([block()], { seed: 1, squad: null, waves });
     const total = sim.initialRed;
-    expect(total).toBe(24 + waves.flatMap(w => w.specs).reduce((n, s) => n + s.count, 0));
+    const waveSoldiers = waves.flatMap(w => [...w.specs, ...(w.squads ?? [])]).reduce((n, s) => n + s.count, 0);
+    expect(total).toBe(24 + waveSoldiers);
     expect(sim.battalions).toHaveLength(1);
     let arrived = false;
     for (let t = 0; t < waves[0].time + 0.1; t += 1 / 30) {
@@ -208,5 +209,98 @@ describe('reinforcements', () => {
     sim.step(1 / 60);
     expect(sim.battalions[0].routed).toBe(true);
     expect(sim.outcome).toBe('playing');
+  });
+});
+
+describe('cavalry squadrons', () => {
+  it('riding into an allied troop takes it under command', () => {
+    const sim = new ChargeSim([], {
+      seed: 1, squad: { x: 500, y: 500, facing: 0, count: 5 }, muster: false,
+      squads: [{ team: 'blue', ai: 'raider', x: 560, y: 500, facing: 0, count: 6, muster: 30 }],
+    });
+    for (let t = 0; t < 1.5 && sim.riders.length < 11; t += 1 / 60) sim.step(1 / 60, { dirX: 1, dirY: 0, gallop: false });
+    expect(sim.riders.length).toBe(11);
+    expect(sim.ridersJoined).toBe(6);
+    expect(sim.squadrons).toHaveLength(1);
+  });
+
+  it('never grows beyond the command limit', () => {
+    const sim = new ChargeSim([], {
+      seed: 1, squad: { x: 500, y: 500, facing: 0, count: C.MAX_SQUAD - 2 }, muster: false,
+      squads: [{ team: 'blue', ai: 'raider', x: 520, y: 500, facing: 0, count: 6, muster: 30 }],
+    });
+    sim.step(1 / 60);
+    expect(sim.riders.length).toBe(C.MAX_SQUAD);
+    expect(sim.squadrons.find(sq => sq !== sim.player)!.riders).toHaveLength(4);
+  });
+
+  it('fresh allied troops muster at the camp', () => {
+    const sim = new ChargeSim([], { seed: 1, squad: { x: 1500, y: 300, facing: 0, count: 3 } });
+    let mustered = false;
+    for (let t = 0; t < C.MUSTER_FIRST + 0.1; t += 1 / 30) {
+      sim.step(1 / 30);
+      if (sim.events.some(e => e.type === 'muster')) mustered = true;
+    }
+    expect(mustered).toBe(true);
+    const troop = sim.squadrons.find(sq => sq !== sim.player)!;
+    expect(troop.riders).toHaveLength(C.MUSTER_SIZE);
+    expect(Math.hypot(troop.riders[0].x - C.CAMP_X, troop.riders[0].y - C.CAMP_Y)).toBeLessThan(C.CAMP_R);
+  });
+
+  it('allied raiders charge enemy battalions on their own', () => {
+    const sim = new ChargeSim([block({ type: 'archer', role: 'archer', count: 20, cols: 10 })], {
+      seed: 4, squad: null, muster: false,
+      squads: [{ team: 'blue', ai: 'raider', x: 600, y: 1000, facing: UP, count: 8 }],
+    });
+    let kills = 0;
+    for (let t = 0; t < 20; t += 1 / 30) {
+      sim.step(1 / 30);
+      kills += sim.events.filter(e => e.type === 'kill').length;
+    }
+    expect(kills).toBeGreaterThan(5);
+  });
+
+  it('hunting knights ride for your banner and clash horse against horse', () => {
+    const sim = new ChargeSim([block({ x: 2100, y: 200 })], {
+      seed: 1, squad: { x: 600, y: 900, facing: UP, count: 6 }, muster: false,
+      squads: [{ team: 'red', ai: 'hunter', x: 600, y: 300, facing: DOWN, count: 6 }],
+    });
+    const start = Math.hypot(sim.squadrons[1].riders[0].x - 600, sim.squadrons[1].riders[0].y - 900);
+    let riderDowns = 0;
+    for (let t = 0; t < 8; t += 1 / 60) {
+      sim.step(1 / 60, { dirX: 0, dirY: -1, gallop: true });
+      riderDowns += sim.events.filter(e => e.type === 'rider-down').length;
+    }
+    expect(riderDowns).toBeGreaterThan(0);
+    const knights = sim.squadrons.find(sq => sq.team === 'red');
+    if (knights?.riders[0] && sim.leader) {
+      expect(Math.hypot(knights.riders[0].x - sim.leader.x, knights.riders[0].y - sim.leader.y)).toBeLessThan(start);
+    }
+  });
+
+  it('killing knights scores double', () => {
+    const sim = new ChargeSim([block({ x: 2100, y: 200 })], {
+      seed: 1, squad: { x: 600, y: 700, facing: UP, count: 1 }, muster: false,
+      squads: [{ team: 'red', ai: 'guard', x: 600, y: 600, facing: DOWN, count: 3 }],
+    });
+    for (const k of sim.squadrons[1].riders) k.hp = 1;
+    sim.leader!.speed = C.GALLOP_SPEED;
+    let points = 0;
+    for (let t = 0; t < 1 && points === 0; t += 1 / 60) {
+      sim.step(1 / 60, { dirX: 0, dirY: -1, gallop: true });
+      for (const e of sim.events) if (e.type === 'rider-down' && e.byPlayer) points = e.points;
+    }
+    expect(points).toBeGreaterThanOrEqual(C.KILL_SCORE * C.KNIGHT_SCORE_MULT);
+  });
+
+  it('broken knights flee the field and count as beaten', () => {
+    const sim = new ChargeSim([block({ team: 'blue', y: 1000, facing: UP })], {
+      seed: 1, squad: null, muster: false,
+      squads: [{ team: 'red', ai: 'hunter', x: 600, y: 120, facing: DOWN, count: C.AI_RETREAT_AT }],
+    });
+    expect(sim.outcome).toBe('playing');
+    for (let t = 0; t < 10 && sim.outcome === 'playing'; t += 1 / 30) sim.step(1 / 30);
+    expect(sim.squadrons.some(sq => sq.team === 'red')).toBe(false);
+    expect(sim.outcome).toBe('victory');
   });
 });

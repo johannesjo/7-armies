@@ -10,17 +10,40 @@ export const CHARGE = {
   SQUAD_SIZE: 12,
   RIDER_RADIUS: 5.5,
   RIDER_HP: 30,
-  CANTER_SPEED: 125,
-  GALLOP_SPEED: 210,
-  ACCEL: 160,
-  GALLOP_ACCEL: 240,
-  COAST_DECEL: 110,
+  CANTER_SPEED: 135,
+  GALLOP_SPEED: 215,
+  ACCEL: 260,
+  GALLOP_ACCEL: 320,
+  COAST_DECEL: 170,
   /** Turn rate (rad/s) when slow vs. at full gallop — wide arcs at speed. */
-  TURN_RATE_SLOW: 4.4,
-  TURN_RATE_FAST: 2.1,
-  FOLLOW_GAIN: 3.2,
-  FOLLOW_ACCEL: 520,
-  FOLLOWER_TURN_RATE: 9,
+  TURN_RATE_SLOW: 5.6,
+  TURN_RATE_FAST: 2.9,
+  FOLLOW_GAIN: 4.2,
+  FOLLOW_ACCEL: 720,
+  FOLLOWER_TURN_RATE: 10,
+  /** Largest squadron you can command (allied troops join up to this). */
+  MAX_SQUAD: 30,
+  /** Ride this close to an allied troop to take it under command. */
+  JOIN_RADIUS: 34,
+  MUSTER_FIRST: 20,
+  MUSTER_INTERVAL: 42,
+  MUSTER_SIZE: 6,
+  /** Mustered troops wait this long at camp for you before riding out alone. */
+  MUSTER_WAIT: 16,
+  MAX_ALLIED_SQUADS: 2,
+  /** AI squadrons break off when down to this many riders. */
+  AI_RETREAT_AT: 2,
+  /** Raiders turn on enemy horse that comes this close. */
+  RAIDER_ENGAGE_SQUAD: 230,
+  GUARD_RADIUS: 380,
+  GUARD_LEASH: 620,
+  KNIGHT_HP: 32,
+  /** Knights are worth this many times an infantryman. */
+  KNIGHT_SCORE_MULT: 2,
+  RIDER_CLASH_DAMAGE_MULT: 0.8,
+  RIDER_CLASH_SLOW: 0.8,
+  /** Damage and shock multiplier for AI cavalry against infantry. */
+  AI_INFANTRY_MULT: 0.25,
 
   STAMINA_MAX: 100,
   STAMINA_DRAIN: 14,

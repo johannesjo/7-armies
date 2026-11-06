@@ -391,14 +391,24 @@ export class ChargeView {
           break;
         case 'rider-hit':
           this.pulse(e.id);
-          this.shake = Math.min(7, this.shake + 0.8);
+          if (e.mine) this.shake = Math.min(7, this.shake + 0.8);
           break;
         case 'rider-down':
           this.killUnit(e.id, e.angle, 130);
-          this.blood(e.x, e.y, e.angle, 8, 1.4);
-          this.burstDust(e.x, e.y, e.angle, 8);
-          this.popup(e.x, e.y, e.wasLeader ? 'Leader down!' : 'Rider down', t.labelWarn, 13);
-          this.shake = Math.min(8, this.shake + 3);
+          this.blood(e.x, e.y, e.angle, e.mine ? 8 : 5, 1.4);
+          this.burstDust(e.x, e.y, e.angle, e.mine ? 8 : 4);
+          if (e.mine) {
+            this.popup(e.x, e.y, e.wasLeader ? 'Leader down!' : 'Rider down', t.labelWarn, 13);
+            this.shake = Math.min(8, this.shake + 3);
+          } else if (e.byPlayer) {
+            this.popup(e.x, e.y, `Knight down +${e.points}`, t.elevationBonus, 14);
+          }
+          break;
+        case 'join':
+          this.popup(e.x, e.y - 16, `+${e.count} riders!`, t.blue, 20, 1.4);
+          break;
+        case 'muster':
+          this.popup(e.x, e.y - 20, 'Fresh riders!', t.blue, 16, 1.6);
           break;
         case 'rally':
           this.popup(e.x, e.y - 10, '+1 rider', t.blue, 13);
@@ -642,6 +652,23 @@ export class ChargeView {
       g.roundRect(x, y, w * m, h, 1.5).fill({ color, alpha: 0.95 });
     }
 
+    // Banners on other squadrons' leaders; allied troops show they can be collected.
+    for (const sq of sim.squadrons) {
+      const SL = sq.riders[0];
+      if (sq === sim.player || !SL) continue;
+      const color = sq.team === 'blue' ? t.blue : t.red;
+      const bx = SL.x - Math.cos(SL.facing) * 3, by = SL.y - Math.sin(SL.facing) * 3;
+      const wave = Math.sin(sim.time * 9 + sq.id) * 1.2;
+      g.moveTo(bx, by).lineTo(bx, by - 12).stroke({ width: 1, color: t.obstacleBorder });
+      g.poly([bx, by - 12, bx + 7, by - 10 + wave, bx, by - 7]).fill(color);
+      if (sq.team === 'blue') {
+        const c = sim.squadCenter(sq);
+        const pulse = 0.5 + 0.3 * Math.sin(sim.time * 4 + sq.id);
+        g.circle(c.x, c.y, 16 + sq.riders.length * 1.5).stroke({ width: 1.2, color, alpha: pulse });
+      }
+    }
+    this.updateJoinTags(sim);
+
     if (!L) return;
     // Leader marker: ring + heading chevron.
     g.circle(L.x, L.y, 11).stroke({ width: 1.4, color: t.blue, alpha: 0.75 });
@@ -666,7 +693,15 @@ export class ChargeView {
     const base = this.baseZoom();
     let targetZoom = base;
     if (this.holdCamera) {
+      // Hold still while a route is drawn so strokes stay under the finger,
+      // but never let the squadron leave the middle of the screen.
       targetZoom = this.zoom;
+      if (L) {
+        const ax = (this.viewW / this.zoom) * 0.3, ay = (this.viewH / this.zoom) * 0.3;
+        const dx = L.x - this.camX, dy = L.y - this.camY;
+        if (Math.abs(dx) > ax) this.camX += dx - Math.sign(dx) * ax;
+        if (Math.abs(dy) > ay) this.camY += dy - Math.sign(dy) * ay;
+      }
     } else if (L) {
       const k = Math.min(1, L.speed / C.GALLOP_SPEED);
       targetZoom = base * (1 - 0.1 * k);
@@ -689,6 +724,40 @@ export class ChargeView {
     const sy = (this.rand() - 0.5) * 2 * this.shake;
     this.world.scale.set(this.zoom);
     this.world.position.set(this.viewW / 2 - cx * this.zoom + sx, this.viewH / 2 - cy * this.zoom + sy);
+  }
+
+  private readonly joinTags = new Map<number, Text>();
+
+  /** "JOIN +n" tags over allied troops so it's obvious you can collect them. */
+  private updateJoinTags(sim: ChargeSim): void {
+    const seen = new Set<number>();
+    const L = sim.leader;
+    for (const sq of sim.squadrons) {
+      if (sq === sim.player || sq.team !== 'blue' || sq.riders.length === 0 || !L) continue;
+      seen.add(sq.id);
+      let tag = this.joinTags.get(sq.id);
+      if (!tag) {
+        tag = new Text({
+          text: '',
+          style: {
+            fontFamily: 'Segoe UI, system-ui, sans-serif', fontSize: 12, fontWeight: '800',
+            fill: this.theme.blue, stroke: { color: this.theme.bg, width: 3 }, letterSpacing: 1,
+          },
+        });
+        tag.anchor.set(0.5, 1);
+        this.popupLayer.addChild(tag);
+        this.joinTags.set(sq.id, tag);
+      }
+      const label = `JOIN +${sq.riders.length}`;
+      if (tag.text !== label) tag.text = label;
+      const c = sim.squadCenter(sq);
+      const p = this.worldToScreen({ x: c.x, y: c.y - 22 - sq.riders.length });
+      tag.position.set(p.x, p.y);
+      tag.alpha = 0.7 + 0.3 * Math.sin(sim.time * 4);
+    }
+    for (const [id, tag] of this.joinTags) {
+      if (!seen.has(id)) { tag.destroy(); this.joinTags.delete(id); }
+    }
   }
 
   private popup(x: number, y: number, msg: string, color: number, size: number, life = 0.9): void {

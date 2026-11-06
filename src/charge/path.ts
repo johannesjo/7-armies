@@ -13,10 +13,10 @@ const SAMPLE = 10;
 /** A point counts as reached inside this radius. */
 const ARRIVE = 16;
 /** Distance ahead along the path the leader steers toward. */
-const LOOKAHEAD_BASE = 26;
-const LOOKAHEAD_PER_SPEED = 0.12;
+const LOOKAHEAD_BASE = 18;
+const LOOKAHEAD_PER_SPEED = 0.08;
 /** Ease off near the end of the route so the squadron pulls up instead of circling. */
-const SLOWDOWN_DIST = 70;
+const SLOWDOWN_DIST = 50;
 
 /**
  * A route drawn by the player. The squadron leader follows it with pure-pursuit

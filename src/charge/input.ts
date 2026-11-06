@@ -22,22 +22,20 @@ export interface StrokeHandler {
 
 /**
  * Mouse / touch: press and drag to draw the squadron's route (a tap rides straight
- * to that spot). Keyboard: WASD/arrows steer directly. Space, Shift, the right mouse
- * button or the on-screen Gallop button force a gallop.
+ * to that spot); draw fast to gallop. Keyboard: WASD/arrows steer directly.
+ * Space, Shift or the right mouse button force a gallop.
  */
 export class ChargeControls {
   private keys = new Set<string>();
   private mouseGallop = false;
-  private gallopTouch = false;
   private stroke: { id: number; start: Vec2; last: Vec2; lastT: number; moved: boolean } | null = null;
   private attached = false;
   onPause: (() => void) | null = null;
   handler: StrokeHandler | null = null;
+  /** Any press on the battlefield (used to unlock audio). */
+  onInteract: (() => void) | null = null;
 
-  constructor(
-    private readonly surface: HTMLElement,
-    private readonly gallopBtn: HTMLElement,
-  ) {}
+  constructor(private readonly surface: HTMLElement) {}
 
   /** A route is being drawn right now. */
   get drawing(): boolean {
@@ -55,11 +53,6 @@ export class ChargeControls {
     window.addEventListener('pointerup', this.onPointerUp);
     window.addEventListener('pointercancel', this.onPointerCancel);
     this.surface.addEventListener('contextmenu', this.preventMenu);
-    this.gallopBtn.addEventListener('pointerdown', this.onGallopDown);
-    this.gallopBtn.addEventListener('pointerup', this.onGallopUp);
-    this.gallopBtn.addEventListener('pointercancel', this.onGallopUp);
-    this.gallopBtn.addEventListener('pointerleave', this.onGallopUp);
-    this.gallopBtn.addEventListener('contextmenu', this.preventMenu);
   }
 
   detach(): void {
@@ -73,11 +66,6 @@ export class ChargeControls {
     window.removeEventListener('pointerup', this.onPointerUp);
     window.removeEventListener('pointercancel', this.onPointerCancel);
     this.surface.removeEventListener('contextmenu', this.preventMenu);
-    this.gallopBtn.removeEventListener('pointerdown', this.onGallopDown);
-    this.gallopBtn.removeEventListener('pointerup', this.onGallopUp);
-    this.gallopBtn.removeEventListener('pointercancel', this.onGallopUp);
-    this.gallopBtn.removeEventListener('pointerleave', this.onGallopUp);
-    this.gallopBtn.removeEventListener('contextmenu', this.preventMenu);
     this.reset();
   }
 
@@ -90,7 +78,7 @@ export class ChargeControls {
     }
     const mag = Math.hypot(dx, dy);
     if (mag > 0) { dx /= mag; dy /= mag; }
-    let gallop = this.gallopTouch || this.mouseGallop;
+    let gallop = this.mouseGallop;
     for (const k of this.keys) if (GALLOP_KEYS.has(k)) gallop = true;
     return { dirX: dx, dirY: dy, gallop };
   }
@@ -98,8 +86,6 @@ export class ChargeControls {
   private reset = (): void => {
     this.keys.clear();
     this.mouseGallop = false;
-    this.gallopTouch = false;
-    this.gallopBtn.classList.remove('pressed');
     if (this.stroke) {
       this.stroke = null;
       this.handler?.strokeEnd(false);
@@ -129,6 +115,7 @@ export class ChargeControls {
 
   private onPointerDown = (e: PointerEvent): void => {
     e.preventDefault();
+    this.onInteract?.();
     if (e.pointerType === 'mouse' && e.button === 2) {
       this.mouseGallop = true;
       return;
@@ -173,18 +160,6 @@ export class ChargeControls {
       this.stroke = null;
       this.handler?.strokeEnd(false);
     }
-  };
-
-  private onGallopDown = (e: PointerEvent): void => {
-    this.gallopTouch = true;
-    this.gallopBtn.classList.add('pressed');
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
-  private onGallopUp = (): void => {
-    this.gallopTouch = false;
-    this.gallopBtn.classList.remove('pressed');
   };
 
   private preventMenu = (e: Event): void => e.preventDefault();

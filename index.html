@@ -441,10 +441,14 @@
     }
     #ch-damage.flash { animation: ch-hurt 0.45s ease-out; }
     @keyframes ch-hurt { from { opacity: 0.4; } to { opacity: 0; } }
-    #ch-pause-btn {
+    #ch-buttons {
       position: absolute;
       top: calc(64px + env(safe-area-inset-top, 0px));
       right: max(12px, env(safe-area-inset-right, 0px));
+      display: flex;
+      gap: 8px;
+    }
+    #ch-buttons button {
       padding: 4px 12px;
       background: rgba(0,0,0,0.35);
       color: #eee;
@@ -453,24 +457,6 @@
       cursor: pointer;
       font-size: 14px;
     }
-    #ch-gallop-btn {
-      display: none;
-      position: absolute;
-      right: max(20px, env(safe-area-inset-right, 0px));
-      bottom: max(24px, env(safe-area-inset-bottom, 0px));
-      width: 96px; height: 96px;
-      border-radius: 50%;
-      border: 3px solid var(--ch-red);
-      background: rgba(0,0,0,0.35);
-      color: #fff;
-      font-weight: 800;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      font-size: 13px;
-      touch-action: none;
-    }
-    #ch-gallop-btn.pressed { background: var(--ch-red); }
-    #ch-gallop-btn.tired { opacity: 0.4; }
     #ch-pause {
       display: none;
       position: absolute;
@@ -493,7 +479,6 @@
     #ch-pause .ch-help { font-size: 13px; opacity: 0.75; max-width: 420px; text-align: center; line-height: 1.6; padding: 0 16px; }
 
     @media (pointer: coarse) {
-      #ch-gallop-btn { display: block; }
       #ch-hint .touch-only { display: inline; }
       #ch-hint .mouse-only { display: none; }
     }
@@ -505,7 +490,7 @@
       #ch-score { font-size: 20px; }
       #ch-minimap { width: 128px; height: 80px; }
       #ch-banner { font-size: 22px; letter-spacing: 1px; }
-      #ch-pause-btn { top: calc(84px + env(safe-area-inset-top, 0px)); }
+      #ch-buttons { top: calc(84px + env(safe-area-inset-top, 0px)); }
       #ch-hint { font-size: 11px; padding: 8px 12px; line-height: 1.5; }
     }
     @media (max-height: 500px) {
@@ -515,15 +500,12 @@
       .ch-bar { width: 100px; }
       #ch-minimap { width: 128px; height: 80px; }
       #ch-hint { top: calc(70px + env(safe-area-inset-top, 0px)); font-size: 11px; padding: 6px 12px; line-height: 1.5; }
-      #ch-gallop-btn { width: 80px; height: 80px; }
-      #ch-banner { font-size: 22px; }
+      #ch-banner { font-size: 22px; top: 72%; }
     }
     body.day-mode #charge-hud { text-shadow: 0 1px 2px rgba(255,255,255,0.6); }
     body.day-mode .ch-bar { background: rgba(68,51,34,0.18); }
-    body.day-mode #ch-pause-btn { background: rgba(245,240,224,0.7); color: #443322; border-color: #aa9977; }
+    body.day-mode #ch-buttons button { background: rgba(245,240,224,0.7); color: #443322; border-color: #aa9977; }
     body.day-mode #ch-banner { text-shadow: 0 1px 6px rgba(255,255,255,0.8); }
-    body.day-mode #ch-gallop-btn { background: rgba(245,240,224,0.7); color: #443322; }
-    body.day-mode #ch-gallop-btn.pressed { color: #fff; }
     body.day-mode #ch-pause { background: rgba(245,240,224,0.85); color: #443322; }
     body.day-mode #ch-pause button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
     body.day-mode #charge-btn { background: #ead2c4; color: #5a2222; border-color: #aa5544; }
@@ -600,17 +582,19 @@
     <canvas id="ch-minimap" aria-hidden="true"></canvas>
     <div id="ch-banner" aria-live="polite"></div>
     <div id="ch-hint">
-      <b>Draw your route</b> — <span class="mouse-only">drag with the mouse</span><span class="touch-only">drag your finger</span>; time slows while you draw. Click or tap a spot to ride straight there.<br>
-      <span class="legend canter"></span> draw slowly to canter · <span class="legend gallop"></span> draw quickly to gallop<br>
-      Hit flanks <b>×2</b> and rears <b>×3</b> · dodge the red circles · ride back to camp to rally
+      <b>Draw your route</b> — <span class="mouse-only">drag with the mouse</span><span class="touch-only">drag your finger</span> and your squadron rides it. Click or tap a spot to ride straight there.<br>
+      <span class="legend canter"></span> draw slowly to canter · <span class="legend gallop"></span> flick quickly to gallop<br>
+      Hit flanks <b>×2</b> and rears <b>×3</b> · dodge the red circles · ride into <b>allied troops</b> to take command of them
       <span class="mouse-only"><br><kbd>WASD</kbd> steers directly · <kbd>Space</kbd> / right mouse forces a gallop</span>
     </div>
-    <div id="ch-drawing-tag" aria-hidden="true">Plotting route · battle slowed</div>
-    <button id="ch-gallop-btn" aria-label="Gallop">Gallop</button>
-    <button id="ch-pause-btn" title="Pause (Esc)" aria-label="Pause">❚❚</button>
+    <div id="ch-drawing-tag" aria-hidden="true">Drawing route — flick fast to gallop</div>
+    <div id="ch-buttons">
+      <button id="ch-mute-btn" title="Mute sound" aria-label="Mute sound">🔊</button>
+      <button id="ch-pause-btn" title="Pause (Esc)" aria-label="Pause">❚❚</button>
+    </div>
     <div id="ch-pause" role="dialog" aria-modal="true" aria-label="Paused">
       <h2>Paused</h2>
-      <p class="ch-help">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it. Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Pikes facing you will stop a charge. Keep moving — riders that stall in the crowd get pulled down. Ride through the blue camp to rally fresh riders and rest your horses.</p>
+      <p class="ch-help">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it. Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Pikes facing you will stop a charge, and enemy knights will hunt you. Keep moving — riders that stall in the crowd get pulled down. Ride into allied cavalry troops to take them under your command (up to 30 riders); fresh troops muster at the blue camp, where you can also rest and rally.</p>
       <button id="ch-resume-btn">Resume</button>
       <button id="ch-quit-btn">Quit to menu</button>
     </div>

@@ -2,10 +2,11 @@ import { Application, Ticker } from 'pixi.js';
 import { Theme } from '../theme';
 import { CHARGE as C } from './config';
 import { ChargeSim, SimEvent, NO_INPUT, ChargeInput } from './sim';
-import { createBattleSpecs, createWaves } from './scenario';
+import { createBattleSpecs, createWaves, createSquadSpecs } from './scenario';
 import { ChargeView, mixColor } from './view';
 import { ChargeControls, StrokeHandler } from './input';
 import { RiderPath, StrokePace } from './path';
+import { ChargeAudio } from './audio';
 import { Vec2 } from '../types';
 
 export interface ChargeResult {
@@ -16,13 +17,24 @@ export interface ChargeResult {
   routs: number;
   ridersLost: number;
   bestCombo: number;
+  joined: number;
   time: number;
+  best: number;
+  newBest: boolean;
+}
+
+const BEST_KEY = 'charge.best';
+
+function readBest(): number {
+  try { return Number(localStorage.getItem(BEST_KEY)) || 0; } catch { return 0; }
+}
+
+function writeBest(score: number): void {
+  try { localStorage.setItem(BEST_KEY, String(score)); } catch { /* storage unavailable */ }
 }
 
 const STEP = 1 / 60;
 const END_DELAY = 2.2;
-/** The battle slows while you draw a route so you can plan the charge. */
-const DRAW_TIME_SCALE = 0.4;
 /** Drawing faster than this share of the screen's long side per second means gallop. */
 const GALLOP_STROKE_SPEED = 0.6;
 /** Strokes starting this close (px) to the end of the current route extend it. */
@@ -71,10 +83,18 @@ export class ChargeMode {
   private readonly pauseEl = $('ch-pause');
   private readonly damageEl = $('ch-damage');
   private readonly minimap = $('ch-minimap') as HTMLCanvasElement;
-  private readonly gallopBtn = $('ch-gallop-btn');
+  private readonly muteBtn = $('ch-mute-btn');
+  private readonly audio = new ChargeAudio();
 
   constructor(private readonly cb: { onEnd(result: ChargeResult): void; onQuit(): void }) {
-    this.controls = new ChargeControls(this.host, this.gallopBtn);
+    this.controls = new ChargeControls(this.host);
+    this.controls.onInteract = () => this.audio.start();
+    this.muteBtn.addEventListener('click', () => {
+      this.audio.muted = !this.audio.muted;
+      this.audio.start();
+      this.updateMuteBtn();
+    });
+    this.updateMuteBtn();
     this.controls.onPause = () => this.togglePause();
     this.controls.handler = this.strokes;
     $('ch-pause-btn').addEventListener('click', () => this.togglePause());
@@ -110,7 +130,12 @@ export class ChargeMode {
     this.teardownRun();
 
     this.theme = theme;
-    this.sim = new ChargeSim(createBattleSpecs(), { seed: (Math.random() * 1e9) | 0, waves: createWaves() });
+    this.sim = new ChargeSim(createBattleSpecs(), {
+      seed: (Math.random() * 1e9) | 0,
+      waves: createWaves(),
+      squads: createSquadSpecs(),
+    });
+    this.audio.start();
     this.view = new ChargeView(app, theme);
     app.resize();
     this.resize();
@@ -149,6 +174,7 @@ export class ChargeMode {
       this.app.stop();
     }
     this.controls.detach();
+    this.audio.hush();
     window.removeEventListener('resize', this.onResize);
     this.view?.destroy();
     this.view = null;
@@ -164,6 +190,7 @@ export class ChargeMode {
     if (!this.sim || this.endTimer >= 0) return;
     this.paused = force ?? !this.paused;
     this.pauseEl.classList.toggle('active', this.paused);
+    if (this.paused) this.audio.hush();
     if (this.paused) ($('ch-resume-btn') as HTMLButtonElement).focus();
   }
 
@@ -217,6 +244,13 @@ export class ChargeMode {
     return kb;
   }
 
+  private updateMuteBtn(): void {
+    const m = this.audio.muted;
+    this.muteBtn.textContent = m ? '🔇' : '🔊';
+    this.muteBtn.title = m ? 'Unmute sound' : 'Mute sound';
+    this.muteBtn.setAttribute('aria-label', this.muteBtn.title);
+  }
+
   private resize(): void {
     if (!this.app || !this.view) return;
     this.view.resize(this.host.clientWidth, this.host.clientHeight);
@@ -228,9 +262,9 @@ export class ChargeMode {
     const rawDt = Math.min(ticker.deltaMS / 1000, 0.1);
     if (this.paused) return;
 
-    // Slow motion while the battle's outcome sinks in, or while a route is drawn.
+    // Slow motion while the battle's outcome sinks in.
     const drawing = this.controls.drawing && this.endTimer < 0;
-    const dt = this.endTimer >= 0 ? rawDt * 0.35 : drawing ? rawDt * DRAW_TIME_SCALE : rawDt;
+    const dt = this.endTimer >= 0 ? rawDt * 0.35 : rawDt;
 
     this.acc += dt;
     this.frameEvents.length = 0;
@@ -244,6 +278,9 @@ export class ChargeMode {
     view.render(sim, this.frameEvents, dt);
     this.screen.classList.toggle('drawing', drawing);
     this.handleHudEvents(this.frameEvents);
+    const L = sim.leader;
+    if (this.endTimer < 0) this.audio.update(rawDt, L ? Math.min(1, L.speed / C.GALLOP_SPEED) : 0, sim.riders.length, this.frameEvents);
+    else this.audio.hush();
 
     this.hudTimer -= rawDt;
     if (this.hudTimer <= 0) {
@@ -264,16 +301,24 @@ export class ChargeMode {
 
   private finish(): void {
     const sim = this.sim!;
+    const score = sim.score + (sim.outcome === 'victory' ? 500 + sim.riders.length * 50 : 0);
+    const prevBest = readBest();
+    const newBest = score > prevBest;
+    if (newBest) writeBest(score);
     const result: ChargeResult = {
       outcome: sim.outcome === 'victory' ? 'victory' : 'defeat',
       reason: sim.outcomeReason,
-      score: sim.score + (sim.outcome === 'victory' ? 500 + sim.riders.length * 50 : 0),
+      score,
       kills: sim.kills,
       routs: sim.routsByPlayer,
       ridersLost: sim.ridersLost,
       bestCombo: sim.bestCombo,
+      joined: sim.ridersJoined,
       time: sim.time,
+      best: Math.max(prevBest, score),
+      newBest,
     };
+    this.audio.hush();
     this.app?.ticker.remove(this.tick, this);
     this.app?.stop();
     this.controls.detach();
@@ -301,7 +346,7 @@ export class ChargeMode {
   private handleHudEvents(events: SimEvent[]): void {
     let hurt = false;
     for (const e of events) {
-      if (e.type === 'rider-hit') hurt = true;
+      if (e.type === 'rider-hit' && e.mine) hurt = true;
       if (e.type === 'rout' && e.team === 'blue') this.banner('Our line is breaking — hurry!', 2200);
       if (e.type === 'rout' && e.team === 'red' && this.sim && this.sim.outcome === 'playing') {
         const left = this.sim.battalions.filter(b => b.team === 'red' && !b.routed).length;
@@ -311,8 +356,10 @@ export class ChargeMode {
           this.banner(`${left} enemy battalion${left === 1 ? '' : 's'} left${more}`, 1600);
         }
       }
-      if (e.type === 'rider-down' && e.wasLeader && this.sim?.leader) this.banner('A new rider takes the banner', 1600);
-      if (e.type === 'wave') this.banner('Enemy reinforcements!', 2200);
+      if (e.type === 'rider-down' && e.mine && e.wasLeader && this.sim?.leader) this.banner('A new rider takes the banner', 1600);
+      if (e.type === 'wave') this.banner(e.index >= 2 ? 'Enemy knights ride for your banner!' : 'Enemy reinforcements!', 2400);
+      if (e.type === 'muster') this.banner('Fresh riders at camp — ride in to take command', 2600);
+      if (e.type === 'join') this.banner(`+${e.count} riders join your squadron`, 1600);
     }
     if (hurt) {
       this.damageEl.classList.remove('flash');
@@ -326,7 +373,7 @@ export class ChargeMode {
     if (!sim) return;
     if (sim.riders.length !== this.lastRiders) {
       this.lastRiders = sim.riders.length;
-      this.ridersEl.textContent = `♞ ${sim.riders.length}/${C.SQUAD_SIZE}`;
+      this.ridersEl.textContent = `♞ ${sim.riders.length}`;
       this.ridersEl.classList.toggle('low', sim.riders.length <= 3);
     }
     this.staminaEl.style.width = `${(sim.stamina / C.STAMINA_MAX) * 100}%`;
@@ -339,7 +386,6 @@ export class ChargeMode {
     this.blueBar.style.width = `${blue * 100}%`;
     const t = Math.floor(sim.time);
     this.timeEl.textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
-    this.gallopBtn.classList.toggle('tired', sim.stamina < C.STAMINA_MIN_TO_GALLOP && !sim.galloping);
   }
 
   private drawMinimap(): void {
@@ -382,6 +428,21 @@ export class ChargeMode {
       ctx.beginPath();
       ctx.arc(v.x * sx, v.y * sy, Math.max(2 * dpr, v.radius * sx), 0, Math.PI * 2);
       ctx.stroke();
+    }
+
+    // Other cavalry: allied troops (collectable) and enemy knights.
+    for (const sq of sim.squadrons) {
+      if (sq === sim.player) continue;
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = hex(sq.team === 'blue' ? theme.blue : theme.red);
+      for (const r of sq.riders) ctx.fillRect(r.x * sx - 1.5 * dpr, r.y * sy - 1.5 * dpr, 3 * dpr, 3 * dpr);
+      const c = sim.squadCenter(sq);
+      if (sq.team === 'blue' && sq.riders.length > 0) {
+        ctx.strokeStyle = hex(theme.blue);
+        ctx.beginPath();
+        ctx.arc(c.x * sx, c.y * sy, 5 * dpr, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
 
     ctx.globalAlpha = 1;

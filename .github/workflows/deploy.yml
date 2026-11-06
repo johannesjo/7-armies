@@ -1,35 +1,96 @@
 name: Deploy to GitHub Pages
 
+# Publishes every branch to GitHub Pages via the `gh-pages` branch:
+#   default branch   -> https://<owner>.github.io/<repo>/
+#   any other branch -> https://<owner>.github.io/<repo>/branches/<branch-slug>/
+# Each deploy sets a "GitHub Pages preview" commit status linking to its URL.
+# Previews are removed when their branch is deleted, and stale ones are pruned
+# on every default-branch deploy.
+#
+# Requires: Settings -> Pages -> Source = "Deploy from a branch", `gh-pages` / (root).
+
 on:
   push:
-    branches: [main]
+    branches: ['**', '!gh-pages']
+  delete:
+  workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
+  statuses: write
 
+# One run per branch at a time; a newer push (or deleting the branch)
+# supersedes an in-progress run for the same branch.
 concurrency:
-  group: pages
+  group: >-
+    pages-${{ github.event_name == 'delete'
+      && (github.event.ref_type == 'branch' && format('refs/heads/{0}', github.event.ref) || format('tag-{0}', github.event.ref))
+      || github.ref }}
   cancel-in-progress: true
 
+env:
+  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  PAGES_BRANCH: gh-pages
+
 jobs:
-  build-and-deploy:
+  deploy:
+    if: >-
+      github.event_name != 'delete'
+      && startsWith(github.ref, 'refs/heads/')
+      && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+
+      - name: Compute target path
+        id: target
+        env:
+          BRANCH: ${{ github.ref_name }}
+          REPO: ${{ github.event.repository.name }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          dir=$(bash .github/scripts/publish-pages.sh path "$BRANCH")
+          base="/$REPO/${dir:+$dir/}"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "url=https://${OWNER,,}.github.io$base" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run build
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - name: Build
+        env:
+          BASE: ${{ steps.target.outputs.base }}
+        run: npm run build -- --base="$BASE"
+
+      - name: Publish to gh-pages
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: bash .github/scripts/publish-pages.sh deploy "$BRANCH" dist
+
+      - name: Link preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.target.outputs.url }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f state=success -f context="GitHub Pages preview" \
+            -f description="Deployed (live within ~1 min)" -f target_url="$URL" > /dev/null
+          echo "### Deployed to GitHub Pages" >> "$GITHUB_STEP_SUMMARY"
+          echo "$URL" >> "$GITHUB_STEP_SUMMARY"
+
+  cleanup:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
         with:
-          path: dist
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Remove preview
+        env:
+          BRANCH: ${{ github.event.ref }}
+        run: bash .github/scripts/publish-pages.sh remove "$BRANCH"

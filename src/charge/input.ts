@@ -1,8 +1,8 @@
 import { Vec2 } from '../types';
 import { ChargeInput } from './sim';
 
-const STICK_RADIUS = 56;
-const MOUSE_DEADZONE = 22;
+/** Moves shorter than this (px) between press and release count as a tap. */
+const TAP_SLOP = 8;
 
 const KEY_DIRS: Record<string, [number, number]> = {
   KeyW: [0, -1], ArrowUp: [0, -1],
@@ -12,24 +12,37 @@ const KEY_DIRS: Record<string, [number, number]> = {
 };
 const GALLOP_KEYS = new Set(['Space', 'ShiftLeft', 'ShiftRight']);
 
+/** Receives route strokes drawn with mouse, pen or finger (surface-local CSS px). */
+export interface StrokeHandler {
+  strokeStart(p: Vec2): void;
+  /** `dist`/`dt` are the screen distance and real time since the previous sample. */
+  strokeMove(p: Vec2, dist: number, dt: number): void;
+  strokeEnd(tap: boolean): void;
+}
+
 /**
- * Turns keyboard (WASD/arrows + Space), mouse (hold left to ride toward the cursor,
- * right button to gallop) and touch (virtual stick + gallop button) into a ChargeInput.
+ * Mouse / touch: press and drag to draw the squadron's route (a tap rides straight
+ * to that spot). Keyboard: WASD/arrows steer directly. Space, Shift, the right mouse
+ * button or the on-screen Gallop button force a gallop.
  */
 export class ChargeControls {
   private keys = new Set<string>();
-  private mouse = { steering: false, gallop: false, x: 0, y: 0 };
-  private stick: { id: number; ox: number; oy: number; x: number; y: number } | null = null;
+  private mouseGallop = false;
   private gallopTouch = false;
+  private stroke: { id: number; start: Vec2; last: Vec2; lastT: number; moved: boolean } | null = null;
   private attached = false;
   onPause: (() => void) | null = null;
+  handler: StrokeHandler | null = null;
 
   constructor(
     private readonly surface: HTMLElement,
-    private readonly stickEl: HTMLElement,
-    private readonly knobEl: HTMLElement,
     private readonly gallopBtn: HTMLElement,
   ) {}
+
+  /** A route is being drawn right now. */
+  get drawing(): boolean {
+    return this.stroke !== null;
+  }
 
   attach(): void {
     if (this.attached) return;
@@ -40,7 +53,7 @@ export class ChargeControls {
     this.surface.addEventListener('pointerdown', this.onPointerDown);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
-    window.addEventListener('pointercancel', this.onPointerUp);
+    window.addEventListener('pointercancel', this.onPointerCancel);
     this.surface.addEventListener('contextmenu', this.preventMenu);
     this.gallopBtn.addEventListener('pointerdown', this.onGallopDown);
     this.gallopBtn.addEventListener('pointerup', this.onGallopUp);
@@ -58,7 +71,7 @@ export class ChargeControls {
     this.surface.removeEventListener('pointerdown', this.onPointerDown);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
-    window.removeEventListener('pointercancel', this.onPointerUp);
+    window.removeEventListener('pointercancel', this.onPointerCancel);
     this.surface.removeEventListener('contextmenu', this.preventMenu);
     this.gallopBtn.removeEventListener('pointerdown', this.onGallopDown);
     this.gallopBtn.removeEventListener('pointerup', this.onGallopUp);
@@ -68,42 +81,29 @@ export class ChargeControls {
     this.reset();
   }
 
-  /** @param leaderScreen leader position in surface-local CSS pixels (for mouse steering). */
-  read(leaderScreen: Vec2 | null): ChargeInput {
+  /** Direct keyboard steering plus any gallop override. dir is zero when no key is held. */
+  read(): ChargeInput {
     let dx = 0, dy = 0;
     for (const k of this.keys) {
       const d = KEY_DIRS[k];
       if (d) { dx += d[0]; dy += d[1]; }
     }
-    let mag = Math.hypot(dx, dy);
+    const mag = Math.hypot(dx, dy);
     if (mag > 0) { dx /= mag; dy /= mag; }
-
-    if (mag === 0 && this.stick) {
-      dx = (this.stick.x - this.stick.ox) / STICK_RADIUS;
-      dy = (this.stick.y - this.stick.oy) / STICK_RADIUS;
-      mag = Math.hypot(dx, dy);
-      if (mag > 1) { dx /= mag; dy /= mag; }
-    }
-
-    if (mag === 0 && this.mouse.steering && leaderScreen) {
-      const mx = this.mouse.x - leaderScreen.x;
-      const my = this.mouse.y - leaderScreen.y;
-      const m = Math.hypot(mx, my);
-      if (m > MOUSE_DEADZONE) { dx = mx / m; dy = my / m; }
-    }
-
-    let gallop = this.gallopTouch || this.mouse.gallop;
+    let gallop = this.gallopTouch || this.mouseGallop;
     for (const k of this.keys) if (GALLOP_KEYS.has(k)) gallop = true;
     return { dirX: dx, dirY: dy, gallop };
   }
 
   private reset = (): void => {
     this.keys.clear();
-    this.mouse.steering = false;
-    this.mouse.gallop = false;
+    this.mouseGallop = false;
     this.gallopTouch = false;
     this.gallopBtn.classList.remove('pressed');
-    this.endStick();
+    if (this.stroke) {
+      this.stroke = null;
+      this.handler?.strokeEnd(false);
+    }
   };
 
   private onKeyDown = (e: KeyboardEvent): void => {
@@ -128,53 +128,52 @@ export class ChargeControls {
   }
 
   private onPointerDown = (e: PointerEvent): void => {
-    const p = this.local(e);
-    if (e.pointerType === 'mouse') {
-      if (e.button === 0) this.mouse.steering = true;
-      if (e.button === 2) this.mouse.gallop = true;
-      this.mouse.x = p.x;
-      this.mouse.y = p.y;
-      e.preventDefault();
+    e.preventDefault();
+    if (e.pointerType === 'mouse' && e.button === 2) {
+      this.mouseGallop = true;
       return;
     }
-    if (this.stick) return;
-    this.stick = { id: e.pointerId, ox: p.x, oy: p.y, x: p.x, y: p.y };
-    this.stickEl.style.left = `${p.x}px`;
-    this.stickEl.style.top = `${p.y}px`;
-    this.stickEl.classList.add('active');
-    this.knobEl.style.transform = 'translate(-50%, -50%)';
-    e.preventDefault();
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (this.stroke) return; // one route at a time
+    const p = this.local(e);
+    this.stroke = { id: e.pointerId, start: p, last: p, lastT: e.timeStamp, moved: false };
+    this.handler?.strokeStart(p);
   };
 
   private onPointerMove = (e: PointerEvent): void => {
-    const p = this.local(e);
-    if (e.pointerType === 'mouse') {
-      this.mouse.x = p.x;
-      this.mouse.y = p.y;
-      return;
+    const s = this.stroke;
+    if (!s || e.pointerId !== s.id) return;
+    // Use every coalesced sample so fast flicks keep their shape and speed.
+    const samples = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
+    for (const ev of samples.length > 0 ? samples : [e]) {
+      const p = this.local(ev);
+      const dist = Math.hypot(p.x - s.last.x, p.y - s.last.y);
+      if (dist < 1) continue;
+      const dt = Math.max(0.001, (ev.timeStamp - s.lastT) / 1000);
+      if (Math.hypot(p.x - s.start.x, p.y - s.start.y) > TAP_SLOP) s.moved = true;
+      s.last = p;
+      s.lastT = ev.timeStamp;
+      this.handler?.strokeMove(p, dist, dt);
     }
-    if (!this.stick || e.pointerId !== this.stick.id) return;
-    this.stick.x = p.x;
-    this.stick.y = p.y;
-    let kx = p.x - this.stick.ox, ky = p.y - this.stick.oy;
-    const m = Math.hypot(kx, ky);
-    if (m > STICK_RADIUS) { kx *= STICK_RADIUS / m; ky *= STICK_RADIUS / m; }
-    this.knobEl.style.transform = `translate(calc(-50% + ${kx}px), calc(-50% + ${ky}px))`;
   };
 
   private onPointerUp = (e: PointerEvent): void => {
-    if (e.pointerType === 'mouse') {
-      if (e.button === 0) this.mouse.steering = false;
-      if (e.button === 2) this.mouse.gallop = false;
+    if (e.pointerType === 'mouse' && e.button === 2) {
+      this.mouseGallop = false;
       return;
     }
-    if (this.stick && e.pointerId === this.stick.id) this.endStick();
+    const s = this.stroke;
+    if (!s || e.pointerId !== s.id) return;
+    this.stroke = null;
+    this.handler?.strokeEnd(!s.moved);
   };
 
-  private endStick(): void {
-    this.stick = null;
-    this.stickEl.classList.remove('active');
-  }
+  private onPointerCancel = (e: PointerEvent): void => {
+    if (this.stroke && e.pointerId === this.stroke.id) {
+      this.stroke = null;
+      this.handler?.strokeEnd(false);
+    }
+  };
 
   private onGallopDown = (e: PointerEvent): void => {
     this.gallopTouch = true;

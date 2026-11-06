@@ -4,6 +4,7 @@ import { Theme } from '../theme';
 import { drawUnitArt } from '../unit-art';
 import { CHARGE as C } from './config';
 import { ChargeSim, SimEvent, Soldier, mulberry32 } from './sim';
+import { PathPoint } from './path';
 
 interface UnitGfx {
   root: Container;
@@ -71,6 +72,9 @@ export class ChargeView {
   private readonly stainBatch = new Graphics();
   private stainDirty = false;
   private readonly telegraph = new Graphics();
+  private readonly route = new Graphics();
+  /** Freeze the camera (e.g. while a route is being drawn) so strokes stay put. */
+  holdCamera = false;
   private readonly unitLayer = new Container();
   private readonly fx = new Graphics();
   private readonly arrowsG = new Graphics();
@@ -104,7 +108,7 @@ export class ChargeView {
     this.stainSprite = new Sprite(this.stainRT);
 
     this.drawGround();
-    this.world.addChild(this.ground, this.stainSprite, this.telegraph, this.unitLayer, this.fx, this.arrowsG, this.overlay);
+    this.world.addChild(this.ground, this.stainSprite, this.route, this.telegraph, this.unitLayer, this.fx, this.arrowsG, this.overlay);
     this.root.addChild(this.world, this.popupLayer);
     app.stage.addChild(this.root);
     // Start from a blank stain layer (render textures may hold stale GPU memory).
@@ -142,6 +146,74 @@ export class ChargeView {
       x: this.world.x + p.x * this.zoom,
       y: this.world.y + p.y * this.zoom,
     };
+  }
+
+  screenToWorld(p: Vec2): Vec2 {
+    return {
+      x: (p.x - this.world.x) / this.zoom,
+      y: (p.y - this.world.y) / this.zoom,
+    };
+  }
+
+  /**
+   * Draw the squadron's planned route from the leader: canter stretches as a dashed
+   * line, gallop stretches as a bold line with chevrons, and a marker at the end.
+   */
+  drawRoute(points: PathPoint[], leader: Soldier | null, drawing: boolean): void {
+    const g = this.route;
+    g.clear();
+    if (points.length === 0) return;
+    const t = this.theme;
+    const canterColor = t.blue;
+    const gallopColor = t.hpMid;
+    const boost = drawing ? 1 : 0.8;
+
+    let px = leader ? leader.x : points[0].x;
+    let py = leader ? leader.y : points[0].y;
+    let dashPhase = 0;
+    let chevronPhase = 10;
+    const DASH = 6, GAP = 5, CHEV = 20;
+
+    for (const p of points) {
+      const dx = p.x - px, dy = p.y - py;
+      const len = Math.hypot(dx, dy);
+      if (len < 0.01) continue;
+      const nx = dx / len, ny = dy / len;
+      if (p.gallop) {
+        g.moveTo(px, py).lineTo(p.x, p.y).stroke({ width: 3, color: gallopColor, alpha: 0.7 * boost, cap: 'round' });
+        // Chevrons point the way at full tilt.
+        let d = CHEV - chevronPhase;
+        while (d < len) {
+          const cx = px + nx * d, cy = py + ny * d;
+          g.moveTo(cx - nx * 4 - ny * 4, cy - ny * 4 + nx * 4).lineTo(cx, cy).lineTo(cx - nx * 4 + ny * 4, cy - ny * 4 - nx * 4)
+            .stroke({ width: 1.6, color: t.bg, alpha: 0.9 });
+          d += CHEV;
+        }
+        chevronPhase = (chevronPhase + len) % CHEV;
+        dashPhase = 0;
+      } else {
+        // Dashes carry their phase across segments so the pattern stays even.
+        let d = 0;
+        while (d < len) {
+          const cycle = (dashPhase + d) % (DASH + GAP);
+          if (cycle < DASH) {
+            const run = Math.min(DASH - cycle, len - d);
+            g.moveTo(px + nx * d, py + ny * d).lineTo(px + nx * (d + run), py + ny * (d + run));
+            d += run;
+          } else {
+            d += DASH + GAP - cycle;
+          }
+        }
+        g.stroke({ width: 1.6, color: canterColor, alpha: 0.75 * boost });
+        dashPhase = (dashPhase + len) % (DASH + GAP);
+      }
+      px = p.x; py = p.y;
+    }
+
+    const end = points[points.length - 1];
+    const endColor = end.gallop ? gallopColor : canterColor;
+    g.circle(end.x, end.y, 6).stroke({ width: 1.5, color: endColor, alpha: 0.85 * boost });
+    g.circle(end.x, end.y, 2).fill({ color: endColor, alpha: 0.85 * boost });
   }
 
   /** Visible world rectangle (for the minimap). */
@@ -593,7 +665,9 @@ export class ChargeView {
     const L = sim.leader;
     const base = this.baseZoom();
     let targetZoom = base;
-    if (L) {
+    if (this.holdCamera) {
+      targetZoom = this.zoom;
+    } else if (L) {
       const k = Math.min(1, L.speed / C.GALLOP_SPEED);
       targetZoom = base * (1 - 0.1 * k);
       const tx = L.x + L.vx * 0.5;

@@ -412,6 +412,26 @@
     #ch-hint.active { opacity: 1; }
     #ch-hint kbd { display: inline-block; padding: 0 5px; border: 1px solid rgba(255,255,255,0.4); border-radius: 3px; font-family: inherit; font-size: 12px; }
     #ch-hint .touch-only { display: none; }
+    #ch-hint .legend { display: inline-block; width: 26px; height: 0; vertical-align: middle; margin-right: 4px; }
+    #ch-hint .legend.canter { border-top: 2px dashed var(--ch-blue); }
+    #ch-hint .legend.gallop { border-top: 4px solid var(--ch-gallop, #e0a030); border-radius: 2px; }
+    #ch-drawing-tag {
+      position: absolute;
+      bottom: max(16px, env(safe-area-inset-bottom, 0px));
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 4px 12px;
+      border-radius: 12px;
+      background: rgba(0,0,0,0.45);
+      color: #eee;
+      font-size: 12px;
+      letter-spacing: 1px;
+      opacity: 0;
+      transition: opacity 0.15s;
+      pointer-events: none;
+    }
+    #charge-screen.drawing #ch-drawing-tag { opacity: 1; }
+    #charge-canvas { cursor: crosshair; }
     #ch-damage {
       position: absolute;
       inset: 0;
@@ -432,25 +452,6 @@
       border-radius: 4px;
       cursor: pointer;
       font-size: 14px;
-    }
-    #ch-stick {
-      display: none;
-      position: absolute;
-      width: 112px; height: 112px;
-      margin: -56px 0 0 -56px;
-      border-radius: 50%;
-      border: 2px solid rgba(255,255,255,0.45);
-      background: rgba(0,0,0,0.15);
-      pointer-events: none;
-    }
-    #ch-stick.active { display: block; }
-    #ch-knob {
-      position: absolute;
-      left: 50%; top: 50%;
-      width: 48px; height: 48px;
-      border-radius: 50%;
-      background: rgba(255,255,255,0.55);
-      transform: translate(-50%, -50%);
     }
     #ch-gallop-btn {
       display: none;
@@ -521,8 +522,6 @@
     body.day-mode .ch-bar { background: rgba(68,51,34,0.18); }
     body.day-mode #ch-pause-btn { background: rgba(245,240,224,0.7); color: #443322; border-color: #aa9977; }
     body.day-mode #ch-banner { text-shadow: 0 1px 6px rgba(255,255,255,0.8); }
-    body.day-mode #ch-stick { border-color: rgba(68,51,34,0.45); background: rgba(68,51,34,0.08); }
-    body.day-mode #ch-knob { background: rgba(68,51,34,0.4); }
     body.day-mode #ch-gallop-btn { background: rgba(245,240,224,0.7); color: #443322; }
     body.day-mode #ch-gallop-btn.pressed { color: #fff; }
     body.day-mode #ch-pause { background: rgba(245,240,224,0.85); color: #443322; }
@@ -601,16 +600,17 @@
     <canvas id="ch-minimap" aria-hidden="true"></canvas>
     <div id="ch-banner" aria-live="polite"></div>
     <div id="ch-hint">
-      <span class="mouse-only"><kbd>WASD</kbd> / <kbd>↑←↓→</kbd> or hold the left mouse button to ride · <kbd>Space</kbd> / right mouse to gallop<br></span>
-      <span class="touch-only">Drag anywhere to steer · hold <b>Gallop</b> to charge<br></span>
-      Hit flanks for <b>×2</b> and rears for <b>×3</b> · never stop inside a crowd · dodge the red circles · ride back to the camp to rally riders
+      <b>Draw your route</b> — <span class="mouse-only">drag with the mouse</span><span class="touch-only">drag your finger</span>; time slows while you draw. Click or tap a spot to ride straight there.<br>
+      <span class="legend canter"></span> draw slowly to canter · <span class="legend gallop"></span> draw quickly to gallop<br>
+      Hit flanks <b>×2</b> and rears <b>×3</b> · dodge the red circles · ride back to camp to rally
+      <span class="mouse-only"><br><kbd>WASD</kbd> steers directly · <kbd>Space</kbd> / right mouse forces a gallop</span>
     </div>
-    <div id="ch-stick"><div id="ch-knob"></div></div>
+    <div id="ch-drawing-tag" aria-hidden="true">Plotting route · battle slowed</div>
     <button id="ch-gallop-btn" aria-label="Gallop">Gallop</button>
     <button id="ch-pause-btn" title="Pause (Esc)" aria-label="Pause">❚❚</button>
     <div id="ch-pause" role="dialog" aria-modal="true" aria-label="Paused">
       <h2>Paused</h2>
-      <p class="ch-help">Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Pikes facing you will stop a charge. Keep moving — riders that stall in the crowd get pulled down. Ride through the blue camp to rally fresh riders and rest your horses.</p>
+      <p class="ch-help">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it. Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Pikes facing you will stop a charge. Keep moving — riders that stall in the crowd get pulled down. Ride through the blue camp to rally fresh riders and rest your horses.</p>
       <button id="ch-resume-btn">Resume</button>
       <button id="ch-quit-btn">Quit to menu</button>
     </div>

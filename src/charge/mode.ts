@@ -1,10 +1,12 @@
 import { Application, Ticker } from 'pixi.js';
 import { Theme } from '../theme';
 import { CHARGE as C } from './config';
-import { ChargeSim, SimEvent, NO_INPUT } from './sim';
+import { ChargeSim, SimEvent, NO_INPUT, ChargeInput } from './sim';
 import { createBattleSpecs, createWaves } from './scenario';
 import { ChargeView, mixColor } from './view';
-import { ChargeControls } from './input';
+import { ChargeControls, StrokeHandler } from './input';
+import { RiderPath, StrokePace } from './path';
+import { Vec2 } from '../types';
 
 export interface ChargeResult {
   outcome: 'victory' | 'defeat';
@@ -19,6 +21,12 @@ export interface ChargeResult {
 
 const STEP = 1 / 60;
 const END_DELAY = 2.2;
+/** The battle slows while you draw a route so you can plan the charge. */
+const DRAW_TIME_SCALE = 0.4;
+/** Drawing faster than this share of the screen's long side per second means gallop. */
+const GALLOP_STROKE_SPEED = 0.6;
+/** Strokes starting this close (px) to the end of the current route extend it. */
+const EXTEND_RADIUS = 36;
 
 function $(id: string): HTMLElement {
   return document.getElementById(id)!;
@@ -42,6 +50,8 @@ export class ChargeMode {
   private frameEvents: SimEvent[] = [];
   private theme: Theme | null = null;
   private lastRiders = -1;
+  private readonly path = new RiderPath();
+  private readonly pace = new StrokePace(800);
   private movedOnce = false;
   private bannerTimeout: ReturnType<typeof setTimeout> | null = null;
   private hintTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -64,8 +74,9 @@ export class ChargeMode {
   private readonly gallopBtn = $('ch-gallop-btn');
 
   constructor(private readonly cb: { onEnd(result: ChargeResult): void; onQuit(): void }) {
-    this.controls = new ChargeControls(this.host, $('ch-stick'), $('ch-knob'), this.gallopBtn);
+    this.controls = new ChargeControls(this.host, this.gallopBtn);
     this.controls.onPause = () => this.togglePause();
+    this.controls.handler = this.strokes;
     $('ch-pause-btn').addEventListener('click', () => this.togglePause());
     $('ch-resume-btn').addEventListener('click', () => this.togglePause(false));
     $('ch-quit-btn').addEventListener('click', () => this.cb.onQuit());
@@ -110,6 +121,7 @@ export class ChargeMode {
     this.paused = false;
     this.lastRiders = -1;
     this.movedOnce = false;
+    this.path.clear();
     this.pauseEl.classList.remove('active');
     this.applyHudTheme(theme);
 
@@ -155,6 +167,56 @@ export class ChargeMode {
     if (this.paused) ($('ch-resume-btn') as HTMLButtonElement).focus();
   }
 
+  /** Route drawing: mouse, pen or finger strokes become the squadron's path. */
+  private readonly strokes: StrokeHandler = {
+    strokeStart: (p: Vec2) => {
+      const view = this.view;
+      if (!view || !this.sim || this.paused || this.endTimer >= 0) return;
+      const end = this.path.end;
+      let extend = false;
+      if (end) {
+        const s = view.worldToScreen(end);
+        extend = Math.hypot(s.x - p.x, s.y - p.y) < EXTEND_RADIUS;
+      }
+      this.pace.reset(GALLOP_STROKE_SPEED * Math.max(this.host.clientWidth, this.host.clientHeight));
+      this.path.begin(view.screenToWorld(p), extend, extend && !!end?.gallop);
+      this.noteMoved();
+    },
+    strokeMove: (p: Vec2, dist: number, dt: number) => {
+      const view = this.view;
+      if (!view || this.paused || this.endTimer >= 0) return;
+      const gallop = this.pace.sample(dist, dt);
+      this.path.add(view.screenToWorld(p), gallop);
+    },
+    strokeEnd: () => {},
+  };
+
+  private noteMoved(): void {
+    if (this.movedOnce) return;
+    this.movedOnce = true;
+    if (this.hintTimeout) clearTimeout(this.hintTimeout);
+    this.hintTimeout = setTimeout(() => this.hintEl.classList.remove('active'), 3500);
+  }
+
+  /** Input for one simulation step: keyboard overrides the drawn route. */
+  private stepInput(sim: ChargeSim): ChargeInput {
+    if (this.endTimer >= 0) return NO_INPUT;
+    const kb = this.controls.read();
+    if (kb.dirX !== 0 || kb.dirY !== 0) {
+      this.path.clear();
+      this.noteMoved();
+      return kb;
+    }
+    const L = sim.leader;
+    if (this.path.active && L) {
+      const input = this.path.steer(L);
+      if (kb.gallop && this.path.active) input.gallop = true;
+      return input;
+    }
+    if (kb.gallop) this.noteMoved();
+    return kb;
+  }
+
   private resize(): void {
     if (!this.app || !this.view) return;
     this.view.resize(this.host.clientWidth, this.host.clientHeight);
@@ -166,24 +228,21 @@ export class ChargeMode {
     const rawDt = Math.min(ticker.deltaMS / 1000, 0.1);
     if (this.paused) return;
 
-    // Slow motion while the battle's outcome sinks in.
-    const dt = this.endTimer >= 0 ? rawDt * 0.35 : rawDt;
-    const leaderScreen = sim.leader ? view.worldToScreen(sim.leader) : null;
-    const input = this.endTimer >= 0 ? NO_INPUT : this.controls.read(leaderScreen);
-    if (!this.movedOnce && (input.gallop || Math.hypot(input.dirX, input.dirY) > 0.2)) {
-      this.movedOnce = true;
-      if (this.hintTimeout) clearTimeout(this.hintTimeout);
-      this.hintTimeout = setTimeout(() => this.hintEl.classList.remove('active'), 3500);
-    }
+    // Slow motion while the battle's outcome sinks in, or while a route is drawn.
+    const drawing = this.controls.drawing && this.endTimer < 0;
+    const dt = this.endTimer >= 0 ? rawDt * 0.35 : drawing ? rawDt * DRAW_TIME_SCALE : rawDt;
 
     this.acc += dt;
     this.frameEvents.length = 0;
     while (this.acc >= STEP) {
       this.acc -= STEP;
-      sim.step(STEP, input);
+      sim.step(STEP, this.stepInput(sim));
       for (const e of sim.events) this.frameEvents.push(e);
     }
+    view.holdCamera = drawing;
+    view.drawRoute(this.path.points, sim.leader, drawing);
     view.render(sim, this.frameEvents, dt);
+    this.screen.classList.toggle('drawing', drawing);
     this.handleHudEvents(this.frameEvents);
 
     this.hudTimer -= rawDt;
@@ -228,6 +287,7 @@ export class ChargeMode {
     this.screen.style.setProperty('--ch-red', hex(theme.red));
     this.screen.style.setProperty('--ch-warn', hex(theme.labelWarn));
     this.screen.style.setProperty('--ch-good', hex(theme.elevationBonus));
+    this.screen.style.setProperty('--ch-gallop', hex(theme.hpMid));
     this.screen.style.setProperty('--ch-bg', hex(mixColor(theme.bg, theme.labelFill, 0.18)));
   }
 

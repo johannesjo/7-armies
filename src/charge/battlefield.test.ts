@@ -69,3 +69,44 @@ describe('the battle on its own', () => {
     expect(reserve.y).toBeGreaterThan(y0 + 30);
   });
 });
+
+describe('footmen fight what they face', () => {
+  it('a man cannot strike an enemy behind him until he has turned round', () => {
+    // A lone red footman facing down (south); a blue one right behind him, facing his back.
+    const sim = new ChargeSim([
+      block({ count: 1, cols: 1, y: 600 }),
+      block({ team: 'blue', count: 1, cols: 1, y: 590, facing: DOWN }),
+    ], { seed: 1, squad: null });
+    const red = sim.soldiers.find(s => s.team === 'red')!;
+    const blue = sim.soldiers.find(s => s.team === 'blue')!;
+    red.attackTimer = 0;
+    blue.attackTimer = 0;
+    run(sim, 0.25);
+    expect(blue.lastAttack).toBeGreaterThan(0); // he faces his foe and strikes
+    expect(red.lastAttack).toBeLessThan(0); // still turning round
+    run(sim, 1.5);
+    expect(red.lastAttack).toBeGreaterThan(0); // now he has turned and fights back
+  });
+
+  it('a battalion attacked in the rear suffers far more than one attacked in front', () => {
+    const fight = (fromBehind: boolean) => {
+      const sim = new ChargeSim([
+        block({ y: 600 }),
+        // Blue arrives either at red's back (above, facing down) or at its front (below, facing up).
+        fromBehind ? block({ team: 'blue', y: 566, facing: DOWN }) : block({ team: 'blue', y: 634, facing: UP }),
+      ], { seed: 2, squad: null });
+      let redDamage = 0;
+      for (let t = 0; t < 20; t += 1 / 30) {
+        sim.step(1 / 30);
+        for (const e of sim.events) {
+          if ((e.type === 'hit' || e.type === 'kill') && e.team === 'red') redDamage += e.type === 'hit' ? e.damage : 1;
+        }
+      }
+      return { redDamage, morale: sim.battalions[0].morale, routed: sim.battalions[0].routed };
+    };
+    const rear = fight(true);
+    const front = fight(false);
+    expect(rear.redDamage).toBeGreaterThan(front.redDamage * 1.5);
+    expect(rear.routed || rear.morale < front.morale).toBe(true);
+  });
+});

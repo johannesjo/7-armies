@@ -51,6 +51,8 @@ export interface Soldier {
   jy: number;
   /** Direction to the nearest enemy within reach (NaN if none) — where weapons point. */
   aim: number;
+  /** Distance to that enemy. */
+  aimDist: number;
   aimTimer: number;
 }
 
@@ -429,6 +431,7 @@ export class ChargeSim {
       jx: 0,
       jy: 0,
       aim: NaN,
+      aimDist: Infinity,
       aimTimer: 0,
     };
   }
@@ -1252,7 +1255,7 @@ export class ChargeSim {
       s.aimTimer -= dt;
       if (s.aimTimer > 0) continue;
       s.aimTimer = 0.2 + this.rand() * 0.15;
-      if (s.fleeing) { s.aim = NaN; continue; }
+      if (s.fleeing) { s.aim = NaN; s.aimDist = Infinity; continue; }
       const near = this.grid.query(s.x, s.y, C.AIM_RADIUS, this.near);
       let best = C.AIM_RADIUS * C.AIM_RADIUS;
       let aim = NaN;
@@ -1263,6 +1266,7 @@ export class ChargeSim {
         if (d2 < best) { best = d2; aim = Math.atan2(dy, dx); }
       }
       s.aim = aim;
+      s.aimDist = Number.isNaN(aim) ? Infinity : Math.sqrt(best);
     }
   }
 
@@ -1311,42 +1315,56 @@ export class ChargeSim {
   private infantryCombat(dt: number): void {
     for (const s of this.soldiers) {
       if (s.rider || !s.alive || s.fleeing || s.down > 0) continue;
+
+      // Turn — it takes time — toward an enemy close at hand, else back to the
+      // battalion's front. Caught from the side or behind, a man must turn first.
+      const reach = s.radius + C.MELEE_REACH + 6;
+      const threatened = s.aimDist < reach + 8;
+      const want = threatened ? s.aim : s.bat ? s.bat.facing : s.facing;
+      s.facing = turnToward(s.facing, want, C.INFANTRY_TURN_RATE * dt);
+
       s.attackTimer -= dt;
       if (s.attackTimer > 0) continue;
 
-      const reach = s.radius + C.MELEE_REACH + 6;
+      // Only an enemy inside his front arc can be struck.
       const near = this.grid.query(s.x, s.y, reach, this.near);
       let target: Soldier | null = null;
       let best = Infinity;
+      let enemyClose = false;
       for (const o of near) {
         if (!o.alive || o.team === s.team) continue;
         const d = Math.hypot(o.x - s.x, o.y - s.y);
-        if (d < s.radius + o.radius + C.MELEE_REACH && d < best) { best = d; target = o; }
+        if (d >= s.radius + o.radius + C.MELEE_REACH) continue;
+        enemyClose = true;
+        const off = Math.abs(angleDiff(Math.atan2(o.y - s.y, o.x - s.x), s.facing));
+        if (off < C.INFANTRY_ARC && d < best) { best = d; target = o; }
       }
+      if (enemyClose && s.bat) s.bat.engagedTimer = 1.2;
       if (!target) { s.attackTimer = 0.25; continue; }
 
-      if (s.bat) s.bat.engagedTimer = 1.2;
       s.attackTimer = C.MELEE_COOLDOWN_MIN + this.rand() * (C.MELEE_COOLDOWN_MAX - C.MELEE_COOLDOWN_MIN);
       s.lastAttack = this.time;
       const ang = Math.atan2(target.y - s.y, target.x - s.x);
-      s.facing = ang;
 
       if (target.rider) {
         const braced = s.type === 'pikeman';
         // A galloping rider is past before a sword can land; pikes still bite.
         if (target.speed >= C.CHARGE_MIN_SPEED && !braced) continue;
         if (this.rand() > C.VS_RIDER_HIT_CHANCE) continue;
-        const dmg = C.MELEE_DAMAGE[s.type] * (braced ? C.PIKE_VS_RIDER_MULT : 1) * C.VS_RIDER_DAMAGE_MULT;
-        this.damageRider(target, dmg, ang, false, 'front');
+        const side = attackSide(ang, target.facing);
+        const dmg = C.MELEE_DAMAGE[s.type] * (braced ? C.PIKE_VS_RIDER_MULT : 1) * C.VS_RIDER_DAMAGE_MULT * sideMultiplier(side);
+        this.damageRider(target, dmg, ang, false, side);
         continue;
       }
 
       if (this.rand() > C.MELEE_HIT_CHANCE) continue;
+      // Blows to the flank or rear land harder (x2 / x3), and the victim can't answer them.
       const side = attackSide(ang, this.victimFacing(target));
-      const dmg = C.MELEE_DAMAGE[s.type] * C.TEAM_MELEE_MULT[s.team] * (side === 'front' ? 1 : 1.5);
+      const dmg = C.MELEE_DAMAGE[s.type] * C.TEAM_MELEE_MULT[s.team] * sideMultiplier(side);
       this.damageSoldier(target, dmg, ang, false, side);
     }
   }
+
 
   private damageSoldier(s: Soldier, dmg: number, angle: number, byPlayer: boolean, side: AttackSide): void {
     if (!s.alive) return;
@@ -1367,7 +1385,7 @@ export class ChargeSim {
     const b = s.bat;
     if (b && !b.routed && !s.fleeing) {
       const perDeath = 100 / (b.initial * C.MORALE_LOSS_SHARE);
-      b.morale -= perDeath * (byPlayer ? C.SIDE_MORALE_FACTOR[side] : 1);
+      b.morale -= perDeath * C.SIDE_MORALE_FACTOR[side];
       b.sinceShock = 0;
     }
     this.events.push({ type: 'kill', x: s.x, y: s.y, angle, team: s.team, id: s.id, byPlayer, side, points });

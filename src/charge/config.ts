@@ -136,6 +136,10 @@ export const CHARGE = {
   MELEE_COOLDOWN_MAX: 2.0,
   MELEE_HIT_CHANCE: 0.1,
   MELEE_REACH: 5,
+  /** A footman strikes only enemies within this half-angle of where he faces (rad)... */
+  INFANTRY_ARC: 0.9,
+  /** ...and turns no faster than this (rad/s) — about a second for a full about-face. */
+  INFANTRY_TURN_RATE: 3,
   /** Infantry swarming a stalled rider land far more often than in the shield-wall grind. */
   VS_RIDER_HIT_CHANCE: 0.5,
   VS_RIDER_DAMAGE_MULT: 1.4,

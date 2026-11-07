@@ -1,7 +1,7 @@
 import { Application, Container, Graphics, GraphicsContext, RenderTexture, Sprite, Text } from 'pixi.js';
 import { Team, UnitType, Vec2 } from '../types';
 import { Theme } from '../theme';
-import { drawUnitArt } from '../unit-art';
+import { drawUnitArt, HORSE_VARIANTS } from '../unit-art';
 import { CHARGE as C } from './config';
 import { ChargeSim, SimEvent, Soldier, mulberry32 } from './sim';
 import { PathPoint } from './path';
@@ -337,12 +337,12 @@ export class ChargeView {
 
   // --- Units -----------------------------------------------------------------------
 
-  private context(type: UnitType, team: Team, r: number): { body: GraphicsContext; weapon: GraphicsContext } {
-    const key = `${type}:${team}:${r}`;
+  private context(type: UnitType, team: Team, r: number, variant: number): { body: GraphicsContext; weapon: GraphicsContext } {
+    const key = `${type}:${team}:${r}:${variant}`;
     let ctx = this.contexts.get(key);
     if (!ctx) {
       ctx = { body: new GraphicsContext(), weapon: new GraphicsContext() };
-      drawUnitArt(ctx.body, ctx.weapon, type, team, r, this.theme);
+      drawUnitArt(ctx.body, ctx.weapon, type, team, r, this.theme, variant);
       this.contexts.set(key, ctx);
     }
     return ctx;
@@ -351,7 +351,7 @@ export class ChargeView {
   private gfxFor(s: Soldier): UnitGfx {
     let u = this.units.get(s.id);
     if (u) return u;
-    const ctx = this.context(s.type, s.team, s.radius);
+    const ctx = this.context(s.type, s.team, s.radius, s.type === 'cavalry' ? s.id % HORSE_VARIANTS : 0);
     const root = new Container();
     const body = new Graphics(ctx.body);
     const weapon = new Graphics(ctx.weapon);

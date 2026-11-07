@@ -2,91 +2,124 @@ import { Graphics, GraphicsContext } from 'pixi.js';
 import { Team, UnitType } from './types';
 import { Theme } from './theme';
 
+type Canvas = Graphics | GraphicsContext;
+
+/** Horse coats: [coat, mane/tail]. Bay, chestnut, grey, black. */
+const HORSE_COATS: [number, number][] = [
+  [0x7a4a2a, 0x2e1c10],
+  [0x9c5a2c, 0x4a2610],
+  [0xa9a49b, 0x5e5850],
+  [0x3d3430, 0x161210],
+];
+
+/** Number of horse coat variants (pass `variant` 0..n-1 to drawUnitArt). */
+export const HORSE_VARIANTS = HORSE_COATS.length;
+
+/** Stable small hash for picking a cosmetic variant from an id. */
+export function artVariant(id: string | number): number {
+  const s = String(id);
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function shadow(g: Canvas, rx: number, ry: number): void {
+  g.ellipse(0, 0, rx, ry).fill({ color: 0x000000, alpha: 0.14 });
+}
+
+/** Helmet seen from above, with a crest line that shows where the soldier faces. */
+function helmet(g: Canvas, x: number, r: number, theme: Theme): void {
+  g.circle(x, 0, r).fill(theme.steel).stroke({ width: 0.6, color: theme.steelDark });
+  g.moveTo(x - r * 0.55, 0).lineTo(x + r * 0.9, 0).stroke({ width: Math.max(0.5, r * 0.35), color: theme.steelDark, alpha: 0.8 });
+}
+
 /**
  * Draw a top-down unit body + weapon into the given graphics.
- * Local +X is the facing direction. Shared by the tactics renderer
- * and the cavalry action mode so both look identical.
+ * Local +X is the facing direction and +Y the unit's right-hand side.
+ * Shared by the tactics renderer and the cavalry action mode so both look identical.
  */
-export function drawUnitArt(shape: Graphics | GraphicsContext, weapon: Graphics | GraphicsContext, type: UnitType, team: Team, r: number, theme: Theme): void {
+export function drawUnitArt(shape: Canvas, weapon: Canvas, type: UnitType, team: Team, r: number, theme: Theme, variant = 0): void {
   const color = team === 'blue' ? theme.blue : theme.red;
-  const darkColor = team === 'blue' ? theme.blueDark : theme.redDark;
+  const dark = team === 'blue' ? theme.blueDark : theme.redDark;
 
   switch (type) {
     case 'cavalry': {
-      // Ellipse body — elongated along X (facing direction)
-      shape.ellipse(0, 0, r * 1.3, r * 0.65);
-      shape.fill(color);
-      shape.ellipse(0, 0, r * 1.3, r * 0.65);
-      shape.setStrokeStyle({ width: 1, color: darkColor });
-      shape.stroke();
-      // Rider dot at front (+X = facing direction)
-      shape.circle(r * 0.6, 0, r * 0.35);
-      shape.fill(darkColor);
-      // Lance
-      weapon.setStrokeStyle({ width: 1, color: theme.barrel, alpha: theme.barrelAlpha });
-      weapon.moveTo(0, 0);
-      weapon.lineTo(r * 1.8, 0);
-      weapon.stroke();
+      const [coat, mane] = HORSE_COATS[((variant % HORSE_VARIANTS) + HORSE_VARIANTS) % HORSE_VARIANTS];
+      shadow(shape, r * 1.65, r * 0.78);
+      // Tail.
+      shape.poly([-r * 1.05, -r * 0.12, -r * 1.75, -r * 0.05, -r * 1.75, r * 0.05, -r * 1.05, r * 0.12]).fill(mane);
+      // Horse body, neck and head.
+      shape.ellipse(-r * 0.12, 0, r * 1.12, r * 0.5).fill(coat).stroke({ width: 0.6, color: mane, alpha: 0.9 });
+      shape.ellipse(r * 0.95, 0, r * 0.38, r * 0.24).fill(coat);
+      shape.ellipse(r * 1.38, 0, r * 0.3, r * 0.19).fill(coat).stroke({ width: 0.5, color: mane, alpha: 0.8 });
+      // Mane along the neck, and ears.
+      shape.moveTo(r * 0.55, 0).lineTo(r * 1.15, 0).stroke({ width: Math.max(0.6, r * 0.14), color: mane });
+      shape.circle(r * 1.2, -r * 0.12, r * 0.07).fill(mane);
+      shape.circle(r * 1.2, r * 0.12, r * 0.07).fill(mane);
+      // Team saddle cloth with a trim.
+      shape.roundRect(-r * 0.68, -r * 0.5, r * 0.92, r * 1.0, r * 0.22).fill(color).stroke({ width: 0.7, color: dark });
+      shape.roundRect(-r * 0.55, -r * 0.37, r * 0.66, r * 0.74, r * 0.15).stroke({ width: 0.5, color: theme.trim, alpha: 0.7 });
+      // Rider: shoulders, shield on the left arm, helmet.
+      shape.ellipse(-r * 0.15, 0, r * 0.27, r * 0.48).fill(dark);
+      shape.ellipse(-r * 0.05, -r * 0.52, r * 0.3, r * 0.22).fill(color).stroke({ width: 0.6, color: theme.steel });
+      helmet(shape, -r * 0.08, r * 0.22, theme);
+      // Lance couched on the right, with a team pennant below the tip.
+      weapon.moveTo(-r * 0.7, r * 0.38).lineTo(r * 2.25, r * 0.38).stroke({ width: Math.max(0.7, r * 0.13), color: theme.wood });
+      weapon.poly([r * 2.25, r * 0.28, r * 2.65, r * 0.38, r * 2.25, r * 0.48]).fill(theme.steel);
+      weapon.poly([r * 1.75, r * 0.38, r * 2.1, r * 0.38, r * 1.9, r * 0.68]).fill(color);
       break;
     }
     case 'archer': {
-      // Oval body — wide shoulders, narrow front-to-back
-      shape.ellipse(0, 0, r * 0.6, r * 1.2);
-      shape.fill(color);
-      shape.ellipse(0, 0, r * 0.6, r * 1.2);
-      shape.setStrokeStyle({ width: 1, color: darkColor });
-      shape.stroke();
-      // D-shaped bow: arc limb + straight bowstring
-      const bowR = r * 1.8;
-      const bowAngle = 0.9; // ~52° half-sweep
-      weapon.setStrokeStyle({ width: 1.5, color: theme.barrel, alpha: theme.barrelAlpha });
-      weapon.arc(0, 0, bowR, -bowAngle, bowAngle);
-      weapon.stroke();
-      // Bowstring: straight line connecting arc endpoints
+      shadow(shape, r * 0.85, r * 1.3);
+      // Quiver on the back, fletchings poking out.
+      shape.roundRect(-r * 0.95, r * 0.05, r * 0.7, r * 0.42, r * 0.15).fill(theme.leather);
+      for (let i = 0; i < 3; i++) {
+        const y = r * (0.12 + i * 0.13);
+        shape.moveTo(-r * 0.95, y).lineTo(-r * 1.2, y).stroke({ width: 0.6, color: theme.trim });
+      }
+      // Body with a strap across the chest.
+      shape.ellipse(0, 0, r * 0.55, r * 1.05).fill(color).stroke({ width: 0.7, color: dark });
+      shape.moveTo(-r * 0.4, r * 0.75).lineTo(r * 0.35, -r * 0.7).stroke({ width: Math.max(0.6, r * 0.15), color: theme.leather });
+      // Hood.
+      shape.circle(r * 0.05, 0, r * 0.42).fill(dark);
+      shape.circle(r * 0.22, 0, r * 0.2).fill({ color: theme.trim, alpha: 0.55 });
+      // Bow: a wooden limb and a fine string.
+      const bowR = r * 1.6;
+      const bowAngle = 0.95;
+      weapon.arc(0, 0, bowR, -bowAngle, bowAngle).stroke({ width: Math.max(0.8, r * 0.28), color: theme.wood });
       const sx = Math.cos(bowAngle) * bowR;
       const sy = Math.sin(bowAngle) * bowR;
-      weapon.setStrokeStyle({ width: 0.5, color: theme.barrel, alpha: theme.barrelAlpha * 0.7 });
-      weapon.moveTo(sx, -sy);
-      weapon.lineTo(sx, sy);
-      weapon.stroke();
+      weapon.moveTo(sx, -sy).lineTo(sx, sy).stroke({ width: 0.4, color: theme.trim, alpha: 0.85 });
       break;
     }
     case 'pikeman': {
-      // Oval body + thicker outline (heavier armor)
-      shape.ellipse(0, 0, r * 0.65, r * 1.2);
-      shape.fill(color);
-      shape.ellipse(0, 0, r * 0.65, r * 1.2);
-      shape.setStrokeStyle({ width: 1.5, color: darkColor });
-      shape.stroke();
-      // Long pike (3× radius) with spearhead
-      const pikeLen = r * 3;
-      weapon.setStrokeStyle({ width: 1, color: theme.barrel, alpha: theme.barrelAlpha });
-      weapon.moveTo(0, 0);
-      weapon.lineTo(pikeLen, 0);
-      weapon.stroke();
-      // Spearhead — small filled triangle at tip
-      weapon.moveTo(pikeLen + 2, 0);
-      weapon.lineTo(pikeLen - 1, -1.2);
-      weapon.lineTo(pikeLen - 1, 1.2);
-      weapon.closePath();
-      weapon.fill({ color: theme.barrel, alpha: theme.barrelAlpha });
+      shadow(shape, r * 0.9, r * 1.35);
+      // Padded body.
+      shape.ellipse(0, 0, r * 0.65, r * 1.15).fill(color).stroke({ width: 1, color: dark });
+      shape.moveTo(-r * 0.35, -r * 0.95).lineTo(-r * 0.35, r * 0.95).stroke({ width: 0.5, color: dark, alpha: 0.6 });
+      // Kettle hat: a wide brim around the crown.
+      shape.circle(r * 0.05, 0, r * 0.62).fill(theme.steel).stroke({ width: 0.6, color: theme.steelDark });
+      shape.circle(r * 0.05, 0, r * 0.34).fill(theme.steelDark);
+      // Pike held at the right side: long ash shaft and steel head.
+      const len = r * 3.4;
+      weapon.moveTo(-r * 1.1, r * 0.35).lineTo(len, r * 0.35).stroke({ width: Math.max(0.7, r * 0.18), color: theme.wood });
+      weapon.poly([len, r * 0.15, len + r * 0.75, r * 0.35, len, r * 0.55]).fill(theme.steel);
+      weapon.moveTo(len - r * 0.1, r * 0.05).lineTo(len - r * 0.1, r * 0.65).stroke({ width: 0.6, color: theme.steelDark });
       break;
     }
     default: {
-      // Swordsman: oval body + outline + shield
-      shape.ellipse(0, 0, r * 0.7, r * 1.15);
-      shape.fill(color);
-      shape.ellipse(0, 0, r * 0.7, r * 1.15);
-      shape.setStrokeStyle({ width: 1, color: darkColor });
-      shape.stroke();
-      // Shield: filled semicircle on local +X side (perpendicular to facing)
-      shape.arc(1.5, 0, 2, -Math.PI / 2, Math.PI / 2);
-      shape.fill({ color: darkColor, alpha: 0.8 });
-      // Short sword, slightly thicker
-      weapon.setStrokeStyle({ width: 1.5, color: theme.barrel, alpha: theme.barrelAlpha });
-      weapon.moveTo(0, 0);
-      weapon.lineTo(r * 1.5, 0);
-      weapon.stroke();
+      // Swordsman.
+      shadow(shape, r * 0.95, r * 1.35);
+      shape.ellipse(0, 0, r * 0.62, r * 1.08).fill(color).stroke({ width: 0.8, color: dark });
+      // Round shield on the left arm with a metal rim and boss.
+      shape.circle(r * 0.4, -r * 0.82, r * 0.55).fill(dark).stroke({ width: 0.7, color: theme.steel });
+      shape.circle(r * 0.4, -r * 0.82, r * 0.17).fill(theme.steel);
+      helmet(shape, r * 0.05, r * 0.42, theme);
+      // Sword in the right hand: blade, crossguard, pommel.
+      const y = r * 0.72;
+      weapon.moveTo(r * 0.5, y).lineTo(r * 1.75, y).stroke({ width: Math.max(0.7, r * 0.2), color: theme.steel });
+      weapon.moveTo(r * 0.5, y - r * 0.32).lineTo(r * 0.5, y + r * 0.32).stroke({ width: Math.max(0.6, r * 0.14), color: theme.steelDark });
+      weapon.circle(r * 0.22, y, Math.max(0.5, r * 0.12)).fill(theme.steelDark);
       break;
     }
   }

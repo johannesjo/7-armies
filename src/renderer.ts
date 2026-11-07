@@ -4,7 +4,7 @@ import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
 import { mergeObstacles } from './obstacle-merge';
 import { Theme, NIGHT_THEME } from './theme';
-import { drawUnitArt } from './unit-art';
+import { drawUnitArt, artVariant } from './unit-art';
 
 export class Renderer {
   private app: Application;
@@ -314,7 +314,7 @@ export class Renderer {
     const container = new Container();
     const shape = new Graphics();
     const weapon = new Graphics();
-    drawUnitArt(shape, weapon, unit.type, unit.team, unit.radius, this.theme);
+    drawUnitArt(shape, weapon, unit.type, unit.team, unit.radius, this.theme, artVariant(unit.id));
 
     container.addChild(shape);
     container.addChild(weapon);

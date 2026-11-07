@@ -38,6 +38,14 @@ export interface Theme {
   barrel: number;
   barrelAlpha: number;
 
+  // Unit materials
+  steel: number;
+  steelDark: number;
+  wood: number;
+  leather: number;
+  /** Light accent for trims, fletching and bowstrings. */
+  trim: number;
+
   // HP bar
   hpBg: number;
   hpHigh: number;
@@ -95,6 +103,12 @@ export const NIGHT_THEME: Theme = {
   barrel: 0xffffff,
   barrelAlpha: 0.6,
 
+  steel: 0xc3cad4,
+  steelDark: 0x6b7482,
+  wood: 0x9a7650,
+  leather: 0x6e4c30,
+  trim: 0xf2ead8,
+
   hpBg: 0x333333,
   hpHigh: 0x44ff44,
   hpMid: 0xffaa00,
@@ -147,6 +161,12 @@ export const DAY_THEME: Theme = {
 
   barrel: 0x443322,
   barrelAlpha: 0.7,
+
+  steel: 0xa7adb4,
+  steelDark: 0x5b616a,
+  wood: 0x80603e,
+  leather: 0x6a4a2e,
+  trim: 0xf7f1e1,
 
   hpBg: 0x998877,
   hpHigh: 0x448833,

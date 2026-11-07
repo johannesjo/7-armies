@@ -155,7 +155,6 @@ export class ChargeView {
   private camX: number = C.CAMP_X;
   private camY: number = C.CAMP_Y - 200;
   private zoom = 2;
-  private shake = 0;
   private viewW = 800;
   private viewH = 450;
   private sidePopupCooldown = 0;
@@ -721,7 +720,6 @@ export class ChargeView {
           break;
         case 'rider-hit':
           this.pulse(e.id);
-          if (e.mine) this.shake = Math.min(2, this.shake + 0.25);
           break;
         case 'rider-down':
           this.killUnit(e.id, e.angle, 120, 0.6);
@@ -729,10 +727,15 @@ export class ChargeView {
           this.burstDust(e.x, e.y, e.angle, e.mine ? 8 : 4);
           if (e.mine) {
             this.popup(e.x, e.y, e.wasLeader ? 'Leader down!' : 'Rider down', t.labelWarn, 13);
-            this.shake = Math.min(2.5, this.shake + 1.2);
           } else if (e.byPlayer) {
             this.popup(e.x, e.y, `Knight down +${e.points}`, t.elevationBonus, 14);
+          } else if (e.lured) {
+            this.popup(e.x, e.y, `Lured +${e.points}`, t.elevationBonus, 15);
           }
+          break;
+        case 'squad-break':
+          this.popup(e.x, e.y - 14, e.team === 'red' ? 'Scattered!' : 'Our riders scatter', e.team === 'red' ? t.elevationBonus : t.labelWarn, 17, 1.2);
+          this.burstDust(e.x, e.y, 0, 6);
           break;
         case 'join':
           this.popup(e.x, e.y - 16, `+${e.count} riders!`, t.blue, 20, 1.4);
@@ -777,10 +780,11 @@ export class ChargeView {
       // Men in the ranks don't all face exactly the same way.
       const quirk = ((s.id * 0.618034) % 1) - 0.5;
       u.root.rotation = s.facing + (s.rider || s.fleeing ? 0 : quirk * 0.28);
-      if (s.fleeing !== u.fleeing) {
-        u.fleeing = s.fleeing;
-        u.weapon.visible = !s.fleeing; // weapons thrown down
-      }
+      // Knocked down: lying tipped over on his side, weapon dropped, until he gets up.
+      const down = !s.rider && s.down > 0;
+      if (down) u.root.rotation += (s.id % 2 === 0 ? 1 : -1) * 1.35;
+      u.fleeing = s.fleeing;
+      u.weapon.visible = !s.fleeing && !down; // weapons thrown down
       this.animateFighting(u, s, sim.time, dt);
       const hpK = s.hp / s.maxHp;
       u.root.alpha = (s.fleeing ? 0.6 : 0.55) + 0.45 * hpK;
@@ -797,6 +801,7 @@ export class ChargeView {
         // Galloping bob.
         scale *= 1 + 0.06 * Math.sin(sim.time * 18 + s.id);
       }
+      if (down) { sx *= 1.12; sy *= 0.7; }
       u.root.scale.set(scale * sx, scale * sy);
     }
     for (const [id, u] of this.units) {
@@ -1129,33 +1134,18 @@ export class ChargeView {
     const base = this.baseZoom();
     let targetZoom = base;
     if (L) {
-      // Keep the whole squadron centred, nudged a little toward where it is heading,
-      // so there is room on every side to draw the next route.
-      const c = sim.squadCenter();
+      // The leader is always exactly in the centre of the screen: no lag, no lead,
+      // no stopping at the field's edge (the forest shows beyond it), no shake.
+      this.camX = L.x;
+      this.camY = L.y;
       const k = Math.min(1, L.speed / C.GALLOP_SPEED);
-      const look = this.holdCamera ? 0.12 : 0.25;
-      const tx = c.x + L.vx * look;
-      const ty = c.y + L.vy * look;
-      // Follow a little more gently while a route is being drawn so strokes don't swim.
-      const f = 1 - Math.exp(-(this.holdCamera ? 3.5 : 6) * dt);
-      this.camX += (tx - this.camX) * f;
-      this.camY += (ty - this.camY) * f;
       targetZoom = this.holdCamera ? this.zoom : base * (1 - 0.08 * k);
     }
     this.zoom += (targetZoom - this.zoom) * (1 - Math.exp(-2 * dt));
-
-    const halfW = this.viewW / this.zoom / 2;
-    const halfH = this.viewH / this.zoom / 2;
-    const m = 60;
-    const cx = halfW * 2 > C.WORLD_W + m * 2 ? C.WORLD_W / 2 : Math.max(halfW - m, Math.min(C.WORLD_W + m - halfW, this.camX));
-    const cy = halfH * 2 > C.WORLD_H + m * 2 ? C.WORLD_H / 2 : Math.max(halfH - m, Math.min(C.WORLD_H + m - halfH, this.camY));
-
-    this.shake *= Math.exp(-9 * dt);
-    const sx = (this.rand() - 0.5) * 2 * this.shake;
-    const sy = (this.rand() - 0.5) * 2 * this.shake;
     this.world.scale.set(this.zoom);
-    this.world.position.set(this.viewW / 2 - cx * this.zoom + sx, this.viewH / 2 - cy * this.zoom + sy);
+    this.world.position.set(this.viewW / 2 - this.camX * this.zoom, this.viewH / 2 - this.camY * this.zoom);
   }
+
 
   private readonly joinTags = new Map<number, BitmapText>();
   private showText = true;

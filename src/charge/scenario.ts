@@ -36,6 +36,11 @@ export function createBattleSpecs(): BattalionSpec[] {
     specs.push({ team: 'blue', type: 'archer', role: 'archer', x: cx + dx, y: fy + 170, facing: UP, count: 18, cols: 9 });
   }
 
+  // Blue reserves: a second line of pikes that moves up when the first breaks, and
+  // turns to face enemy horse — lead pursuing knights onto them.
+  specs.push({ team: 'blue', type: 'pikeman', role: 'reserve', x: cx - 330, y: fy + 300, facing: UP, count: 20, cols: 5 });
+  specs.push({ team: 'blue', type: 'pikeman', role: 'reserve', x: cx + 330, y: fy + 300, facing: UP, count: 20, cols: 5 });
+
   // Red reserves guarding the rear — they wheel toward the squadron.
   specs.push({ team: 'red', type: 'pikeman', role: 'reserve', x: cx - 470, y: fy - 300, facing: DOWN, count: 20, cols: 5 });
   specs.push({ team: 'red', type: 'pikeman', role: 'reserve', x: cx + 470, y: fy - 300, facing: DOWN, count: 20, cols: 5 });

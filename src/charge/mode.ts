@@ -115,7 +115,8 @@ export class ChargeMode {
   private readonly screen = $('charge-screen');
   private readonly host = $('charge-canvas');
   private readonly ridersEl = $('ch-riders');
-  private readonly staminaEl = $('ch-stamina');
+  private readonly speedEl = $('ch-speed');
+  private readonly formEl = $('ch-form');
   private readonly scoreEl = $('ch-score');
   private readonly comboEl = $('ch-combo');
   private readonly redBar = $('ch-red');
@@ -510,8 +511,14 @@ export class ChargeMode {
       this.ridersEl.textContent = `♞ ${sim.riders.length}`;
       this.ridersEl.classList.toggle('low', sim.riders.length <= 3);
     }
-    this.staminaEl.style.width = `${(sim.stamina / C.STAMINA_MAX) * 100}%`;
-    this.staminaEl.classList.toggle('low', sim.stamina < C.STAMINA_MIN_TO_GALLOP);
+    // Speed gauge: gold once fast enough that the charge bonus kicks in.
+    const sp = sim.leader?.speed ?? 0;
+    this.speedEl.style.width = `${Math.min(1, sp / C.GALLOP_SPEED) * 100}%`;
+    this.speedEl.classList.toggle('charging', sp > C.CANTER_SPEED + 8);
+    // Formation gauge: how tight the wedge is (it hits other horsemen as one body).
+    const cohesion = sim.player?.cohesion ?? 0;
+    this.formEl.style.width = `${cohesion * 100}%`;
+    this.formEl.classList.toggle('loose', cohesion < 0.5);
     this.scoreEl.textContent = sim.score.toLocaleString();
     this.comboEl.textContent = this.combatText && sim.combo >= 3 ? `${sim.combo}× trample` : '';
     const red = sim.redStanding / sim.initialRed;

@@ -87,13 +87,10 @@ describe('squadron', () => {
     expect(sim.events.some(e => e.type === 'rider-down' && e.wasLeader)).toBe(true);
   });
 
-  it('galloping drains stamina and resting restores it', () => {
-    const sim = new ChargeSim([], { seed: 1, squad: { x: 1200, y: 300, facing: 0, count: 1 } });
-    for (let t = 0; t < 2; t += 1 / 60) sim.step(1 / 60, { dirX: 1, dirY: 0, gallop: true });
-    const drained = sim.stamina;
-    expect(drained).toBeLessThan(C.STAMINA_MAX);
-    for (let t = 0; t < 2; t += 1 / 60) sim.step(1 / 60);
-    expect(sim.stamina).toBeGreaterThan(drained);
+  it('can gallop for as long as you like', () => {
+    const sim = new ChargeSim([], { seed: 1, squad: { x: 300, y: 300, facing: 0, count: 1 }, muster: false });
+    for (let t = 0; t < 8; t += 1 / 60) sim.step(1 / 60, { dirX: 1, dirY: 0, gallop: true });
+    expect(sim.leader!.speed).toBeGreaterThan(C.GALLOP_SPEED * 0.95);
   });
 
   it('turns more tightly at a canter than at a gallop', () => {
@@ -265,17 +262,17 @@ describe('cavalry squadrons', () => {
       seed: 1, squad: { x: 600, y: 900, facing: UP, count: 6 }, muster: false,
       squads: [{ team: 'red', ai: 'hunter', x: 600, y: 300, facing: DOWN, count: 6 }],
     });
-    const start = Math.hypot(sim.squadrons[1].riders[0].x - 600, sim.squadrons[1].riders[0].y - 900);
     let riderDowns = 0;
+    let closest = Infinity;
     for (let t = 0; t < 8; t += 1 / 60) {
       sim.step(1 / 60, { dirX: 0, dirY: -1, gallop: true });
       riderDowns += sim.events.filter(e => e.type === 'rider-down').length;
+      const k = sim.squadrons.find(sq => sq.team === 'red')?.riders[0];
+      if (k && sim.leader) closest = Math.min(closest, Math.hypot(k.x - sim.leader.x, k.y - sim.leader.y));
     }
+    // They rode right at us and the squadrons met.
+    expect(closest).toBeLessThan(30);
     expect(riderDowns).toBeGreaterThan(0);
-    const knights = sim.squadrons.find(sq => sq.team === 'red');
-    if (knights?.riders[0] && sim.leader) {
-      expect(Math.hypot(knights.riders[0].x - sim.leader.x, knights.riders[0].y - sim.leader.y)).toBeLessThan(start);
-    }
   });
 
   it('killing knights scores double', () => {
@@ -319,7 +316,7 @@ describe('fighting animation signal', () => {
 
 describe('weapon aim', () => {
   it('soldiers note the direction of the nearest enemy, and ignore distant ones', () => {
-    const sim = new ChargeSim([block({ x: 600, y: 600 })], { seed: 1, squad: { x: 600, y: 680, facing: UP, count: 1 }, muster: false });
+    const sim = new ChargeSim([block({ x: 600, y: 600 })], { seed: 1, squad: { x: 600, y: 655, facing: UP, count: 1 }, muster: false });
     sim.step(1 / 60);
     const front = sim.soldiers.filter(s => !s.rider).sort((a, b) => b.y - a.y)[0];
     // The rider is below (south of) the battalion.

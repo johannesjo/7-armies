@@ -50,28 +50,77 @@ export const CHARGE = {
   KNIGHT_HP: 32,
   /** Knights are worth this many times an infantryman. */
   KNIGHT_SCORE_MULT: 2,
-  RIDER_CLASH_DAMAGE_MULT: 0.8,
-  RIDER_CLASH_SLOW: 0.8,
   /** Damage and shock multiplier for AI cavalry against infantry. */
   AI_INFANTRY_MULT: 0.25,
 
-  STAMINA_MAX: 100,
-  STAMINA_DRAIN: 14,
-  STAMINA_REGEN: 13,
-  STAMINA_MIN_TO_GALLOP: 12,
 
   // --- Charging ---
   /** Above this speed riders trample instead of fencing. */
   CHARGE_MIN_SPEED: 85,
-  IMPACT_DAMAGE: 9,
   FLANK_MULT: 2,
   REAR_MULT: 3,
-  IMPACT_SLOWDOWN: 0.95,
-  PIKE_FRONT_SLOWDOWN: 0.62,
-  PIKE_FRONT_DAMAGE: 7,
-  TRAMPLE_IMMUNITY: 0.4,
-  KNOCKBACK_SIDE: 110,
-  KNOCKBACK_FORWARD: 45,
+  // --- Physics ---
+  /** Body masses; a horse and rider weighs as much as five footmen. */
+  MASS: { swordsman: 1, pikeman: 1.15, archer: 0.8, cavalry: 5.5 } as Record<UnitType, number>,
+  KNIGHT_MASS: 6.2,
+  /** At full gallop a horse hits as if this much heavier (x1 + bonus), ramping up from a canter. */
+  CHARGE_WEIGHT_BONUS: 1.2,
+  /** Bounciness of collisions (0 = dead stop, 1 = billiard balls). */
+  RESTITUTION: 0.15,
+  /** Infantry bracing against a charge, as a multiple of their mass, by the side they are hit on. */
+  BRACE: { front: 4, pike: 7, flank: 2, rear: 1 },
+  /** Effective mass of a man lying on the ground. */
+  DOWN_MASS: 0.6,
+  /** A charged man's velocity change below this does nothing. */
+  IMPACT_DV_MIN: 50,
+  /** Damage per unit of velocity change above IMPACT_DV0. */
+  IMPACT_DV0: 55,
+  IMPACT_DAMAGE_K: 0.11,
+  /** Velocity change that knocks a man off his feet, and how long he stays down. */
+  KNOCK_DV: 80,
+  DOWN_TIME: 1.4,
+  DOWN_TIME_JITTER: 1.2,
+  /** Rider damage per unit of impulse when riding onto braced pikes. */
+  PIKE_RIDER_DAMAGE: 0.022,
+  /** Men colliding faster than this were thrown — the crash hurts. */
+  THROWN_REL: 80,
+  SECONDARY_DV0: 60,
+  /** A comrade crashing into you knocks you over more easily than a blow you braced for. */
+  SECONDARY_KNOCK_DV: 50,
+  SECONDARY_DAMAGE_K: 0.07,
+  /** How long collisions caused by a man you sent flying still count as yours (s). */
+  THROWN_CREDIT: 0.9,
+  /** How long a felled man's body keeps flying and bowling others over (s). */
+  FLYING_TIME: 0.6,
+  // --- Cavalry against cavalry ---
+  /** A follower within this distance of his place counts toward the wedge's cohesion. */
+  COHESION_DIST: 9,
+  /** A fully tight wedge hits other horsemen this much heavier (x1 + weight). */
+  COHESION_WEIGHT: 0.6,
+  /** Clash shock dealt to an AI squadron by the side it was hit on, and per rider it loses. */
+  CLASH_SHOCK: { front: 0.25, flank: 1.2, rear: 2.2 },
+  LOSS_SHOCK: 0.6,
+  /** Shock that breaks an AI squadron, how fast shock fades, and how long it stays scattered. */
+  SQUAD_BREAK_SHOCK: 2.5,
+  SQUAD_SHOCK_DECAY: 0.5,
+  SQUAD_BROKEN_TIME: 3.5,
+  /** Points for a knight your own troops kill while he hunts you, relative to killing him yourself. */
+  LURE_SCORE_MULT: 0.75,
+  /**
+   * A charging rider strikes an enemy horseman within this half-angle of where he faces
+   * (rad). Damage: RIDER_STRIKE x speed (vs gallop) x wedge bonus x side (front 1,
+   * flank 2, rear 3) — at full gallop a rear strike unhorses, head-on takes two.
+   */
+  STRIKE_CONE: 0.9,
+  RIDER_STRIKE: 16,
+  STRIKE_WEDGE_BONUS: 0.5,
+  STRIKE_COOLDOWN: 0.35,
+  /** Sword-fighting from the saddle reaches this far round from the front (rad), not behind. */
+  SADDLE_ARC: 1.9,
+  /** How hard a footman can push to regain his place (world units/s²). */
+  INFANTRY_ACCEL: 220,
+  /** Sliding friction for thrown and fallen men (1/s). */
+  GROUND_FRICTION: 5,
   RIDER_MELEE_DAMAGE: 4,
   RIDER_MELEE_COOLDOWN: 0.7,
   RIDER_REACH: 6,
@@ -87,6 +136,10 @@ export const CHARGE = {
   MELEE_COOLDOWN_MAX: 2.0,
   MELEE_HIT_CHANCE: 0.1,
   MELEE_REACH: 5,
+  /** A footman strikes only enemies within this half-angle of where he faces (rad)... */
+  INFANTRY_ARC: 0.9,
+  /** ...and turns no faster than this (rad/s) — about a second for a full about-face. */
+  INFANTRY_TURN_RATE: 3,
   /** Infantry swarming a stalled rider land far more often than in the shield-wall grind. */
   VS_RIDER_HIT_CHANCE: 0.5,
   VS_RIDER_DAMAGE_MULT: 1.4,
@@ -101,6 +154,22 @@ export const CHARGE = {
   MARCH_SPEED: 30,
   MARCH_DISTANCE: 260,
   BATTALION_TURN_RATE: 0.4,
+
+  // --- The battle on its own ---
+  /** Lines in melee shove: the stronger side gains ground at up to this speed. */
+  PUSH_SPEED: 7,
+  PUSH_RANGE: 150,
+  PUSH_WEIGHT: { swordsman: 1, pikeman: 1.15, archer: 0.5, cavalry: 1.5 } as Record<UnitType, number>,
+  /** Ranks spread by up to this fraction as morale fails. */
+  LOOSEN: 0.35,
+  /** How often wounded men rotate out of the front rank (s). */
+  ROTATE_INTERVAL: 2.4,
+  /** Archers fall back from enemy foot within this distance, up to ARCHER_FALLBACK from their post. */
+  ARCHER_SKIRMISH: 140,
+  ARCHER_FALLBACK: 260,
+  ARCHER_RETREAT_SPEED: 32,
+  /** A routed line pulls up the nearest reserve within this distance. */
+  PLUG_RANGE: 700,
 
   // --- Archers ---
   ARCHER_RANGE: 480,
@@ -143,7 +212,6 @@ export const CHARGE = {
   CAMP_R: 95,
   RALLY_INTERVAL: 2.2,
   CAMP_HEAL: 12,
-  CAMP_STAMINA_MULT: 3,
 
   // --- Scoring ---
   KILL_SCORE: 10,

@@ -6,7 +6,7 @@ export interface ChargeInput {
   /** Desired travel direction in world space; magnitude 0..1 (joystick deflection). */
   dirX: number;
   dirY: number;
-  /** Spur the horses into a full gallop (drains stamina). */
+  /** Spur the horses into a full gallop. */
   gallop: boolean;
 }
 
@@ -65,7 +65,6 @@ export interface Squadron {
   /** Riders in command order; riders[0] leads. */
   riders: Soldier[];
   initial: number;
-  stamina: number;
   galloping: boolean;
   home: Vec2;
   phase: SquadPhase;
@@ -311,14 +310,6 @@ export class ChargeSim {
     return this.riders[0] ?? null;
   }
 
-  get stamina(): number {
-    return this.player?.stamina ?? 0;
-  }
-
-  set stamina(v: number) {
-    if (this.player) this.player.stamina = v;
-  }
-
   get galloping(): boolean {
     return this.player?.galloping ?? false;
   }
@@ -437,7 +428,6 @@ export class ChargeSim {
       ai: spec.ai,
       riders: [],
       initial: spec.count,
-      stamina: C.STAMINA_MAX,
       galloping: false,
       home: { x: spec.x, y: spec.y },
       phase: spec.muster ? 'muster' : 'approach',
@@ -555,7 +545,8 @@ export class ChargeSim {
     const leaving = sq.team === 'red' && sq.phase === 'retreat';
     const raw = Math.atan2(input.dirY, input.dirX);
     let desired = mag > 0.2 ? (leaving ? raw : this.awayFromWalls(L, raw)) : L.facing;
-    const wantsGallop = input.gallop && sq.stamina > (sq.galloping ? 0.5 : C.STAMINA_MIN_TO_GALLOP);
+    // No stamina: the cost of a gallop is a wider turn (speed versus control).
+    const wantsGallop = input.gallop;
     // Spurring with no direction charges straight ahead.
     if (wantsGallop && mag <= 0.2) { mag = 1; desired = L.facing; }
 
@@ -575,9 +566,6 @@ export class ChargeSim {
     }
 
     sq.galloping = wantsGallop && L.speed > C.CANTER_SPEED;
-    const rest = sq === this.player && this.inCamp ? C.CAMP_STAMINA_MULT : 1;
-    if (sq.galloping) sq.stamina = Math.max(0, sq.stamina - C.STAMINA_DRAIN * dt);
-    else sq.stamina = Math.min(C.STAMINA_MAX, sq.stamina + C.STAMINA_REGEN * rest * dt);
 
     L.vx = Math.cos(L.facing) * L.speed;
     L.vy = Math.sin(L.facing) * L.speed;
@@ -820,7 +808,6 @@ export class ChargeSim {
   private aiInput(sq: Squadron, dt: number): ChargeInput {
     const L = sq.riders[0];
     sq.phaseTimer -= dt;
-    const canGallop = sq.stamina > 20;
 
     if (sq.riders.length <= C.AI_RETREAT_AT && sq.phase !== 'retreat' && sq.phase !== 'idle' && sq.phase !== 'muster') {
       sq.phase = 'retreat';
@@ -839,7 +826,7 @@ export class ChargeSim {
         if (sq.team === 'red') {
           // Broken knights ride off the field.
           if (L.y < 20) for (const r of sq.riders) r.alive = false;
-          return this.rideTo(L, { x: L.x, y: -100 }, canGallop);
+          return this.rideTo(L, { x: L.x, y: -100 }, true);
         }
         if (Math.hypot(L.x - C.CAMP_X, L.y - C.CAMP_Y) < C.CAMP_R * 0.5) sq.phase = 'idle';
         return this.rideTo(L, { x: C.CAMP_X, y: C.CAMP_Y }, false);
@@ -871,7 +858,7 @@ export class ChargeSim {
       // Ride at where the enemy horse will be.
       const aim = { x: T.x + T.vx * 0.35, y: T.y + T.vy * 0.35 };
       const d = Math.hypot(aim.x - L.x, aim.y - L.y);
-      return { ...this.rideTo(L, aim, canGallop && d < 340), dirX: (aim.x - L.x) / (d || 1), dirY: (aim.y - L.y) / (d || 1) };
+      return { ...this.rideTo(L, aim, d < 340), dirX: (aim.x - L.x) / (d || 1), dirY: (aim.y - L.y) / (d || 1) };
     }
 
     const b = sq.targetBat;
@@ -884,7 +871,7 @@ export class ChargeSim {
         sq.targetBat = null; // pick again — maybe the same battalion, maybe another
         sq.phaseTimer = 0;
       }
-      return this.rideTo(L, exit, canGallop);
+      return this.rideTo(L, exit, true);
     }
 
     // Approach: pick the nearest exposed side (rear or a flank) and ride round to it,
@@ -906,7 +893,7 @@ export class ChargeSim {
       sq.phase = 'charge';
       sq.phaseTimer = 2.6;
       sq.chargeExit = { x: b.x + (ix / il) * 180, y: b.y + (iy / il) * 180 };
-      return this.rideTo(L, sq.chargeExit, canGallop);
+      return this.rideTo(L, sq.chargeExit, true);
     }
     let wp = ap;
     // Detour round the side if the straight line would cross the formation.

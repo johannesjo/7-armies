@@ -87,13 +87,10 @@ describe('squadron', () => {
     expect(sim.events.some(e => e.type === 'rider-down' && e.wasLeader)).toBe(true);
   });
 
-  it('galloping drains stamina and resting restores it', () => {
-    const sim = new ChargeSim([], { seed: 1, squad: { x: 1200, y: 300, facing: 0, count: 1 } });
-    for (let t = 0; t < 2; t += 1 / 60) sim.step(1 / 60, { dirX: 1, dirY: 0, gallop: true });
-    const drained = sim.stamina;
-    expect(drained).toBeLessThan(C.STAMINA_MAX);
-    for (let t = 0; t < 2; t += 1 / 60) sim.step(1 / 60);
-    expect(sim.stamina).toBeGreaterThan(drained);
+  it('can gallop for as long as you like', () => {
+    const sim = new ChargeSim([], { seed: 1, squad: { x: 300, y: 300, facing: 0, count: 1 }, muster: false });
+    for (let t = 0; t < 8; t += 1 / 60) sim.step(1 / 60, { dirX: 1, dirY: 0, gallop: true });
+    expect(sim.leader!.speed).toBeGreaterThan(C.GALLOP_SPEED * 0.95);
   });
 
   it('turns more tightly at a canter than at a gallop', () => {

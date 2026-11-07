@@ -53,10 +53,6 @@ export const CHARGE = {
   /** Damage and shock multiplier for AI cavalry against infantry. */
   AI_INFANTRY_MULT: 0.25,
 
-  STAMINA_MAX: 100,
-  STAMINA_DRAIN: 14,
-  STAMINA_REGEN: 13,
-  STAMINA_MIN_TO_GALLOP: 12,
 
   // --- Charging ---
   /** Above this speed riders trample instead of fencing. */
@@ -173,7 +169,6 @@ export const CHARGE = {
   CAMP_R: 95,
   RALLY_INTERVAL: 2.2,
   CAMP_HEAL: 12,
-  CAMP_STAMINA_MULT: 3,
 
   // --- Scoring ---
   KILL_SCORE: 10,

@@ -130,6 +130,8 @@ export interface Battalion {
   sinceShock: number;
   engagedTimer: number;
   lastPlayerHit: number;
+  /** Paces how often wounded men in the front rank swap with fresh men behind. */
+  rotateTimer: number;
 }
 
 export interface Arrow {
@@ -376,6 +378,7 @@ export class ChargeSim {
       sinceShock: 99,
       engagedTimer: 0,
       lastPlayerHit: -99,
+      rotateTimer: this.rand() * C.ROTATE_INTERVAL,
     };
     for (let i = 0; i < spec.count; i++) {
       const p = this.slotPos(bat, i);
@@ -466,8 +469,9 @@ export class ChargeSim {
     const rows = Math.ceil(b.grid.length / b.cols);
     const col = i % b.cols;
     const row = Math.floor(i / b.cols);
-    const lx = ((rows - 1) / 2 - row) * b.spacing;
-    const ly = (col - (b.cols - 1) / 2) * b.spacing;
+    const sp = b.spacing * (b.routed ? 1 : this.looseness(b));
+    const lx = ((rows - 1) / 2 - row) * sp;
+    const ly = (col - (b.cols - 1) / 2) * sp;
     const c = Math.cos(b.facing), sn = Math.sin(b.facing);
     out.x = b.x + lx * c - ly * sn;
     out.y = b.y + lx * sn + ly * c;
@@ -953,7 +957,7 @@ export class ChargeSim {
       if (role === 'reserve' && this.nearestEnemyBattalion(b, 260)) role = 'front';
 
       if (role === 'front') {
-        if (engaged) continue; // locked in melee — can't wheel or advance
+        if (engaged) { this.pressLine(b, dt); continue; } // locked in melee: push and shove
         const target = this.nearestEnemyBattalion(b);
         if (!target) continue;
         const dx = target.x - b.x, dy = target.y - b.y;
@@ -991,7 +995,50 @@ export class ChargeSim {
     }
   }
 
+  /** Fighting strength for the shoving match: numbers, heart and the kind of men. */
+  private lineStrength(b: Battalion): number {
+    return this.members(b).length * (0.3 + 0.7 * clamp01(b.morale / 100)) * C.PUSH_WEIGHT[b.type];
+  }
+
+  /**
+   * Two lines locked in melee push against each other: the side with more men and
+   * better heart slowly drives the other back, so the front bends and shifts and a
+   * losing battalion gives ground before it breaks.
+   */
+  private pressLine(b: Battalion, dt: number): void {
+    const foe = this.nearestEnemyBattalion(b, C.PUSH_RANGE);
+    if (!foe) return;
+    const mine = this.lineStrength(b), theirs = this.lineStrength(foe);
+    const balance = (mine - theirs) / Math.max(1, mine + theirs);
+    const v = C.PUSH_SPEED * Math.max(-1, Math.min(1, balance * 2.2));
+    b.x += Math.cos(b.facing) * v * dt;
+    b.y += Math.sin(b.facing) * v * dt;
+  }
+
+  /** Ranks loosen and grow ragged as a battalion's heart fails. */
+  looseness(b: Battalion): number {
+    return 1 + C.LOOSEN * (1 - clamp01(b.morale / 100));
+  }
+
   private updateArchers(b: Battalion, dt: number): void {
+    // Skirmishers: fall back from enemy foot closing in rather than stand and be cut down.
+    if (b.engagedTimer <= 0) {
+      let threat: Battalion | null = null;
+      let best: number = C.ARCHER_SKIRMISH;
+      for (const o of this.battalions) {
+        if (o.team === b.team || o.routed || o.role === 'archer') continue;
+        const d = Math.hypot(o.x - b.x, o.y - b.y);
+        if (d < best) { best = d; threat = o; }
+      }
+      if (threat && Math.hypot(b.x - b.home.x, b.y - b.home.y) < C.ARCHER_FALLBACK) {
+        const dx = b.x - threat.x, dy = b.y - threat.y;
+        const d = Math.hypot(dx, dy) || 1;
+        b.x += (dx / d) * C.ARCHER_RETREAT_SPEED * dt;
+        b.y += (dy / d) * C.ARCHER_RETREAT_SPEED * dt;
+        b.x = Math.max(60, Math.min(C.WORLD_W - 60, b.x));
+        b.y = Math.max(60, Math.min(C.WORLD_H - 60, b.y));
+      }
+    }
     let aim: Vec2 | null = null;
     let atPlayer = false;
     let spread: number = C.VOLLEY_SPREAD_LINE;
@@ -1082,6 +1129,19 @@ export class ChargeSim {
   }
 
   /** Close ranks: survivors step forward into gaps of their file. */
+  /** Badly wounded men in the front rank swap places with fresh men behind them. */
+  private rotateWounded(b: Battalion): void {
+    for (let col = 0; col < b.cols; col++) {
+      const front = b.grid[col];
+      const behind = b.grid[b.cols + col];
+      if (!front || !behind || !front.alive || !behind.alive || front.down > 0) continue;
+      if (front.hp < front.maxHp * 0.45 && behind.hp > behind.maxHp * 0.75) {
+        b.grid[col] = behind;
+        b.grid[b.cols + col] = front;
+      }
+    }
+  }
+
   private closeRanks(b: Battalion): void {
     const rows = Math.ceil(b.grid.length / b.cols);
     for (let col = 0; col < b.cols; col++) {
@@ -1101,7 +1161,15 @@ export class ChargeSim {
 
   private moveInfantry(dt: number): void {
     const slide = Math.exp(-C.GROUND_FRICTION * dt);
-    for (const b of this.battalions) if (!b.routed) this.closeRanks(b);
+    for (const b of this.battalions) {
+      if (b.routed) continue;
+      this.closeRanks(b);
+      b.rotateTimer -= dt;
+      if (b.rotateTimer <= 0) {
+        b.rotateTimer = C.ROTATE_INTERVAL * (0.6 + this.rand() * 0.8);
+        this.rotateWounded(b);
+      }
+    }
 
     for (const s of this.soldiers) {
       if (s.rider || !s.alive) continue;
@@ -1117,8 +1185,9 @@ export class ChargeSim {
       } else if (s.bat) {
         const idx = s.bat.grid.indexOf(s);
         const p = this.slotPos(s.bat, idx, this.tmp);
-        dvx = (p.x + s.jx - s.x) * 3;
-        dvy = (p.y + s.jy - s.y) * 3;
+        const rag = 1 + 2 * (this.looseness(s.bat) - 1);
+        dvx = (p.x + s.jx * rag - s.x) * 3;
+        dvy = (p.y + s.jy * rag - s.y) * 3;
         const m = Math.hypot(dvx, dvy);
         if (m > maxSpeed) { dvx *= maxSpeed / m; dvy *= maxSpeed / m; }
       }
@@ -1553,6 +1622,17 @@ export class ChargeSim {
       this.score += C.ROUT_SCORE;
     }
     this.events.push({ type: 'rout', x: b.x, y: b.y, team: b.team, byPlayer, type2: b.type });
+    // A broken line is a hole: the nearest reserve marches up to plug it.
+    if (b.role === 'front') {
+      let plug: Battalion | null = null;
+      let best: number = C.PLUG_RANGE;
+      for (const o of this.battalions) {
+        if (o.team !== b.team || o.routed || o.role !== 'reserve') continue;
+        const d = Math.hypot(o.x - b.x, o.y - b.y);
+        if (d < best) { best = d; plug = o; }
+      }
+      if (plug) plug.role = 'front';
+    }
     // Panic spreads to neighbours.
     for (const o of this.battalions) {
       if (o === b || o.routed || o.team !== b.team) continue;

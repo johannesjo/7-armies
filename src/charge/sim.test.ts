@@ -316,7 +316,7 @@ describe('fighting animation signal', () => {
 
 describe('weapon aim', () => {
   it('soldiers note the direction of the nearest enemy, and ignore distant ones', () => {
-    const sim = new ChargeSim([block({ x: 600, y: 600 })], { seed: 1, squad: { x: 600, y: 680, facing: UP, count: 1 }, muster: false });
+    const sim = new ChargeSim([block({ x: 600, y: 600 })], { seed: 1, squad: { x: 600, y: 655, facing: UP, count: 1 }, muster: false });
     sim.step(1 / 60);
     const front = sim.soldiers.filter(s => !s.rider).sort((a, b) => b.y - a.y)[0];
     // The rider is below (south of) the battalion.

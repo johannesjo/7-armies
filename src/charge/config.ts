@@ -128,6 +128,22 @@ export const CHARGE = {
   MARCH_DISTANCE: 260,
   BATTALION_TURN_RATE: 0.4,
 
+  // --- The battle on its own ---
+  /** Lines in melee shove: the stronger side gains ground at up to this speed. */
+  PUSH_SPEED: 7,
+  PUSH_RANGE: 150,
+  PUSH_WEIGHT: { swordsman: 1, pikeman: 1.15, archer: 0.5, cavalry: 1.5 } as Record<UnitType, number>,
+  /** Ranks spread by up to this fraction as morale fails. */
+  LOOSEN: 0.35,
+  /** How often wounded men rotate out of the front rank (s). */
+  ROTATE_INTERVAL: 2.4,
+  /** Archers fall back from enemy foot within this distance, up to ARCHER_FALLBACK from their post. */
+  ARCHER_SKIRMISH: 140,
+  ARCHER_FALLBACK: 260,
+  ARCHER_RETREAT_SPEED: 32,
+  /** A routed line pulls up the nearest reserve within this distance. */
+  PLUG_RANGE: 700,
+
   // --- Archers ---
   ARCHER_RANGE: 480,
   ARCHER_MIN_RANGE: 95,

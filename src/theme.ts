@@ -46,6 +46,17 @@ export interface Theme {
   /** Light accent for trims, fletching and bowstrings. */
   trim: number;
 
+  // Ground
+  /** Paint a realistic grass field instead of a flat background. */
+  grass: boolean;
+  grassDark: number;
+  grassLight: number;
+  grassDry: number;
+  /** Bare / trampled earth, hoofprints. */
+  dirt: number;
+  /** Outline behind floating combat text. */
+  textOutline: number;
+
   // HP bar
   hpBg: number;
   hpHigh: number;
@@ -109,6 +120,13 @@ export const NIGHT_THEME: Theme = {
   leather: 0x5e5246,
   trim: 0xf2ead8,
 
+  grass: false,
+  grassDark: 0x1a1a2e,
+  grassLight: 0x1a1a2e,
+  grassDry: 0x1a1a2e,
+  dirt: 0x6a6a90,
+  textOutline: 0x1a1a2e,
+
   hpBg: 0x333333,
   hpHigh: 0x44ff44,
   hpMid: 0xffaa00,
@@ -168,6 +186,13 @@ export const DAY_THEME: Theme = {
   leather: 0x5c5044,
   trim: 0xf7f1e1,
 
+  grass: false,
+  grassDark: 0xf5f0e0,
+  grassLight: 0xf5f0e0,
+  grassDry: 0xf5f0e0,
+  dirt: 0x665544,
+  textOutline: 0xf5f0e0,
+
   hpBg: 0x998877,
   hpHigh: 0x448833,
   hpMid: 0xbb8822,
@@ -186,4 +211,79 @@ export const DAY_THEME: Theme = {
   bloodAlpha: 0.85,
   bloodFade: 0.9,
   elevationAlpha: 0.6,
+};
+
+/** Realistic field: grass, earthy team colours, darker blood. */
+export const FIELD_THEME: Theme = {
+  bg: 0x5c7539,
+  grid: 0x5c7539,
+  gridAlpha: 0,
+
+  elevationOuter: 0x86a04e,
+  elevationMid: 0x93ab58,
+  elevationInner: 0xa1b764,
+  elevationLabel: '#f4e9a8',
+
+  obstacleBorder: 0x4b4636,
+  obstacleFill: 0x8a8577,
+  obstacleHighlight: 0xa8a394,
+
+  blue: 0x2f5fa0,
+  blueDark: 0x1a3863,
+  red: 0xb0342b,
+  redDark: 0x611914,
+
+  blueProjectile: 0xe2e8ef,
+  redProjectile: 0xf1e2dc,
+
+  blueBlood: [0x8a1a16, 0x6e1410, 0xa02a20],
+  redBlood: [0x8a1a16, 0x6e1410, 0xa02a20],
+  blueStain: 0x4a120d,
+  redStain: 0x4a120d,
+
+  muzzleFlash: 0xf2ead0,
+  muzzleCore: 0xffffff,
+
+  barrel: 0x2b2a20,
+  barrelAlpha: 0.7,
+
+  hpBg: 0x2e3320,
+  hpHigh: 0x9fd05a,
+  hpMid: 0xe6b03a,
+  hpLow: 0xd8502e,
+
+  bluePath: 0x2f5fa0,
+  redPath: 0xb0342b,
+  bluePathBright: 0x7aa6e0,
+  redPathBright: 0xe07a6e,
+  labelFill: 0x262a1a,
+  labelWarn: 0xd8402e,
+  elevationBonus: 0xf2d35a,
+  hoverLabelFill: 0xf4f0e0,
+  paperNoise: false,
+  sketchyObstacles: false,
+  bloodAlpha: 0.9,
+  bloodFade: 0.5,
+  elevationAlpha: 0.7,
+
+  steel: 0xb3b1ab,
+  steelDark: 0x5f5d58,
+  wood: 0x8a7558,
+  leather: 0x5e4a36,
+  trim: 0xefe7d2,
+
+  grass: true,
+  grassDark: 0x4a6330,
+  grassLight: 0x76904b,
+  grassDry: 0x9c9562,
+  dirt: 0x6e5a40,
+  textOutline: 0x1c2412,
+};
+
+export type ThemeName = 'field' | 'parchment' | 'night';
+
+export const THEMES: Record<ThemeName, Theme> = {
+  field: FIELD_THEME,
+  parchment: DAY_THEME,
+  night: NIGHT_THEME,
 };

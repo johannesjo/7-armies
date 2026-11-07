@@ -1,4 +1,5 @@
-import { Application, Graphics, Container, Text } from 'pixi.js';
+import { Application, Graphics, Container, Text, Sprite, Texture } from 'pixi.js';
+import { paintGrass } from './ground';
 import { Unit, Obstacle, Projectile, ElevationZone, Vec2 } from './types';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
@@ -12,7 +13,8 @@ export class Renderer {
   private dyingUnits: Map<string, { container: Container; age: number; vel: { x: number; y: number } }> = new Map();
   private elevationGraphics: Container | null = null;
   private obstacleGraphics: Container | null = null;
-  private bgGraphics: Graphics | null = null;
+  private bgGraphics: Container | null = null;
+  private grassTexture: Texture | null = null;
   private projectileGraphics: Graphics | null = null;
   private _effects: EffectsManager | null = null;
   private zoneLabels: { rect: Obstacle; label: Text; hovered: boolean; dragActive: boolean }[] = [];
@@ -48,9 +50,18 @@ export class Renderer {
   private drawBackground(): void {
     if (this.bgGraphics) {
       this.app.stage.removeChild(this.bgGraphics);
-      this.bgGraphics.destroy();
+      this.bgGraphics.destroy({ children: true });
     }
-    this.bgGraphics = new Graphics();
+    this.grassTexture?.destroy(true);
+    this.grassTexture = null;
+    this.bgGraphics = new Container();
+    if (this.theme.grass) {
+      this.grassTexture = Texture.from(paintGrass(MAP_WIDTH, MAP_HEIGHT, this.theme, { scale: 2, seed: 5 }));
+      const grass = new Sprite(this.grassTexture);
+      grass.width = MAP_WIDTH;
+      grass.height = MAP_HEIGHT;
+      this.bgGraphics.addChild(grass);
+    }
     this.app.stage.addChildAt(this.bgGraphics, 0);
 
     if (this.noiseSprite) {

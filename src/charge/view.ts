@@ -1,4 +1,5 @@
-import { Application, Container, Graphics, GraphicsContext, RenderTexture, Sprite, Text } from 'pixi.js';
+import { Application, Container, Graphics, GraphicsContext, RenderTexture, Sprite, Text, Texture } from 'pixi.js';
+import { paintGrass } from '../ground';
 import { Team, UnitType, Vec2 } from '../types';
 import { Theme } from '../theme';
 import { drawUnitArt, HORSE_VARIANTS } from '../unit-art';
@@ -103,8 +104,9 @@ export class ChargeView {
 
   constructor(private readonly app: Application, private readonly theme: Theme) {
     this.ink = theme.labelFill;
-    this.dust = mixColor(theme.bg, theme.obstacleBorder, 0.35);
-    app.renderer.background.color = mixColor(theme.bg, this.ink, 0.18);
+    this.dust = theme.grass ? mixColor(theme.dirt, theme.trim, 0.45) : mixColor(theme.bg, theme.obstacleBorder, 0.35);
+    // Beyond the field: forest floor on grass, a darker margin otherwise.
+    app.renderer.background.color = theme.grass ? 0x33441f : mixColor(theme.bg, this.ink, 0.18);
 
     this.stainRT = RenderTexture.create({ width: C.WORLD_W, height: C.WORLD_H, resolution: 1 });
     this.stainSprite = new Sprite(this.stainRT);
@@ -122,6 +124,7 @@ export class ChargeView {
     this.root.destroy({ children: true });
     this.stainBatch.destroy();
     this.stainRT.destroy(true);
+    this.grassTexture?.destroy(true);
     for (const c of this.contexts.values()) { c.body.destroy(); c.weapon.destroy(); }
     this.contexts.clear();
     this.units.clear();
@@ -260,10 +263,105 @@ export class ChargeView {
 
   // --- Static ground -------------------------------------------------------------
 
+  private grassTexture: Texture | null = null;
+
+  /** Amount of bare, trampled earth: where the lines clash and around both camps. */
+  private earthAt = (x: number, y: number): number => {
+    const cx = C.WORLD_W / 2;
+    const xFade = Math.max(0, 1 - Math.max(0, Math.abs(x - cx) - 380) / 160);
+    const front = Math.max(0, 1 - Math.abs(y - C.FRONT_Y) / 80) * xFade;
+    const camp = Math.max(0, 1 - Math.hypot(x - C.CAMP_X, y - C.CAMP_Y) / (C.CAMP_R * 1.15));
+    const redCamp = y < 200 ? Math.max(0, 1 - Math.max(0, Math.abs(x - cx) - 300) / 120) * (1 - y / 200) * 0.8 : 0;
+    return Math.max(front, camp, redCamp);
+  };
+
+  /** Realistic meadow: noise-painted grass, tufts, flowers, stones, bushes and a forest border. */
+  private drawGrass(g: Graphics): void {
+    const t = this.theme;
+    const rand = mulberry32(4321);
+    const canvas = paintGrass(C.WORLD_W, C.WORLD_H, t, { scale: 4, seed: 11, earth: this.earthAt });
+    this.grassTexture = Texture.from(canvas);
+    const sprite = new Sprite(this.grassTexture);
+    sprite.width = C.WORLD_W;
+    sprite.height = C.WORLD_H;
+    this.world.addChild(sprite);
+
+    // Forest beyond the field edge.
+    const tree = (x: number, y: number, r: number) => {
+      g.circle(x + r * 0.25, y + r * 0.3, r).fill({ color: 0x000000, alpha: 0.25 });
+      g.circle(x, y, r).fill(mixColor(t.grassDark, 0x1c2a10, 0.45));
+      g.circle(x - r * 0.25, y - r * 0.25, r * 0.6).fill({ color: t.grassDark, alpha: 0.9 });
+      g.circle(x - r * 0.35, y - r * 0.35, r * 0.28).fill({ color: t.grassLight, alpha: 0.35 });
+    };
+    const band = 170;
+    for (let i = 0; i < 520; i++) {
+      const side = Math.floor(rand() * 4);
+      const along = rand();
+      const depth = 10 + rand() * band;
+      const x = side === 0 ? along * (C.WORLD_W + band * 2) - band : side === 1 ? C.WORLD_W + depth : side === 2 ? along * (C.WORLD_W + band * 2) - band : -depth;
+      const y = side === 0 ? -depth : side === 2 ? C.WORLD_H + depth : along * (C.WORLD_H + band * 2) - band;
+      tree(x, y, 14 + rand() * 18);
+    }
+
+    // Grass tufts in a few shades.
+    const shades = [mixColor(t.grassDark, 0x000000, 0.25), mixColor(t.grassLight, 0xffffff, 0.12), t.grassDry];
+    for (const shade of shades) {
+      g.setStrokeStyle({ width: 0.9, color: shade, alpha: 0.7 });
+      for (let i = 0; i < 1300; i++) {
+        const x = rand() * C.WORLD_W, y = rand() * C.WORLD_H;
+        if (this.earthAt(x, y) > 0.55) continue;
+        const s = 1.6 + rand() * 2.2;
+        g.moveTo(x - s * 0.7, y).lineTo(x - s * 0.2, y - s).moveTo(x, y).lineTo(x + s * 0.1, y - s * 1.2)
+          .moveTo(x + s * 0.6, y).lineTo(x + s * 0.4, y - s * 0.9);
+      }
+      g.stroke();
+    }
+
+    // Wildflowers.
+    const petals = [0xf6f2e4, 0xf0d24a, 0xb592d8, 0xe9a0b4];
+    for (let i = 0; i < 260; i++) {
+      const cx = rand() * C.WORLD_W, cy = rand() * C.WORLD_H;
+      if (this.earthAt(cx, cy) > 0.3) continue;
+      const color = petals[Math.floor(rand() * petals.length)];
+      const n = 3 + Math.floor(rand() * 5);
+      for (let k = 0; k < n; k++) g.circle(cx + (rand() - 0.5) * 14, cy + (rand() - 0.5) * 14, 0.7 + rand() * 0.5).fill({ color, alpha: 0.9 });
+    }
+
+    // Stones.
+    for (let i = 0; i < 140; i++) {
+      const x = rand() * C.WORLD_W, y = rand() * C.WORLD_H;
+      const r = 0.8 + rand() * 2.2;
+      g.ellipse(x + 0.5, y + 0.6, r * 1.2, r).fill({ color: 0x000000, alpha: 0.2 });
+      g.ellipse(x, y, r * 1.2, r).fill(mixColor(t.obstacleFill, 0x000000, rand() * 0.3));
+      g.circle(x - r * 0.3, y - r * 0.3, r * 0.4).fill({ color: 0xffffff, alpha: 0.18 });
+    }
+
+    // Bushes near the edges of the field.
+    for (let i = 0; i < 60; i++) {
+      const edge = Math.floor(rand() * 4);
+      const inset = 15 + rand() * 90;
+      const x = edge === 1 ? C.WORLD_W - inset : edge === 3 ? inset : rand() * C.WORLD_W;
+      const y = edge === 0 ? inset : edge === 2 ? C.WORLD_H - inset : rand() * C.WORLD_H;
+      if (this.earthAt(x, y) > 0.1) continue;
+      const r = 5 + rand() * 6;
+      g.ellipse(x + r * 0.3, y + r * 0.4, r * 1.3, r * 0.9).fill({ color: 0x000000, alpha: 0.22 });
+      for (let k = 0; k < 4; k++) {
+        g.circle(x + (rand() - 0.5) * r, y + (rand() - 0.5) * r * 0.7, r * (0.5 + rand() * 0.3))
+          .fill(mixColor(t.grassDark, 0x1c2a10, 0.25 + rand() * 0.25));
+      }
+      g.circle(x - r * 0.3, y - r * 0.3, r * 0.3).fill({ color: t.grassLight, alpha: 0.35 });
+    }
+  }
+
   private drawGround(): void {
     const g = this.ground;
     const t = this.theme;
     const rand = mulberry32(1234);
+    if (t.grass) {
+      this.drawGrass(g);
+      this.drawCamps(g, rand);
+      return;
+    }
     g.rect(0, 0, C.WORLD_W, C.WORLD_H).fill(t.bg);
 
     // Churned earth where the lines meet.
@@ -291,7 +389,11 @@ export class ChargeView {
 
     // Field edge.
     g.rect(0, 0, C.WORLD_W, C.WORLD_H).stroke({ width: 4, color: t.obstacleBorder, alpha: 0.5 });
+    this.drawCamps(g, rand);
+  }
 
+  private drawCamps(g: Graphics, rand: () => number): void {
+    const t = this.theme;
     // Blue rally camp.
     const blue = t.blue;
     for (let i = 0; i < 6; i++) {
@@ -325,7 +427,7 @@ export class ChargeView {
   }
 
   private drawTent(g: Graphics, x: number, y: number, color: number): void {
-    g.poly([x - 11, y + 8, x, y - 9, x + 11, y + 8]).fill({ color: mixColor(this.theme.bg, color, 0.25) })
+    g.poly([x - 11, y + 8, x, y - 9, x + 11, y + 8]).fill({ color: mixColor(this.theme.trim, color, 0.22) })
       .stroke({ width: 1.2, color, alpha: 0.6 });
     g.moveTo(x, y - 9).lineTo(x, y + 8).stroke({ width: 0.8, color, alpha: 0.5 });
   }
@@ -569,7 +671,7 @@ export class ChargeView {
         const side = this.rand() < 0.5 ? 2 : -2;
         const jx = (this.rand() - 0.5) * 3, jy = (this.rand() - 0.5) * 3;
         this.stainBatch.circle(r.x - Math.sin(r.facing) * side + jx, r.y + Math.cos(r.facing) * side + jy, 0.8)
-          .fill({ color: this.theme.obstacleBorder, alpha: 0.08 });
+          .fill({ color: this.theme.grass ? this.theme.dirt : this.theme.obstacleBorder, alpha: this.theme.grass ? 0.16 : 0.08 });
         this.stainDirty = true;
       }
     }
@@ -773,7 +875,7 @@ export class ChargeView {
           text: '',
           style: {
             fontFamily: 'Segoe UI, system-ui, sans-serif', fontSize: 12, fontWeight: '800',
-            fill: this.theme.blue, stroke: { color: this.theme.bg, width: 3 }, letterSpacing: 1,
+            fill: this.theme.grass ? this.theme.trim : this.theme.blue, stroke: { color: this.theme.textOutline, width: 3 }, letterSpacing: 1,
           },
         });
         tag.anchor.set(0.5, 1);
@@ -804,7 +906,7 @@ export class ChargeView {
           fontSize: size,
           fontWeight: '800',
           fill: color,
-          stroke: { color: this.theme.bg, width: 3 },
+          stroke: { color: this.theme.textOutline, width: 3 },
           letterSpacing: 1,
         },
       });

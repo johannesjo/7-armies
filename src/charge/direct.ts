@@ -1,11 +1,11 @@
 import { ChargeInput } from './sim';
 
 /** Pointer closer than this (CSS px) to the leader: let the horses slow to a stop. */
-export const DEAD_ZONE_PX = 26;
+export const DEAD_ZONE_PX = 20;
 /** Full canter at this share of the screen's short side from the leader. */
-export const CANTER_FULL = 0.2;
+export const CANTER_FULL = 0.12;
 /** Gallop beyond this share of the screen's short side from the leader. */
-export const GALLOP_AT = 0.33;
+export const GALLOP_AT = 0.2;
 
 export interface DirectZones {
   dead: number;

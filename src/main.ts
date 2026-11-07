@@ -5,7 +5,8 @@ import { BattleResult, TurnPhase, ReplayData } from './types';
 import { BATTALION_SIZE, ARMY_COMPOSITION } from './constants';
 import { createArmyBattalions } from './battalion';
 import { ReplayPlayer } from './replay';
-import { DAY_THEME, NIGHT_THEME } from './theme';
+import { THEMES, Theme, ThemeName } from './theme';
+import { ChargeMode, ChargeResult } from './charge/mode';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
@@ -14,6 +15,7 @@ const resultScreen = document.getElementById('result-screen')!;
 
 const battleBtn = document.getElementById('battle-btn')!;
 const aiBtn = document.getElementById('ai-btn')!;
+const chargeBtn = document.getElementById('charge-btn')!;
 
 const battleHud = document.getElementById('battle-hud')!;
 const blueCountEl = document.getElementById('blue-count')!;
@@ -36,7 +38,30 @@ const newBattleBtn = document.getElementById('new-battle-btn')!;
 const replayBtn = document.getElementById('replay-btn')!;
 const reloadBtn = document.getElementById('reload-btn')!;
 
-const dayModeCb = document.getElementById('day-mode-cb') as HTMLInputElement;
+const themeSelect = document.getElementById('theme-select') as HTMLSelectElement;
+const THEME_KEY = 'theme';
+
+function loadThemeName(): ThemeName {
+  let stored: string | null = null;
+  try { stored = localStorage.getItem(THEME_KEY); } catch { /* storage unavailable */ }
+  return stored === 'parchment' || stored === 'night' ? stored : 'field';
+}
+
+themeSelect.value = loadThemeName();
+
+function currentTheme(): Theme {
+  return THEMES[themeSelect.value as ThemeName] ?? THEMES.field;
+}
+
+function teamCss(team: 'blue' | 'red'): string {
+  const c = team === 'blue' ? currentTheme().blue : currentTheme().red;
+  return `#${c.toString(16).padStart(6, '0')}`;
+}
+
+/** Parchment uses the light page styling; field and night use the dark overlays. */
+function applyBodyTheme(): void {
+  document.body.classList.toggle('day-mode', themeSelect.value === 'parchment');
+}
 const pixiContainer = document.getElementById('pixi-container')!;
 
 // Replay controls
@@ -53,6 +78,8 @@ let rendererReady: Promise<void> | null = null;
 let engine: GameEngine | null = null;
 let aiMode = false;
 let gameFailed = false;
+let lastMode: 'tactics' | 'charge' = 'tactics';
+let chargeMode: ChargeMode | null = null;
 
 // Replay state
 let replayPlayer: ReplayPlayer | null = null;
@@ -90,6 +117,7 @@ function showGameError(): void {
   reloadBtn.focus();
 
   renderer?.ticker?.stop();
+  chargeMode?.stop();
 }
 
 function updateCounts(): void {
@@ -120,10 +148,7 @@ function onPhaseChange(phase: TurnPhase, round: number): void {
   // Planning overlay
   if (planning) {
     const team = phase === 'blue-planning' ? 'Blue' : 'Red';
-    const isDayMode = dayModeCb.checked;
-    const color = phase === 'blue-planning'
-      ? (isDayMode ? '#2266aa' : '#4a9eff')
-      : (isDayMode ? '#aa3333' : '#ff4a4a');
+    const color = teamCss(phase === 'blue-planning' ? 'blue' : 'red');
     planningLabel.textContent = `${team} Planning`;
     planningLabel.style.color = color;
     planningInstructions.textContent = `Round ${round} · Drag to draw a route.`;
@@ -168,7 +193,7 @@ function onGameEvent(
       roundTimerEl.textContent = `${Math.ceil(timeLeft)}s`;
 
       if (timeLeft <= 3) {
-        roundTimerEl.style.color = dayModeCb.checked ? '#aa3333' : '#ff4444';
+        roundTimerEl.style.color = `#${currentTheme().labelWarn.toString(16).padStart(6, '0')}`;
         const pulse = 1 + 0.1 * Math.sin(Date.now() / 150);
         roundTimerEl.style.transform = `scale(${pulse})`;
       } else {
@@ -182,9 +207,7 @@ function onGameEvent(
     captureReplayData();
     const result = data as BattleResult;
 
-    const color = result.winner === 'blue'
-      ? (dayModeCb.checked ? '#2266aa' : '#4a9eff')
-      : (dayModeCb.checked ? '#aa3333' : '#ff4a4a');
+    const color = teamCss(result.winner);
     winnerTextEl.innerHTML = `${result.winner === 'blue' ? 'Blue' : 'Red'} Wins!<br><span style="font-size:0.5em;opacity:0.7">Elimination!</span>`;
     winnerTextEl.style.color = color;
 
@@ -231,10 +254,11 @@ function showPreview(): void {
 
 function startGame(): void {
   if (gameFailed) return;
+  lastMode = 'tactics';
   lastReplayData = null;
   engine?.stop();
-  document.body.classList.toggle('day-mode', dayModeCb.checked);
-  renderer!.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+  applyBodyTheme();
+  renderer!.setTheme(currentTheme());
   engine = new GameEngine(renderer!, onGameEvent, {
     aiMode,
   });
@@ -284,6 +308,11 @@ function stopReplay(): void {
 }
 
 function returnToMenu(): void {
+  if (chargeMode?.active || lastMode === 'charge') {
+    chargeMode?.stop();
+    renderer?.ticker.start();
+  }
+  rematchBtn.style.display = '';
   replayPlayer?.stop();
   replayPlayer = null;
   engine?.stop();
@@ -298,13 +327,60 @@ function returnToMenu(): void {
 
   showPreview();
   showScreen('prompt');
-  aiBtn.focus();
+  chargeBtn.focus();
 }
 
-dayModeCb.addEventListener('change', () => {
-  document.body.classList.toggle('day-mode', dayModeCb.checked);
+// --- Cavalry Charge mode ---
+
+function onChargeEnd(result: ChargeResult): void {
+  if (gameFailed) return;
+  const won = result.outcome === 'victory';
+  winnerTextEl.innerHTML = `${won ? 'Victory!' : 'Defeat'}<br><span style="font-size:0.4em;opacity:0.7;letter-spacing:1px">${result.reason}</span>`;
+  winnerTextEl.style.color = teamCss(won ? 'blue' : 'red');
+  const mins = Math.floor(result.time / 60);
+  const secs = String(Math.floor(result.time % 60)).padStart(2, '0');
+  resultStatsEl.innerHTML = [
+    `<b style="font-size:1.4em">Score ${result.score.toLocaleString()}</b>`,
+    `Enemies ridden down: ${result.kills}`,
+    `Battalions routed by your charges: ${result.routs}`,
+    `Best trample combo: ${result.bestCombo}`,
+    `Riders recruited: ${result.joined} · lost: ${result.ridersLost}`,
+    `Time: ${mins}:${secs}`,
+    result.newBest ? '<b>New best score!</b>' : `Best: ${result.best.toLocaleString()}`,
+  ].join('<br>');
+  rematchBtn.textContent = 'Ride again';
+  rematchBtn.style.display = '';
+  newBattleBtn.textContent = 'Back';
+  replayBtn.style.display = 'none';
+  showScreen('result');
+  rematchBtn.focus();
+}
+
+async function startCharge(): Promise<void> {
+  if (gameFailed) return;
+  lastMode = 'charge';
+  engine?.stop();
+  engine = null;
+  replayPlayer?.stop();
+  replayPlayer = null;
+  applyBodyTheme();
+  // The tactics canvas sits hidden underneath; stop it rendering while we ride.
+  renderer?.ticker.stop();
+  showScreen('battle');
+  battleScreen.inert = true;
+  leaveBattleBtn.classList.remove('active');
+  chargeMode ??= new ChargeMode({
+    onEnd: onChargeEnd,
+    onQuit: returnToMenu,
+  });
+  await chargeMode.start(currentTheme());
+}
+
+themeSelect.addEventListener('change', () => {
+  try { localStorage.setItem(THEME_KEY, themeSelect.value); } catch { /* storage unavailable */ }
+  applyBodyTheme();
   if (renderer) {
-    renderer.setTheme(dayModeCb.checked ? DAY_THEME : NIGHT_THEME);
+    renderer.setTheme(currentTheme());
     showPreview();
   }
 });
@@ -343,7 +419,17 @@ speedToggle.addEventListener('click', () => {
 
 rematchBtn.addEventListener('click', async () => {
   await initRenderer();
+  if (lastMode === 'charge') {
+    resultScreen.classList.remove('active');
+    await startCharge();
+    return;
+  }
   startGame();
+});
+
+chargeBtn.addEventListener('click', async () => {
+  await initRenderer();
+  await startCharge();
 });
 
 newBattleBtn.addEventListener('click', returnToMenu);
@@ -384,8 +470,8 @@ replaySpeedToggle.addEventListener('click', () => {
 (async () => {
   await initRenderer();
   if (gameFailed) return;
-  document.body.classList.toggle('day-mode', dayModeCb.checked);
-  if (dayModeCb.checked) renderer!.setTheme(DAY_THEME);
+  applyBodyTheme();
+  renderer!.setTheme(currentTheme());
   showPreview();
   showScreen('prompt');
 })();

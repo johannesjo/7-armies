@@ -310,6 +310,7 @@ export class GameEngine {
           }
         }
         const aoeHits = meleeAoeAttack(unit, this.units, dt);
+        if (aoeHits.length > 0) unit.swingAt = performance.now();
         for (const hit of aoeHits) {
           // Store death fly-away velocity from melee hit direction
           if (hit.killed) {

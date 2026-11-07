@@ -1,9 +1,11 @@
-import { Application, Graphics, Container, Text } from 'pixi.js';
+import { Application, Graphics, Container, Text, Sprite, Texture, TilingSprite } from 'pixi.js';
+import { paintGrassTile, paintGroundOverlay } from './ground';
 import { Unit, Obstacle, Projectile, ElevationZone, Vec2 } from './types';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
 import { mergeObstacles } from './obstacle-merge';
 import { Theme, NIGHT_THEME } from './theme';
+import { drawUnitArt, artVariant, attackPose } from './unit-art';
 
 export class Renderer {
   private app: Application;
@@ -11,7 +13,10 @@ export class Renderer {
   private dyingUnits: Map<string, { container: Container; age: number; vel: { x: number; y: number } }> = new Map();
   private elevationGraphics: Container | null = null;
   private obstacleGraphics: Container | null = null;
-  private bgGraphics: Graphics | null = null;
+  private bgGraphics: Container | null = null;
+  private grassTexture: Texture | null = null;
+  private grassTile: HTMLCanvasElement | null = null;
+  private patchTexture: Texture | null = null;
   private projectileGraphics: Graphics | null = null;
   private _effects: EffectsManager | null = null;
   private zoneLabels: { rect: Obstacle; label: Text; hovered: boolean; dragActive: boolean }[] = [];
@@ -47,9 +52,27 @@ export class Renderer {
   private drawBackground(): void {
     if (this.bgGraphics) {
       this.app.stage.removeChild(this.bgGraphics);
-      this.bgGraphics.destroy();
+      this.bgGraphics.destroy({ children: true });
     }
-    this.bgGraphics = new Graphics();
+    this.patchTexture?.destroy(true);
+    this.patchTexture = null;
+    this.bgGraphics = new Container();
+    if (this.theme.grass) {
+      // Tiled close-up grass with broad colour patches over it.
+      // The tile canvas is cached for the session, so its texture is kept too.
+      const tile = paintGrassTile(this.theme, 768, 3);
+      if (this.grassTile !== tile) {
+        this.grassTile = tile;
+        this.grassTexture = Texture.from(tile);
+      }
+      const grass = new TilingSprite({ texture: this.grassTexture!, width: MAP_WIDTH, height: MAP_HEIGHT });
+      grass.tileScale.set(0.4);
+      this.patchTexture = Texture.from(paintGroundOverlay(MAP_WIDTH, MAP_HEIGHT, this.theme, null, 5, 5));
+      const patches = new Sprite(this.patchTexture);
+      patches.width = MAP_WIDTH;
+      patches.height = MAP_HEIGHT;
+      this.bgGraphics.addChild(grass, patches);
+    }
     this.app.stage.addChildAt(this.bgGraphics, 0);
 
     if (this.noiseSprite) {
@@ -256,10 +279,17 @@ export class Renderer {
       container.x = unit.pos.x;
       container.y = unit.pos.y;
 
-      // Rotate gun barrel / weapon indicator
-      (container.getChildAt(1) as Graphics).rotation = unit.gunAngle;
-      // Rotate body with the facing direction
-      (container.getChildAt(0) as Graphics).rotation = unit.gunAngle;
+      // Body and weapon face the unit's heading; a melee blow swings or thrusts the weapon.
+      const body = container.getChildAt(0) as Graphics;
+      const weapon = container.getChildAt(1) as Graphics;
+      const pose = unit.swingAt !== undefined
+        ? attackPose(unit.type, unit.radius, (performance.now() - unit.swingAt) / 1000)
+        : { wRot: 0, wX: 0, bX: 0 };
+      const fx = Math.cos(unit.gunAngle), fy = Math.sin(unit.gunAngle);
+      body.rotation = unit.gunAngle;
+      body.position.set(fx * pose.bX, fy * pose.bX);
+      weapon.rotation = unit.gunAngle + pose.wRot;
+      weapon.position.set(fx * (pose.bX + pose.wX), fy * (pose.bX + pose.wX));
 
       // HP feedback via alpha + scale (no per-unit health bars at this scale)
       const hpRatio = unit.hp / unit.maxHp;
@@ -312,91 +342,8 @@ export class Renderer {
   private createUnitGraphic(unit: Unit): Container {
     const container = new Container();
     const shape = new Graphics();
-    const color = unit.team === 'blue' ? this.theme.blue : this.theme.red;
-    const darkColor = unit.team === 'blue' ? this.theme.blueDark : this.theme.redDark;
-    const r = unit.radius;
-
     const weapon = new Graphics();
-
-    switch (unit.type) {
-      case 'cavalry': {
-        // Ellipse body — elongated along X (facing direction)
-        shape.ellipse(0, 0, r * 1.3, r * 0.65);
-        shape.fill(color);
-        shape.ellipse(0, 0, r * 1.3, r * 0.65);
-        shape.setStrokeStyle({ width: 1, color: darkColor });
-        shape.stroke();
-        // Rider dot at front (+X = facing direction)
-        shape.circle(r * 0.6, 0, r * 0.35);
-        shape.fill(darkColor);
-        // Lance
-        weapon.setStrokeStyle({ width: 1, color: this.theme.barrel, alpha: this.theme.barrelAlpha });
-        weapon.moveTo(0, 0);
-        weapon.lineTo(r * 1.8, 0);
-        weapon.stroke();
-        break;
-      }
-      case 'archer': {
-        // Oval body — wide shoulders, narrow front-to-back
-        shape.ellipse(0, 0, r * 0.6, r * 1.2);
-        shape.fill(color);
-        shape.ellipse(0, 0, r * 0.6, r * 1.2);
-        shape.setStrokeStyle({ width: 1, color: darkColor });
-        shape.stroke();
-        // D-shaped bow: arc limb + straight bowstring
-        const bowR = r * 1.8;
-        const bowAngle = 0.9; // ~52° half-sweep
-        weapon.setStrokeStyle({ width: 1.5, color: this.theme.barrel, alpha: this.theme.barrelAlpha });
-        weapon.arc(0, 0, bowR, -bowAngle, bowAngle);
-        weapon.stroke();
-        // Bowstring: straight line connecting arc endpoints
-        const sx = Math.cos(bowAngle) * bowR;
-        const sy = Math.sin(bowAngle) * bowR;
-        weapon.setStrokeStyle({ width: 0.5, color: this.theme.barrel, alpha: this.theme.barrelAlpha * 0.7 });
-        weapon.moveTo(sx, -sy);
-        weapon.lineTo(sx, sy);
-        weapon.stroke();
-        break;
-      }
-      case 'pikeman': {
-        // Oval body + thicker outline (heavier armor)
-        shape.ellipse(0, 0, r * 0.65, r * 1.2);
-        shape.fill(color);
-        shape.ellipse(0, 0, r * 0.65, r * 1.2);
-        shape.setStrokeStyle({ width: 1.5, color: darkColor });
-        shape.stroke();
-        // Long pike (3× radius) with spearhead
-        const pikeLen = r * 3;
-        weapon.setStrokeStyle({ width: 1, color: this.theme.barrel, alpha: this.theme.barrelAlpha });
-        weapon.moveTo(0, 0);
-        weapon.lineTo(pikeLen, 0);
-        weapon.stroke();
-        // Spearhead — small filled triangle at tip
-        weapon.moveTo(pikeLen + 2, 0);
-        weapon.lineTo(pikeLen - 1, -1.2);
-        weapon.lineTo(pikeLen - 1, 1.2);
-        weapon.closePath();
-        weapon.fill({ color: this.theme.barrel, alpha: this.theme.barrelAlpha });
-        break;
-      }
-      default: {
-        // Swordsman: oval body + outline + shield
-        shape.ellipse(0, 0, r * 0.7, r * 1.15);
-        shape.fill(color);
-        shape.ellipse(0, 0, r * 0.7, r * 1.15);
-        shape.setStrokeStyle({ width: 1, color: darkColor });
-        shape.stroke();
-        // Shield: filled semicircle on local +X side (perpendicular to facing)
-        shape.arc(1.5, 0, 2, -Math.PI / 2, Math.PI / 2);
-        shape.fill({ color: darkColor, alpha: 0.8 });
-        // Short sword, slightly thicker
-        weapon.setStrokeStyle({ width: 1.5, color: this.theme.barrel, alpha: this.theme.barrelAlpha });
-        weapon.moveTo(0, 0);
-        weapon.lineTo(r * 1.5, 0);
-        weapon.stroke();
-        break;
-      }
-    }
+    drawUnitArt(shape, weapon, unit.type, unit.team, unit.radius, this.theme, artVariant(unit.id));
 
     container.addChild(shape);
     container.addChild(weapon);

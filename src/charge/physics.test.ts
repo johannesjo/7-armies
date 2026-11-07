@@ -65,3 +65,25 @@ describe('charge physics', () => {
     expect(knight.mass).toBeGreaterThan(sim.leader!.mass);
   });
 });
+
+describe('full-gallop charges', () => {
+  /** Ride into the rear of a 40-man block at `speed`; report speed kept and how far the rider got. */
+  const through = (speed: number, gallop: boolean) => {
+    const sim = new ChargeSim([block({ count: 40, cols: 8 })], { seed: 5, squad: { x: 600, y: 540, facing: DOWN, count: 1 }, muster: false });
+    sim.leader!.speed = speed;
+    let minSpeed = Infinity;
+    for (let t = 0; t < 1; t += 1 / 60) {
+      sim.step(1 / 60, { dirX: 0, dirY: gallop ? 1 : 0.6, gallop });
+      if (sim.leader) minSpeed = Math.min(minSpeed, sim.leader.speed);
+    }
+    return { kept: minSpeed / speed, y: sim.leader?.y ?? 0 };
+  };
+
+  it('a full gallop ploughs through a block that bogs down a canter', () => {
+    const fast = through(C.GALLOP_SPEED, true);
+    const slow = through(C.CANTER_SPEED, false);
+    expect(fast.kept).toBeGreaterThan(slow.kept + 0.15);
+    // The galloping rider comes out the far side of the block (it spans y≈570..630).
+    expect(fast.y).toBeGreaterThan(640);
+  });
+});

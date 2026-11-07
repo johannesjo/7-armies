@@ -1332,12 +1332,22 @@ export class ChargeSim {
    * rear, or lying on the ground, they go flying.
    */
   private effectiveMass(victim: Soldier, rammer: Soldier): number {
-    if (victim.rider) return victim.mass;
+    if (victim.rider) return victim.mass * this.chargeWeight(victim);
     if (victim.down > 0) return C.DOWN_MASS;
     if (!rammer.rider || victim.fleeing) return victim.mass;
     const side = attackSide(Math.atan2(rammer.vy, rammer.vx), this.victimFacing(victim));
     const brace = side === 'front' ? (victim.type === 'pikeman' ? C.BRACE.pike : C.BRACE.front) : C.BRACE[side];
     return victim.mass * brace;
+  }
+
+  /**
+   * A horse at full gallop hits as if it were heavier (commitment: the weight of horse
+   * and lance driving forward), so it loses far less momentum per man and ploughs on.
+   * No bonus at a canter or slower — a slow charge bogs down.
+   */
+  private chargeWeight(r: Soldier): number {
+    const k = clamp01((r.speed - C.CANTER_SPEED) / (C.GALLOP_SPEED - C.CANTER_SPEED));
+    return 1 + C.CHARGE_WEIGHT_BONUS * k;
   }
 
   /**
@@ -1404,7 +1414,8 @@ export class ChargeSim {
       if (mine) victim.thrownByPlayer = this.time + C.THROWN_CREDIT;
       if (dv > C.KNOCK_DV) victim.down = Math.max(victim.down, C.DOWN_TIME + this.rand() * C.DOWN_TIME_JITTER);
       this.events.push({ type: 'impact', x: victim.x, y: victim.y, angle: heading, side, pike: braced });
-      if (braced) this.damageRider(other, impulse * C.PIKE_RIDER_DAMAGE, heading + Math.PI, false, 'front');
+      // Pike wounds scale with the real blow, not the gallop bonus.
+      if (braced) this.damageRider(other, impulse / this.chargeWeight(other) * C.PIKE_RIDER_DAMAGE, heading + Math.PI, false, 'front');
       this.damageSoldier(victim, Math.max(0, dv - C.IMPACT_DV0) * C.IMPACT_DAMAGE_K * aiK, heading, mine, side);
       return;
     }

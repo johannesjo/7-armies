@@ -67,6 +67,8 @@ export const CHARGE = {
   /** Body masses; a horse and rider weighs as much as five footmen. */
   MASS: { swordsman: 1, pikeman: 1.15, archer: 0.8, cavalry: 5.5 } as Record<UnitType, number>,
   KNIGHT_MASS: 6.2,
+  /** At full gallop a horse hits as if this much heavier (x1 + bonus), ramping up from a canter. */
+  CHARGE_WEIGHT_BONUS: 1.2,
   /** Bounciness of collisions (0 = dead stop, 1 = billiard balls). */
   RESTITUTION: 0.15,
   /** Infantry bracing against a charge, as a multiple of their mass, by the side they are hit on. */

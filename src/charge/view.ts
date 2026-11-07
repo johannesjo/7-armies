@@ -155,7 +155,6 @@ export class ChargeView {
   private camX: number = C.CAMP_X;
   private camY: number = C.CAMP_Y - 200;
   private zoom = 2;
-  private shake = 0;
   private viewW = 800;
   private viewH = 450;
   private sidePopupCooldown = 0;
@@ -721,7 +720,6 @@ export class ChargeView {
           break;
         case 'rider-hit':
           this.pulse(e.id);
-          if (e.mine) this.shake = Math.min(2, this.shake + 0.25);
           break;
         case 'rider-down':
           this.killUnit(e.id, e.angle, 120, 0.6);
@@ -729,7 +727,6 @@ export class ChargeView {
           this.burstDust(e.x, e.y, e.angle, e.mine ? 8 : 4);
           if (e.mine) {
             this.popup(e.x, e.y, e.wasLeader ? 'Leader down!' : 'Rider down', t.labelWarn, 13);
-            this.shake = Math.min(2.5, this.shake + 1.2);
           } else if (e.byPlayer) {
             this.popup(e.x, e.y, `Knight down +${e.points}`, t.elevationBonus, 14);
           }
@@ -1131,33 +1128,18 @@ export class ChargeView {
     const base = this.baseZoom();
     let targetZoom = base;
     if (L) {
-      // Keep the whole squadron centred, nudged a little toward where it is heading,
-      // so there is room on every side to draw the next route.
-      const c = sim.squadCenter();
+      // The leader is always exactly in the centre of the screen: no lag, no lead,
+      // no stopping at the field's edge (the forest shows beyond it), no shake.
+      this.camX = L.x;
+      this.camY = L.y;
       const k = Math.min(1, L.speed / C.GALLOP_SPEED);
-      const look = this.holdCamera ? 0.12 : 0.25;
-      const tx = c.x + L.vx * look;
-      const ty = c.y + L.vy * look;
-      // Follow a little more gently while a route is being drawn so strokes don't swim.
-      const f = 1 - Math.exp(-(this.holdCamera ? 3.5 : 6) * dt);
-      this.camX += (tx - this.camX) * f;
-      this.camY += (ty - this.camY) * f;
       targetZoom = this.holdCamera ? this.zoom : base * (1 - 0.08 * k);
     }
     this.zoom += (targetZoom - this.zoom) * (1 - Math.exp(-2 * dt));
-
-    const halfW = this.viewW / this.zoom / 2;
-    const halfH = this.viewH / this.zoom / 2;
-    const m = 60;
-    const cx = halfW * 2 > C.WORLD_W + m * 2 ? C.WORLD_W / 2 : Math.max(halfW - m, Math.min(C.WORLD_W + m - halfW, this.camX));
-    const cy = halfH * 2 > C.WORLD_H + m * 2 ? C.WORLD_H / 2 : Math.max(halfH - m, Math.min(C.WORLD_H + m - halfH, this.camY));
-
-    this.shake *= Math.exp(-9 * dt);
-    const sx = (this.rand() - 0.5) * 2 * this.shake;
-    const sy = (this.rand() - 0.5) * 2 * this.shake;
     this.world.scale.set(this.zoom);
-    this.world.position.set(this.viewW / 2 - cx * this.zoom + sx, this.viewH / 2 - cy * this.zoom + sy);
+    this.world.position.set(this.viewW / 2 - this.camX * this.zoom, this.viewH / 2 - this.camY * this.zoom);
   }
+
 
   private readonly joinTags = new Map<number, BitmapText>();
   private showText = true;

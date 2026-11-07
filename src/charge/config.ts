@@ -18,9 +18,19 @@ export const CHARGE = {
   /** Turn rate (rad/s) when slow vs. at full gallop — wide arcs at speed. */
   TURN_RATE_SLOW: 5.6,
   TURN_RATE_FAST: 2.9,
-  FOLLOW_GAIN: 4.2,
-  FOLLOW_ACCEL: 720,
-  FOLLOWER_TURN_RATE: 10,
+  /** Followers close the gap to their slot at this rate (1/s), along their heading. */
+  FOLLOW_GAIN: 3,
+  /** Followers can ride at most this much faster than the leader to regain their place. */
+  FOLLOW_CATCH_UP: 1.06,
+  /**
+   * Followers steer toward a point this far ahead along their own lane (world units),
+   * so they keep to their lane round a wheel instead of cutting the corner.
+   */
+  FOLLOW_LOOKAHEAD: 10,
+  /** Horses rein in much harder than they can speed up. */
+  FOLLOW_BRAKE: 420,
+  /** Followers turn a little more nimbly than the leader at the same speed. */
+  FOLLOWER_AGILITY: 1.15,
   /** Largest squadron you can command (allied troops join up to this). */
   MAX_SQUAD: 30,
   /** Ride this close to an allied troop to take it under command. */

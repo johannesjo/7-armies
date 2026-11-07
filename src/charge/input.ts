@@ -1,15 +1,14 @@
 import { Vec2 } from '../types';
-import { ChargeInput } from './sim';
+import { Reins } from './direct';
 
 /** Moves shorter than this (px) between press and release count as a tap. */
 const TAP_SLOP = 8;
 
-const KEY_DIRS: Record<string, [number, number]> = {
-  KeyW: [0, -1], ArrowUp: [0, -1],
-  KeyS: [0, 1], ArrowDown: [0, 1],
-  KeyA: [-1, 0], ArrowLeft: [-1, 0],
-  KeyD: [1, 0], ArrowRight: [1, 0],
-};
+const FORWARD_KEYS = new Set(['KeyW', 'ArrowUp']);
+const BACK_KEYS = new Set(['KeyS', 'ArrowDown']);
+const LEFT_KEYS = new Set(['KeyA', 'ArrowLeft']);
+const RIGHT_KEYS = new Set(['KeyD', 'ArrowRight']);
+const STEER_KEYS = new Set([...FORWARD_KEYS, ...BACK_KEYS, ...LEFT_KEYS, ...RIGHT_KEYS]);
 const GALLOP_KEYS = new Set(['Space', 'ShiftLeft', 'ShiftRight']);
 
 /** Receives route strokes drawn with mouse, pen or finger (surface-local CSS px). */
@@ -22,7 +21,8 @@ export interface StrokeHandler {
 
 /**
  * Mouse / touch: press and drag to draw the squadron's route (a tap rides straight
- * to that spot); draw fast to gallop. Keyboard: WASD/arrows steer directly.
+ * to that spot); draw fast to gallop. Keyboard: reins relative to the horses —
+ * W/↑ ride on, A/D or ←/→ turn, S/↓ rein in.
  * Space, Shift or the right mouse button force a gallop.
  */
 export class ChargeControls {
@@ -69,18 +69,22 @@ export class ChargeControls {
     this.reset();
   }
 
-  /** Direct keyboard steering plus any gallop override. dir is zero when no key is held. */
-  read(): ChargeInput {
-    let dx = 0, dy = 0;
+  /**
+   * Keyboard reins (relative to the squadron's heading, like steering a car) — null
+   * when no steering key is held — plus any gallop override.
+   */
+  read(): { reins: Reins | null; gallop: boolean } {
+    let forward = false, back = false, turn = 0;
     for (const k of this.keys) {
-      const d = KEY_DIRS[k];
-      if (d) { dx += d[0]; dy += d[1]; }
+      if (FORWARD_KEYS.has(k)) forward = true;
+      if (BACK_KEYS.has(k)) back = true;
+      if (LEFT_KEYS.has(k)) turn -= 1;
+      if (RIGHT_KEYS.has(k)) turn += 1;
     }
-    const mag = Math.hypot(dx, dy);
-    if (mag > 0) { dx /= mag; dy /= mag; }
     let gallop = this.mouseGallop;
     for (const k of this.keys) if (GALLOP_KEYS.has(k)) gallop = true;
-    return { dirX: dx, dirY: dy, gallop };
+    const steering = forward || back || turn !== 0;
+    return { reins: steering ? { forward, back, turn } : null, gallop };
   }
 
   private reset = (): void => {
@@ -98,7 +102,7 @@ export class ChargeControls {
       e.preventDefault();
       return;
     }
-    if (KEY_DIRS[e.code] || GALLOP_KEYS.has(e.code)) {
+    if (STEER_KEYS.has(e.code) || GALLOP_KEYS.has(e.code)) {
       this.keys.add(e.code);
       e.preventDefault();
     }

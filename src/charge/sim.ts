@@ -63,7 +63,25 @@ export interface Squadron {
   targetSquad: Squadron | null;
   /** Where a charge through the target exits. */
   chargeExit: Vec2 | null;
+  /** The leader's recent path; followers ride along it, offset into their lane. */
+  trail: TrailPoint[];
+  /** Distance the leader has ridden (the arc position of the newest trail point). */
+  trailS: number;
 }
+
+export interface TrailPoint {
+  x: number;
+  y: number;
+  /** Direction of travel here. */
+  h: number;
+  /** Arc length along the path. */
+  s: number;
+}
+
+/** Trail points are laid every this many world units. */
+const TRAIL_STEP = 3;
+/** How much path to remember behind the leader. */
+const TRAIL_KEEP = 260;
 
 export interface SquadSpec {
   team: Team;
@@ -396,7 +414,10 @@ export class ChargeSim {
       targetBat: null,
       targetSquad: null,
       chargeExit: null,
+      trail: [],
+      trailS: 0,
     };
+    this.resetTrail(sq, spec.x, spec.y, spec.facing);
     for (let i = 0; i < spec.count; i++) {
       const slot = i === 0 ? { x: 0, y: 0 } : this.slots[Math.min(i - 1, this.slots.length - 1)];
       const p = rotate(slot, spec.facing);
@@ -496,10 +517,8 @@ export class ChargeSim {
 
     let targetSpeed = 0;
     if (mag > 0.2) {
-      const speedT = clamp01((L.speed - C.CANTER_SPEED * 0.5) / (C.GALLOP_SPEED - C.CANTER_SPEED * 0.5));
-      const turnRate = C.TURN_RATE_SLOW + (C.TURN_RATE_FAST - C.TURN_RATE_SLOW) * speedT;
       const diff = angleDiff(desired, L.facing);
-      L.facing = turnToward(L.facing, desired, turnRate * dt);
+      L.facing = turnToward(L.facing, desired, this.turnRate(L.speed) * dt);
       targetSpeed = wantsGallop ? C.GALLOP_SPEED : C.CANTER_SPEED * Math.min(1, mag * 1.25);
       // Hauling the horse around sheds speed.
       if (Math.abs(diff) > 1.6) targetSpeed = Math.min(targetSpeed, C.CANTER_SPEED * 0.7);
@@ -520,26 +539,109 @@ export class ChargeSim {
     L.vy = Math.sin(L.facing) * L.speed;
     this.integrateRider(L, dt);
 
-    const maxFollow = C.GALLOP_SPEED * 1.2;
+    this.extendTrail(sq);
+
+    // Followers ride like horses too: each follows the leader's path, offset into
+    // its lane, with its own heading, a turn rate that tightens only as it slows,
+    // and little spare speed to regain its place. On a curve the outer lanes are
+    // longer, so riders there fall behind; sharp turns string the squadron out.
+    const maxFollow = Math.min(C.GALLOP_SPEED, Math.max(L.speed, C.CANTER_SPEED * 0.6)) * C.FOLLOW_CATCH_UP;
     for (let i = 1; i < sq.riders.length; i++) {
       const f = sq.riders[i];
-      const slot = rotate(this.slots[Math.min(i - 1, this.slots.length - 1)], L.facing);
-      const dx = L.x + slot.x - f.x;
-      const dy = L.y + slot.y - f.y;
-      let dvx = L.vx + dx * C.FOLLOW_GAIN - f.vx;
-      let dvy = L.vy + dy * C.FOLLOW_GAIN - f.vy;
-      const dm = Math.hypot(dvx, dvy);
-      const maxDv = C.FOLLOW_ACCEL * dt;
-      if (dm > maxDv) { dvx *= maxDv / dm; dvy *= maxDv / dm; }
-      f.vx += dvx;
-      f.vy += dvy;
-      let sp = Math.hypot(f.vx, f.vy);
-      if (sp > maxFollow) { f.vx *= maxFollow / sp; f.vy *= maxFollow / sp; sp = maxFollow; }
-      f.speed = sp;
-      if (sp > 8) f.facing = turnToward(f.facing, Math.atan2(f.vy, f.vx), C.FOLLOWER_TURN_RATE * dt);
-      else f.facing = turnToward(f.facing, L.facing, 3 * dt);
+      // Steer toward a point a little ahead of the slot (smooth curves), but pace
+      // ourselves against the slot itself.
+      const aim = this.slotTarget(sq, i, C.FOLLOW_LOOKAHEAD + L.speed * 0.04);
+      const slot = this.slotTarget(sq, i);
+      const ax = aim.x - f.x, ay = aim.y - f.y;
+      const dx = slot.x - f.x, dy = slot.y - f.y;
+      const dist = Math.hypot(dx, dy);
+
+      const desired = Math.hypot(ax, ay) > 3 ? Math.atan2(ay, ax) : aim.h;
+      const diff = angleDiff(desired, f.facing);
+      f.facing = turnToward(f.facing, desired, this.turnRate(f.speed) * C.FOLLOWER_AGILITY * dt);
+
+      // Close the gap along our own heading; ease off if the slot has swung behind us.
+      const along = dx * Math.cos(f.facing) + dy * Math.sin(f.facing);
+      let target = L.speed + clamp(along * C.FOLLOW_GAIN, -L.speed, maxFollow - L.speed);
+      // A rider that needs a sharp turn reins in to turn tighter — so the inside of a
+      // wheel slows down while the outside has to ride hard to keep up.
+      const sharp = Math.abs(diff);
+      if (sharp > 0.35) target = Math.min(target, L.speed * Math.max(0.45, 1 - (sharp - 0.35) * 0.6));
+      if (sharp > 1.8) target = Math.min(target, Math.max(L.speed * 0.55, C.CANTER_SPEED * 0.45));
+      if (dist < 4 && L.speed < 5) target = 0;
+      target = clamp(target, 0, maxFollow);
+      if (f.speed < target) f.speed = Math.min(target, f.speed + C.GALLOP_ACCEL * 1.05 * dt);
+      else f.speed = Math.max(target, f.speed - C.FOLLOW_BRAKE * dt);
+
+      f.vx = Math.cos(f.facing) * f.speed;
+      f.vy = Math.sin(f.facing) * f.speed;
       this.integrateRider(f, dt);
     }
+  }
+
+  /** Lay a straight trail behind a (new) leader so the wedge forms up behind it. */
+  private resetTrail(sq: Squadron, x: number, y: number, facing: number): void {
+    sq.trail.length = 0;
+    sq.trailS = 0;
+    const cx = Math.cos(facing), cy = Math.sin(facing);
+    for (let d = TRAIL_KEEP; d >= 0; d -= TRAIL_STEP * 4) {
+      sq.trail.push({ x: x - cx * d, y: y - cy * d, h: facing, s: -d });
+    }
+  }
+
+  /** Record the leader's path as it rides. */
+  private extendTrail(sq: Squadron): void {
+    const L = sq.riders[0];
+    const last = sq.trail[sq.trail.length - 1];
+    const d = Math.hypot(L.x - last.x, L.y - last.y);
+    if (d < TRAIL_STEP) return;
+    sq.trailS = last.s + d;
+    sq.trail.push({ x: L.x, y: L.y, h: Math.atan2(L.y - last.y, L.x - last.x), s: sq.trailS });
+    while (sq.trail.length > 2 && sq.trail[1].s < sq.trailS - TRAIL_KEEP) sq.trail.shift();
+  }
+
+  /**
+   * Where follower `i` belongs: `back` units behind the leader along its path and
+   * `side` units across it, plus `ahead` to lead the target a little.
+   */
+  slotTarget(sq: Squadron, i: number, ahead = 0): { x: number; y: number; h: number } {
+    const L = sq.riders[0];
+    const slot = this.slots[Math.min(i - 1, this.slots.length - 1)];
+    const trail = sq.trail;
+    const last = trail[trail.length - 1];
+    // Path position: the newest trail point plus however far the leader is past it.
+    const pastLast = Math.hypot(L.x - last.x, L.y - last.y);
+    const want = last.s + pastLast + slot.x + ahead; // slot.x is negative (behind)
+    let x: number, y: number, h: number;
+    if (want >= last.s) {
+      const k = want - last.s;
+      h = pastLast > 0.5 ? Math.atan2(L.y - last.y, L.x - last.x) : L.facing;
+      x = last.x + Math.cos(h) * k;
+      y = last.y + Math.sin(h) * k;
+    } else {
+      let j = trail.length - 1;
+      while (j > 0 && trail[j - 1].s > want) j--;
+      const a = trail[Math.max(0, j - 1)], b = trail[j];
+      if (want <= a.s) {
+        // Older than we remember: extend straight back.
+        h = a.h;
+        x = a.x - Math.cos(h) * (a.s - want);
+        y = a.y - Math.sin(h) * (a.s - want);
+      } else {
+        const k = (want - a.s) / Math.max(1e-6, b.s - a.s);
+        x = a.x + (b.x - a.x) * k;
+        y = a.y + (b.y - a.y) * k;
+        h = b.h;
+      }
+    }
+    // Offset across the path into this rider's lane (+y is the right-hand side).
+    return { x: x - Math.sin(h) * slot.y, y: y + Math.cos(h) * slot.y, h };
+  }
+
+  /** How sharply a horse can turn (rad/s) at a given speed — wide arcs at a gallop. */
+  private turnRate(speed: number): number {
+    const k = clamp01((speed - C.CANTER_SPEED * 0.5) / (C.GALLOP_SPEED - C.CANTER_SPEED * 0.5));
+    return C.TURN_RATE_SLOW + (C.TURN_RATE_FAST - C.TURN_RATE_SLOW) * k;
   }
 
   private integrateRider(r: Soldier, dt: number): void {
@@ -1156,6 +1258,7 @@ export class ChargeSim {
       const next = sq.riders[1];
       next.speed = Math.max(next.speed, r.speed * 0.8);
       next.facing = r.facing;
+      this.resetTrail(sq, next.x, next.y, next.facing);
     }
     sq.riders = sq.riders.filter(x => x !== r);
     if (mine) this.ridersLost++;

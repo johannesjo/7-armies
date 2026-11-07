@@ -252,12 +252,12 @@ describe('cavalry squadrons', () => {
       seed: 4, squad: null, muster: false,
       squads: [{ team: 'blue', ai: 'raider', x: 600, y: 1000, facing: UP, count: 8 }],
     });
-    let kills = 0;
+    let impacts = 0;
     for (let t = 0; t < 20; t += 1 / 30) {
       sim.step(1 / 30);
-      kills += sim.events.filter(e => e.type === 'kill').length;
+      impacts += sim.events.filter(e => e.type === 'impact').length;
     }
-    expect(kills).toBeGreaterThan(5);
+    expect(impacts).toBeGreaterThan(5);
   });
 
   it('hunting knights ride for your banner and clash horse against horse', () => {

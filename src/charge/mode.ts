@@ -7,7 +7,7 @@ import { ChargeView, mixColor } from './view';
 import { ChargeControls, StrokeHandler } from './input';
 import { RiderPath, StrokePace } from './path';
 import { ChargeAudio } from './audio';
-import { directInput, directZones } from './direct';
+import { directInput, directZones, reinsInput } from './direct';
 import { Vec2 } from '../types';
 
 export interface ChargeResult {
@@ -268,13 +268,15 @@ export class ChargeMode {
   /** Input for one simulation step: keyboard overrides the drawn route. */
   private stepInput(sim: ChargeSim): ChargeInput {
     if (this.endTimer >= 0) return NO_INPUT;
-    const kb = this.controls.read();
-    if (kb.dirX !== 0 || kb.dirY !== 0) {
+    const keys = this.controls.read();
+    const L = sim.leader;
+    // Keyboard reins steer relative to the horses and override the pointer.
+    if (keys.reins && L) {
       this.path.clear();
       this.noteMoved();
-      return kb;
+      return reinsInput(keys.reins, L.facing, keys.gallop);
     }
-    const L = sim.leader;
+    const kb: ChargeInput = { dirX: 0, dirY: 0, gallop: keys.gallop };
     if (this.scheme === 'direct') {
       if (!this.aim || !L || !this.view) return kb;
       const s = this.view.worldToScreen(L);

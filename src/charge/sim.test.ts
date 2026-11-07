@@ -330,3 +330,34 @@ describe('weapon aim', () => {
     expect(far.soldiers.filter(s => !s.rider).every(s => Number.isNaN(s.aim))).toBe(true);
   });
 });
+
+describe('field edges', () => {
+  const ride = (sim: ChargeSim, heading: number, seconds: number) => {
+    for (let t = 0; t < seconds; t += 1 / 60) sim.step(1 / 60, { dirX: Math.cos(heading), dirY: Math.sin(heading), gallop: true });
+  };
+
+  it('riding into an edge at an angle runs along it at full pace', () => {
+    const sim = new ChargeSim([], { seed: 1, squad: { x: 1200, y: 120, facing: UP, count: 12 }, muster: false });
+    ride(sim, UP + 0.25, 3);
+    expect(sim.leader!.speed).toBeGreaterThan(C.GALLOP_SPEED * 0.9);
+    expect(sim.leader!.x).toBeGreaterThan(1500);
+  });
+
+  it('riding straight at an edge wheels along it, and turning back leaves it', () => {
+    const sim = new ChargeSim([], { seed: 1, squad: { x: 1200, y: 150, facing: UP, count: 12 }, muster: false });
+    ride(sim, UP, 2);
+    expect(sim.leader!.speed).toBeGreaterThan(C.CANTER_SPEED);
+    ride(sim, DOWN, 1.5);
+    expect(sim.leader!.y).toBeGreaterThan(150);
+  });
+
+  it('a squadron driven into a corner rides out again', () => {
+    const sim = new ChargeSim([], { seed: 1, squad: { x: 150, y: 150, facing: -Math.PI * 0.75, count: 12 }, muster: false });
+    ride(sim, -Math.PI * 0.75, 2.5); // into the top-left corner
+    ride(sim, Math.PI / 4, 2); // back out toward the field
+    expect(sim.leader!.x).toBeGreaterThan(200);
+    expect(sim.leader!.y).toBeGreaterThan(200);
+    // The whole squadron follows, nobody left pinned in the corner.
+    for (const r of sim.riders) expect(Math.min(r.x, r.y)).toBeGreaterThan(40);
+  });
+});

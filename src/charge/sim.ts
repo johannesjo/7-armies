@@ -86,6 +86,11 @@ export interface TrailPoint {
   s: number;
 }
 
+/** Riders are kept this far inside the field's edge. */
+const EDGE = 12;
+/** Within this distance of the edge, steering bends away from it. */
+const WALL_SOFT = 70;
+
 /** Trail points are laid every this many world units. */
 const TRAIL_STEP = 3;
 /** How much path to remember behind the leader. */
@@ -534,7 +539,10 @@ export class ChargeSim {
     if (!L) return;
 
     let mag = Math.min(1, Math.hypot(input.dirX, input.dirY));
-    let desired = mag > 0.2 ? Math.atan2(input.dirY, input.dirX) : L.facing;
+    // Broken knights ride off the field, so they skip the wall-following.
+    const leaving = sq.team === 'red' && sq.phase === 'retreat';
+    const raw = Math.atan2(input.dirY, input.dirX);
+    let desired = mag > 0.2 ? (leaving ? raw : this.awayFromWalls(L, raw)) : L.facing;
     const wantsGallop = input.gallop && sq.stamina > (sq.galloping ? 0.5 : C.STAMINA_MIN_TO_GALLOP);
     // Spurring with no direction charges straight ahead.
     if (wantsGallop && mag <= 0.2) { mag = 1; desired = L.facing; }
@@ -574,8 +582,8 @@ export class ChargeSim {
       const f = sq.riders[i];
       // Steer toward a point a little ahead of the slot (smooth curves), but pace
       // ourselves against the slot itself.
-      const aim = this.slotTarget(sq, i, C.FOLLOW_LOOKAHEAD + L.speed * 0.04);
-      const slot = this.slotTarget(sq, i);
+      const aim = this.insideField(this.slotTarget(sq, i, C.FOLLOW_LOOKAHEAD + L.speed * 0.04));
+      const slot = this.insideField(this.slotTarget(sq, i));
       const ax = aim.x - f.x, ay = aim.y - f.y;
       const dx = slot.x - f.x, dy = slot.y - f.y;
       const dist = Math.hypot(dx, dy);
@@ -601,6 +609,14 @@ export class ChargeSim {
       f.vy = Math.sin(f.facing) * f.speed;
       this.integrateRider(f, dt);
     }
+  }
+
+  /** Pull a point inside the field, so lanes that run off the edge don't pin riders against it. */
+  private insideField<T extends { x: number; y: number }>(p: T): T {
+    const m = EDGE + 4;
+    p.x = Math.max(m, Math.min(C.WORLD_W - m, p.x));
+    p.y = Math.max(m, Math.min(C.WORLD_H - m, p.y));
+    return p;
   }
 
   /** Lay a straight trail behind a (new) leader so the wedge forms up behind it. */
@@ -671,13 +687,35 @@ export class ChargeSim {
   private integrateRider(r: Soldier, dt: number): void {
     r.x += r.vx * dt;
     r.y += r.vy * dt;
-    const m = 12;
-    const lead = r.squad?.riders[0] === r;
-    if (r.x < m) { r.x = m; if (lead) r.speed *= 0.9; }
-    if (r.x > C.WORLD_W - m) { r.x = C.WORLD_W - m; if (lead) r.speed *= 0.9; }
-    if (r.y < m) { r.y = m; if (lead) r.speed *= 0.9; }
-    if (r.y > C.WORLD_H - m) { r.y = C.WORLD_H - m; if (lead) r.speed *= 0.9; }
+    // Hard edge as a backstop only: riders slide along it without losing speed
+    // (steering already turns them along the wall before they reach it).
+    const m = EDGE;
+    if (r.x < m) r.x = m;
+    if (r.x > C.WORLD_W - m) r.x = C.WORLD_W - m;
+    if (r.y < m) r.y = m;
+    if (r.y > C.WORLD_H - m) r.y = C.WORLD_H - m;
     r.trampleImmune = Math.max(0, r.trampleImmune - dt);
+  }
+
+  /**
+   * Near the field's edge, fade out the part of a heading that points off the field,
+   * so horses wheel round to ride along the border instead of ramming it.
+   */
+  private awayFromWalls(L: Soldier, heading: number): number {
+    let dx = Math.cos(heading), dy = Math.sin(heading);
+    const soft = WALL_SOFT;
+    const fade = (dist: number) => clamp01((dist - EDGE) / soft);
+    if (dx < 0) dx *= fade(L.x);
+    if (dx > 0) dx *= fade(C.WORLD_W - L.x);
+    if (dy < 0) dy *= fade(L.y);
+    if (dy > 0) dy *= fade(C.WORLD_H - L.y);
+    if (Math.hypot(dx, dy) < 0.15) {
+      // Pointing straight off the field: turn along the edge, whichever way we already lean.
+      const fx = Math.cos(L.facing), fy = Math.sin(L.facing);
+      const nearX = Math.min(L.x, C.WORLD_W - L.x) < Math.min(L.y, C.WORLD_H - L.y);
+      if (nearX) { dx = 0; dy = fy >= 0 ? 1 : -1; } else { dx = fx >= 0 ? 1 : -1; dy = 0; }
+    }
+    return Math.atan2(dy, dx);
   }
 
   /** Scale a rider's momentum after an impact. */

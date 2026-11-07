@@ -180,7 +180,7 @@ describe('battle scenario', () => {
     for (let t = 0; t < 400 && sim.outcome === 'playing'; t += 1 / 30) sim.step(1 / 30);
     // ...but eventually it breaks.
     expect(sim.outcome).toBe('defeat');
-  });
+  }, 30000); // simulates several minutes of battle
 });
 
 describe('reinforcements', () => {

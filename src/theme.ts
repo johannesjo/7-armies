@@ -103,10 +103,10 @@ export const NIGHT_THEME: Theme = {
   barrel: 0xffffff,
   barrelAlpha: 0.6,
 
-  steel: 0xc3cad4,
-  steelDark: 0x6b7482,
-  wood: 0x9a7650,
-  leather: 0x6e4c30,
+  steel: 0xbdbab4,
+  steelDark: 0x6c6964,
+  wood: 0x8a7c6a,
+  leather: 0x5e5246,
   trim: 0xf2ead8,
 
   hpBg: 0x333333,
@@ -162,10 +162,10 @@ export const DAY_THEME: Theme = {
   barrel: 0x443322,
   barrelAlpha: 0.7,
 
-  steel: 0xa7adb4,
-  steelDark: 0x5b616a,
-  wood: 0x80603e,
-  leather: 0x6a4a2e,
+  steel: 0x9e9a93,
+  steelDark: 0x5c5853,
+  wood: 0x7a6c5a,
+  leather: 0x5c5044,
   trim: 0xf7f1e1,
 
   hpBg: 0x998877,

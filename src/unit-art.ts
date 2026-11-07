@@ -4,12 +4,15 @@ import { Theme } from './theme';
 
 type Canvas = Graphics | GraphicsContext;
 
-/** Horse coats: [coat, mane/tail]. Bay, chestnut, grey, black. */
+/**
+ * Horse coats: [coat, mane/tail]. Deliberately muted browns and greys with no
+ * red or blue in them, so only the team colours say which side a rider is on.
+ */
 const HORSE_COATS: [number, number][] = [
-  [0x7a4a2a, 0x2e1c10],
-  [0x9c5a2c, 0x4a2610],
-  [0xa9a49b, 0x5e5850],
-  [0x3d3430, 0x161210],
+  [0x6b5d50, 0x2f2924], // dark bay
+  [0x8a7d6a, 0x403830], // dun
+  [0xa29e96, 0x5a5650], // grey
+  [0x3e3a37, 0x1a1817], // black
 ];
 
 /** Number of horse coat variants (pass `variant` 0..n-1 to drawUnitArt). */
@@ -27,10 +30,13 @@ function shadow(g: Canvas, rx: number, ry: number): void {
   g.ellipse(0, 0, rx, ry).fill({ color: 0x000000, alpha: 0.14 });
 }
 
-/** Helmet seen from above, with a crest line that shows where the soldier faces. */
-function helmet(g: Canvas, x: number, r: number, theme: Theme): void {
-  g.circle(x, 0, r).fill(theme.steel).stroke({ width: 0.6, color: theme.steelDark });
-  g.moveTo(x - r * 0.55, 0).lineTo(x + r * 0.9, 0).stroke({ width: Math.max(0.5, r * 0.35), color: theme.steelDark, alpha: 0.8 });
+/**
+ * Team-painted helmet seen from above, with a crest line in the team's bright
+ * colour that shows where the soldier faces.
+ */
+function helmet(g: Canvas, x: number, r: number, color: number, dark: number): void {
+  g.circle(x, 0, r).fill(dark);
+  g.moveTo(x - r * 0.55, 0).lineTo(x + r * 0.9, 0).stroke({ width: Math.max(0.5, r * 0.4), color, alpha: 0.9 });
 }
 
 /**
@@ -57,12 +63,12 @@ export function drawUnitArt(shape: Canvas, weapon: Canvas, type: UnitType, team:
       shape.circle(r * 1.2, -r * 0.12, r * 0.07).fill(mane);
       shape.circle(r * 1.2, r * 0.12, r * 0.07).fill(mane);
       // Team saddle cloth with a trim.
-      shape.roundRect(-r * 0.68, -r * 0.5, r * 0.92, r * 1.0, r * 0.22).fill(color).stroke({ width: 0.7, color: dark });
-      shape.roundRect(-r * 0.55, -r * 0.37, r * 0.66, r * 0.74, r * 0.15).stroke({ width: 0.5, color: theme.trim, alpha: 0.7 });
+      shape.roundRect(-r * 0.85, -r * 0.56, r * 1.2, r * 1.12, r * 0.26).fill(color).stroke({ width: 0.7, color: dark });
+      shape.roundRect(-r * 0.7, -r * 0.42, r * 0.9, r * 0.84, r * 0.18).stroke({ width: 0.5, color: theme.trim, alpha: 0.6 });
       // Rider: shoulders, shield on the left arm, helmet.
-      shape.ellipse(-r * 0.15, 0, r * 0.27, r * 0.48).fill(dark);
-      shape.ellipse(-r * 0.05, -r * 0.52, r * 0.3, r * 0.22).fill(color).stroke({ width: 0.6, color: theme.steel });
-      helmet(shape, -r * 0.08, r * 0.22, theme);
+      shape.ellipse(-r * 0.15, 0, r * 0.27, r * 0.48).fill(color).stroke({ width: 0.5, color: dark });
+      shape.ellipse(-r * 0.05, -r * 0.52, r * 0.3, r * 0.22).fill(color).stroke({ width: 0.6, color: dark });
+      helmet(shape, -r * 0.08, r * 0.22, color, dark);
       // Lance couched on the right, with a team pennant below the tip.
       weapon.moveTo(-r * 0.7, r * 0.38).lineTo(r * 2.25, r * 0.38).stroke({ width: Math.max(0.7, r * 0.13), color: theme.wood });
       weapon.poly([r * 2.25, r * 0.28, r * 2.65, r * 0.38, r * 2.25, r * 0.48]).fill(theme.steel);
@@ -98,8 +104,8 @@ export function drawUnitArt(shape: Canvas, weapon: Canvas, type: UnitType, team:
       shape.ellipse(0, 0, r * 0.65, r * 1.15).fill(color).stroke({ width: 1, color: dark });
       shape.moveTo(-r * 0.35, -r * 0.95).lineTo(-r * 0.35, r * 0.95).stroke({ width: 0.5, color: dark, alpha: 0.6 });
       // Kettle hat: a wide brim around the crown.
-      shape.circle(r * 0.05, 0, r * 0.62).fill(theme.steel).stroke({ width: 0.6, color: theme.steelDark });
-      shape.circle(r * 0.05, 0, r * 0.34).fill(theme.steelDark);
+      shape.circle(r * 0.05, 0, r * 0.62).fill(dark);
+      shape.circle(r * 0.05, 0, r * 0.32).fill(color);
       // Pike held at the right side: long ash shaft and steel head.
       const len = r * 3.4;
       weapon.moveTo(-r * 1.1, r * 0.35).lineTo(len, r * 0.35).stroke({ width: Math.max(0.7, r * 0.18), color: theme.wood });
@@ -112,9 +118,9 @@ export function drawUnitArt(shape: Canvas, weapon: Canvas, type: UnitType, team:
       shadow(shape, r * 0.95, r * 1.35);
       shape.ellipse(0, 0, r * 0.62, r * 1.08).fill(color).stroke({ width: 0.8, color: dark });
       // Round shield on the left arm with a metal rim and boss.
-      shape.circle(r * 0.4, -r * 0.82, r * 0.55).fill(dark).stroke({ width: 0.7, color: theme.steel });
-      shape.circle(r * 0.4, -r * 0.82, r * 0.17).fill(theme.steel);
-      helmet(shape, r * 0.05, r * 0.42, theme);
+      shape.circle(r * 0.4, -r * 0.82, r * 0.55).fill(color).stroke({ width: 0.8, color: dark });
+      shape.circle(r * 0.4, -r * 0.82, r * 0.17).fill(dark);
+      helmet(shape, r * 0.05, r * 0.42, color, dark);
       // Sword in the right hand: blade, crossguard, pommel.
       const y = r * 0.72;
       weapon.moveTo(r * 0.5, y).lineTo(r * 1.75, y).stroke({ width: Math.max(0.7, r * 0.2), color: theme.steel });

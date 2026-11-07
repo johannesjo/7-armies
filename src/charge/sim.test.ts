@@ -262,17 +262,17 @@ describe('cavalry squadrons', () => {
       seed: 1, squad: { x: 600, y: 900, facing: UP, count: 6 }, muster: false,
       squads: [{ team: 'red', ai: 'hunter', x: 600, y: 300, facing: DOWN, count: 6 }],
     });
-    const start = Math.hypot(sim.squadrons[1].riders[0].x - 600, sim.squadrons[1].riders[0].y - 900);
     let riderDowns = 0;
+    let closest = Infinity;
     for (let t = 0; t < 8; t += 1 / 60) {
       sim.step(1 / 60, { dirX: 0, dirY: -1, gallop: true });
       riderDowns += sim.events.filter(e => e.type === 'rider-down').length;
+      const k = sim.squadrons.find(sq => sq.team === 'red')?.riders[0];
+      if (k && sim.leader) closest = Math.min(closest, Math.hypot(k.x - sim.leader.x, k.y - sim.leader.y));
     }
+    // They rode right at us and the squadrons met.
+    expect(closest).toBeLessThan(30);
     expect(riderDowns).toBeGreaterThan(0);
-    const knights = sim.squadrons.find(sq => sq.team === 'red');
-    if (knights?.riders[0] && sim.leader) {
-      expect(Math.hypot(knights.riders[0].x - sim.leader.x, knights.riders[0].y - sim.leader.y)).toBeLessThan(start);
-    }
   });
 
   it('killing knights scores double', () => {

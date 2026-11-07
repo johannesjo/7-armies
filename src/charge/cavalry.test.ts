@@ -73,3 +73,45 @@ describe('cavalry against cavalry', () => {
     expect(lure && lure.type === 'rider-down' && lure.points).toBeGreaterThan(0);
   });
 });
+
+describe('horseman strikes', () => {
+  it('a strike from behind is one-sided and decisive', () => {
+    const sim = new ChargeSim([block()], {
+      seed: 4, squad: { x: 480, y: 600, facing: 0, count: 1 }, muster: false,
+      // Knights waiting at their post, facing away from us.
+      squads: [{ team: 'red', ai: 'hunter', x: 600, y: 600, facing: 0, count: 3, muster: 20 }],
+    });
+    sim.leader!.speed = C.GALLOP_SPEED;
+    const events = ride(sim, 0, 1);
+    const knightsDown = events.filter(e => e.type === 'rider-down' && e.team === 'red').length;
+    expect(knightsDown).toBeGreaterThan(0);
+    expect(sim.leader!.hp).toBe(C.RIDER_HP); // they never got to strike back
+  });
+
+  it('meeting head-on, both sides strike', () => {
+    const sim = new ChargeSim([block()], {
+      seed: 4, squad: { x: 400, y: 600, facing: 0, count: 1 }, muster: false,
+      squads: [{ team: 'red', ai: 'hunter', x: 700, y: 600, facing: Math.PI, count: 3 }],
+    });
+    sim.leader!.speed = C.GALLOP_SPEED;
+    const events = ride(sim, 0, 1.5);
+    const hitMine = events.some(e => e.type === 'rider-hit' && e.mine);
+    const hitTheirs = events.some(e => (e.type === 'rider-hit' && !e.mine) || (e.type === 'rider-down' && e.team === 'red'));
+    expect(hitMine).toBe(true);
+    expect(hitTheirs).toBe(true);
+  });
+
+  it('a horseman too slow to charge does not strike', () => {
+    const sim = new ChargeSim([block()], {
+      seed: 4, squad: { x: 560, y: 600, facing: 0, count: 1 }, muster: false,
+      squads: [{ team: 'red', ai: 'hunter', x: 600, y: 600, facing: 0, count: 3, muster: 20 }],
+    });
+    const events: SimEvent[] = [];
+    for (let t = 0; t < 1; t += 1 / 60) {
+      sim.step(1 / 60, { dirX: 0.3, dirY: 0, gallop: false }); // a slow walk into them
+      events.push(...sim.events);
+    }
+    expect(sim.leader!.speed).toBeLessThan(C.CHARGE_MIN_SPEED);
+    expect(events.some(e => e.type === 'impact' && !e.pike)).toBe(false);
+  });
+});

@@ -101,13 +101,22 @@ export const CHARGE = {
   CLASH_SHOCK: { front: 0.25, flank: 1.2, rear: 2.2 },
   LOSS_SHOCK: 0.6,
   /** Shock that breaks an AI squadron, how fast shock fades, and how long it stays scattered. */
-  SQUAD_BREAK_SHOCK: 4,
+  SQUAD_BREAK_SHOCK: 2.5,
   SQUAD_SHOCK_DECAY: 0.5,
   SQUAD_BROKEN_TIME: 3.5,
   /** Points for a knight your own troops kill while he hunts you, relative to killing him yourself. */
   LURE_SCORE_MULT: 0.75,
-  RIDER_CLASH_DV0: 35,
-  RIDER_CLASH_K: 0.1,
+  /**
+   * A charging rider strikes an enemy horseman within this half-angle of where he faces
+   * (rad). Damage: RIDER_STRIKE x speed (vs gallop) x wedge bonus x side (front 1,
+   * flank 2, rear 3) — at full gallop a rear strike unhorses, head-on takes two.
+   */
+  STRIKE_CONE: 0.9,
+  RIDER_STRIKE: 16,
+  STRIKE_WEDGE_BONUS: 0.5,
+  STRIKE_COOLDOWN: 0.35,
+  /** Sword-fighting from the saddle reaches this far round from the front (rad), not behind. */
+  SADDLE_ARC: 1.9,
   /** How hard a footman can push to regain his place (world units/s²). */
   INFANTRY_ACCEL: 220,
   /** Sliding friction for thrown and fallen men (1/s). */

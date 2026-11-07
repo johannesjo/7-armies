@@ -1287,7 +1287,9 @@ export class ChargeSim {
         if (!s.alive || s.team === r.team) continue;
         const d = Math.hypot(s.x - r.x, s.y - r.y);
 
-        if (d < r.radius + s.radius + C.RIDER_REACH && d < meleeD) {
+        // From the saddle you can cut to the front and sides, not behind you.
+        if (d < r.radius + s.radius + C.RIDER_REACH && d < meleeD
+          && Math.abs(angleDiff(Math.atan2(s.y - r.y, s.x - r.x), r.facing)) < C.SADDLE_ARC) {
           meleeD = d;
           meleeTarget = s;
         }
@@ -1513,14 +1515,21 @@ export class ChargeSim {
     }
 
     if (victim.rider && other.rider) {
-      // Horse against horse.
-      if (!enemies || dv < C.RIDER_CLASH_DV0) return;
+      // Horse against horse: only a rider facing his target can strike it. Caught in
+      // the flank or rear, a horseman can't strike back — get round them and it's a
+      // one-sided fight; meet them head-on and both strike.
+      if (!enemies || !this.canStrike(other, victim)) return;
+      other.attackTimer = C.STRIKE_COOLDOWN;
+      other.lastAttack = this.time;
       const mine = other.squad === this.player;
-      const side = attackSide(Math.atan2(other.vy, other.vx), victim.facing);
-      this.events.push({ type: 'impact', x: victim.x, y: victim.y, angle, side, pike: false });
+      const approach = Math.atan2(victim.y - other.y, victim.x - other.x);
+      const side = attackSide(approach, victim.facing);
+      this.events.push({ type: 'impact', x: victim.x, y: victim.y, angle: approach, side, pike: false });
       // Hit in the flank or rear, a squadron is thrown into disorder.
       if (victim.squad) this.shockSquad(victim.squad, C.CLASH_SHOCK[side], other, mine);
-      this.damageRider(victim, (dv - C.RIDER_CLASH_DV0) * C.RIDER_CLASH_K * sideMultiplier(side), angle, mine, side);
+      const speedK = Math.min(1.1, other.speed / C.GALLOP_SPEED);
+      const wedge = 1 + C.STRIKE_WEDGE_BONUS * (other.squad?.cohesion ?? 0);
+      this.damageRider(victim, C.RIDER_STRIKE * speedK * wedge * sideMultiplier(side), approach, mine, side);
       return;
     }
 
@@ -1571,6 +1580,13 @@ export class ChargeSim {
       }
     }
     this.flying.length = live;
+  }
+
+  /** A rider strikes another if he's charging and has him in front of his lance. */
+  private canStrike(attacker: Soldier, target: Soldier): boolean {
+    if (attacker.speed < C.CHARGE_MIN_SPEED || attacker.attackTimer > 0) return false;
+    const toTarget = Math.atan2(target.y - attacker.y, target.x - attacker.x);
+    return Math.abs(angleDiff(toTarget, attacker.facing)) < C.STRIKE_CONE;
   }
 
   /** How heavy a horseman is in a clash with other horsemen (speed and wedge included). */

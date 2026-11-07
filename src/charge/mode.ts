@@ -91,8 +91,8 @@ export class ChargeMode {
   private aim: Vec2 | null = null;
   private readonly controlsBtn = $('ch-controls-btn');
   private readonly textBtn = $('ch-text-btn');
-  /** Floating combat text, combo counter and banners (off = a cleaner screen). */
-  private combatText = readFlag(TEXT_KEY, true);
+  /** Floating combat text, combo counter and banners — off by default for a cleaner screen. */
+  private combatText = readFlag(TEXT_KEY, false);
   private readonly pace = new StrokePace(800);
   private movedOnce = false;
   private bannerTimeout: ReturnType<typeof setTimeout> | null = null;

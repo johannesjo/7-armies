@@ -200,7 +200,11 @@ export class ChargeView {
   }
 
   private baseZoom(): number {
-    return Math.max(0.8, Math.min(3, Math.max(this.viewW, this.viewH) / 740));
+    const long = Math.max(this.viewW, this.viewH), short = Math.min(this.viewW, this.viewH);
+    let zoom = long / 740;
+    // Phones: frame ~260 world units across the short side so units aren't tiny.
+    if (short < 600) zoom = Math.max(zoom, short / 260);
+    return Math.max(0.8, Math.min(3, zoom));
   }
 
   /** Snap the camera to the squadron (on start). */

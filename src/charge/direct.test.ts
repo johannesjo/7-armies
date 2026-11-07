@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { directInput, directZones, reinsInput } from './direct';
+import { directInput, directZones, reinsInput, joystickInput } from './direct';
 import { ChargeSim } from './sim';
 import { CHARGE as C } from './config';
 
@@ -85,5 +85,39 @@ describe('reinsInput (keyboard)', () => {
   it('gallops when spurred while riding forward', () => {
     const l = ride({ forward: true, back: false, turn: 0 }, true, 2);
     expect(l.speed).toBeGreaterThan(C.CANTER_SPEED + 30);
+  });
+});
+
+describe('joystickInput', () => {
+  const R = 60;
+  const speedAfter = (dx: number, dy: number) => {
+    const sim = new ChargeSim([], { seed: 1, squad: { x: 1200, y: 700, facing: 0, count: 1 }, muster: false });
+    for (let t = 0; t < 2; t += 1 / 60) sim.step(1 / 60, joystickInput(dx, dy, R));
+    return sim.leader!;
+  };
+
+  it('rests in the dead zone', () => {
+    expect(joystickInput(4, 3, R)).toEqual({ dirX: 0, dirY: 0, gallop: false });
+  });
+
+  it('rides in the stick direction, faster the further it is pushed', () => {
+    const walk = speedAfter(15, 0);
+    const canter = speedAfter(40, 0);
+    const gallop = speedAfter(60, 0);
+    expect(walk.speed).toBeLessThan(canter.speed);
+    expect(canter.speed).toBeLessThanOrEqual(C.CANTER_SPEED + 1);
+    expect(gallop.speed).toBeGreaterThan(C.CANTER_SPEED + 30);
+    expect(joystickInput(60, 0, R).gallop).toBe(true);
+    expect(joystickInput(40, 0, R).gallop).toBe(false);
+  });
+
+  it('steers toward the stick direction', () => {
+    const l = speedAfter(0, -50); // up
+    expect(l.facing).toBeCloseTo(-Math.PI / 2, 1);
+  });
+
+  it('clamps beyond the rim', () => {
+    const inp = joystickInput(300, 0, R);
+    expect(Math.hypot(inp.dirX, inp.dirY)).toBeCloseTo(1);
   });
 });

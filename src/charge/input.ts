@@ -168,3 +168,87 @@ export class ChargeControls {
 
   private preventMenu = (e: Event): void => e.preventDefault();
 }
+
+/**
+ * On-screen joystick: a fixed stick in the corner. Touches that start on its (generous)
+ * hit area grab it; the knob follows the finger, clamped to the rim.
+ */
+export class Joystick {
+  private pointer: number | null = null;
+  private dx = 0;
+  private dy = 0;
+  private attached = false;
+
+  constructor(private readonly zone: HTMLElement, private readonly base: HTMLElement, private readonly knob: HTMLElement) {}
+
+  /** Knob travel in CSS px. */
+  get radius(): number {
+    return this.base.clientWidth * 0.5;
+  }
+
+  /** Knob offset from the centre (CSS px), or null when the stick is not held. */
+  get offset(): { dx: number; dy: number } | null {
+    return this.pointer === null ? null : { dx: this.dx, dy: this.dy };
+  }
+
+  attach(): void {
+    if (this.attached) return;
+    this.attached = true;
+    this.zone.addEventListener('pointerdown', this.onDown);
+    window.addEventListener('pointermove', this.onMove);
+    window.addEventListener('pointerup', this.onUp);
+    window.addEventListener('pointercancel', this.onUp);
+    this.zone.addEventListener('contextmenu', this.preventMenu);
+  }
+
+  detach(): void {
+    if (!this.attached) return;
+    this.attached = false;
+    this.zone.removeEventListener('pointerdown', this.onDown);
+    window.removeEventListener('pointermove', this.onMove);
+    window.removeEventListener('pointerup', this.onUp);
+    window.removeEventListener('pointercancel', this.onUp);
+    this.zone.removeEventListener('contextmenu', this.preventMenu);
+    this.release();
+  }
+
+  private update(e: PointerEvent): void {
+    const r = this.base.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    let dx = e.clientX - cx, dy = e.clientY - cy;
+    const max = r.width / 2;
+    const d = Math.hypot(dx, dy);
+    if (d > max) { dx *= max / d; dy *= max / d; }
+    this.dx = dx;
+    this.dy = dy;
+    this.knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+  }
+
+  private onDown = (e: PointerEvent): void => {
+    if (this.pointer !== null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.pointer = e.pointerId;
+    this.base.classList.add('held');
+    this.update(e);
+  };
+
+  private onMove = (e: PointerEvent): void => {
+    if (e.pointerId !== this.pointer) return;
+    this.update(e);
+  };
+
+  private onUp = (e: PointerEvent): void => {
+    if (e.pointerId !== this.pointer) return;
+    this.release();
+  };
+
+  private release(): void {
+    this.pointer = null;
+    this.dx = this.dy = 0;
+    this.base.classList.remove('held');
+    this.knob.style.transform = 'translate(-50%, -50%)';
+  }
+
+  private preventMenu = (e: Event): void => e.preventDefault();
+}

@@ -58,3 +58,21 @@ export function reinsInput(reins: Reins, facing: number, gallop: boolean): Charg
   const h = facing + turn * REIN_TURN;
   return { dirX: Math.cos(h) * mag, dirY: Math.sin(h) * mag, gallop: gallop && !reins.back };
 }
+
+/** Stick deflection (0..1) below which the horses are left to slow down. */
+export const STICK_DEAD = 0.15;
+/** Stick deflection (0..1) beyond which the squadron gallops. */
+export const STICK_GALLOP = 0.85;
+
+/**
+ * Virtual joystick: ride in the stick's direction; a small push walks, a bigger one
+ * canters, pushing into the outer ring gallops. `dx`/`dy` are the knob's offset from
+ * the stick's centre and `radius` its travel (same units).
+ */
+export function joystickInput(dx: number, dy: number, radius: number): ChargeInput {
+  const d = Math.hypot(dx, dy);
+  const k = Math.min(1, d / Math.max(1, radius));
+  if (k < STICK_DEAD) return { dirX: 0, dirY: 0, gallop: false };
+  const mag = Math.max(0.3, Math.min(1, (k - STICK_DEAD) / 0.6));
+  return { dirX: (dx / d) * mag, dirY: (dy / d) * mag, gallop: k >= STICK_GALLOP };
+}

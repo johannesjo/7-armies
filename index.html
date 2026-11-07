@@ -433,7 +433,51 @@
     #charge-screen.drawing #ch-drawing-tag { opacity: 1; }
     #charge-canvas { cursor: crosshair; }
     #charge-screen[data-controls="direct"] .ctl-route,
-    #charge-screen[data-controls="route"] .ctl-direct { display: none; }
+    #charge-screen[data-controls="direct"] .ctl-joystick,
+    #charge-screen[data-controls="route"] .ctl-direct,
+    #charge-screen[data-controls="route"] .ctl-joystick,
+    #charge-screen[data-controls="joystick"] .ctl-direct,
+    #charge-screen[data-controls="joystick"] .ctl-route { display: none; }
+    /* Steering stick (bottom right) — its hit zone is larger than the stick itself. */
+    #ch-joy-zone {
+      display: none;
+      position: absolute;
+      right: max(0px, env(safe-area-inset-right, 0px));
+      bottom: max(0px, env(safe-area-inset-bottom, 0px));
+      width: 220px;
+      height: 220px;
+      touch-action: none;
+    }
+    #charge-screen[data-controls="joystick"] #ch-joy-zone { display: block; }
+    #ch-joy {
+      position: absolute;
+      right: 34px;
+      bottom: 34px;
+      width: 124px;
+      height: 124px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(14, 18, 10, 0.35) 0 60%, transparent 61%),
+        radial-gradient(circle, transparent 0 82%, rgba(230, 176, 58, 0.55) 83% 100%);
+      border: 2px solid rgba(255, 255, 255, 0.28);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+      pointer-events: none;
+    }
+    #ch-joy.held { border-color: rgba(255, 255, 255, 0.55); }
+    #ch-joy-knob {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: rgba(242, 238, 226, 0.85);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+      transform: translate(-50%, -50%);
+    }
+    @media (max-height: 420px) {
+      #ch-joy { width: 108px; height: 108px; right: 24px; bottom: 20px; }
+      #ch-joy-knob { width: 46px; height: 46px; }
+    }
     #ch-damage {
       position: absolute;
       inset: 0;
@@ -622,12 +666,14 @@
     <canvas id="ch-minimap" aria-hidden="true"></canvas>
     <div id="ch-banner" aria-live="polite"></div>
     <div id="ch-hint">
+      <span class="ctl-joystick"><b>Steer with the stick</b> at the bottom right — push further to ride faster, into the outer ring to <b>gallop</b>. Let go to rein in.<br></span>
       <span class="ctl-direct"><b>Point where to ride</b> — keep <span class="touch-only">your finger</span><span class="mouse-only">the mouse button held</span> on the field and your squadron rides toward it. Closer = slower, further = faster, far out = <b>gallop</b>.<br></span>
       <span class="ctl-route"><b>Draw your route</b> — <span class="mouse-only">drag with the mouse</span><span class="touch-only">drag your finger</span> and your squadron rides it.<br>
       <span class="legend canter"></span> draw slowly to canter · <span class="legend gallop"></span> flick quickly to gallop<br></span>
       Hit flanks <b>×2</b> and rears <b>×3</b> · dodge the red circles · ride into <b>allied troops</b> to take command of them
       <span class="mouse-only"><br>Keyboard reins: <kbd>W</kbd> ride on · <kbd>A</kbd>/<kbd>D</kbd> turn · <kbd>S</kbd> rein in · <kbd>Space</kbd> gallop</span>
     </div>
+    <div id="ch-joy-zone" aria-label="Steering stick"><div id="ch-joy"><div id="ch-joy-knob"></div></div></div>
     <div id="ch-drawing-tag" aria-hidden="true">Drawing route — flick fast to gallop</div>
     <div id="ch-buttons">
       <button id="ch-mute-btn" title="Mute sound" aria-label="Mute sound">🔊</button>
@@ -635,7 +681,7 @@
     </div>
     <div id="ch-pause" role="dialog" aria-modal="true" aria-label="Paused">
       <h2>Paused</h2>
-      <p class="ch-help"><span class="ctl-direct">Hold your finger or the mouse button where you want to ride — the further from your squadron, the faster it goes, and far out it gallops.</span><span class="ctl-route">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it.</span> Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Wheel wide: on a sharp turn the riders on the outside of your wedge fall behind. Pikes facing you will stop a charge, and enemy knights will hunt you. Keep moving — riders that stall in the crowd get pulled down. Ride into allied cavalry troops to take them under your command (up to 30 riders); fresh troops muster at the blue camp, where you can also rest and rally.</p>
+      <p class="ch-help"><span class="ctl-joystick">Steer with the stick at the bottom right — push further to ride faster, into the outer ring to gallop.</span><span class="ctl-direct">Hold your finger or the mouse button where you want to ride — the further from your squadron, the faster it goes, and far out it gallops.</span><span class="ctl-route">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it.</span> Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Wheel wide: on a sharp turn the riders on the outside of your wedge fall behind. Pikes facing you will stop a charge, and enemy knights will hunt you. Keep moving — riders that stall in the crowd get pulled down. Ride into allied cavalry troops to take them under your command (up to 30 riders); fresh troops muster at the blue camp, where you can also rest and rally.</p>
       <button id="ch-resume-btn">Resume</button>
       <button id="ch-controls-btn">Controls: point &amp; ride</button>
       <button id="ch-text-btn" aria-pressed="false">Combat text: off</button>

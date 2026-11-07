@@ -4,10 +4,10 @@ import { CHARGE as C } from './config';
 import { ChargeSim, SimEvent, NO_INPUT, ChargeInput } from './sim';
 import { createBattleSpecs, createWaves, createSquadSpecs } from './scenario';
 import { ChargeView, mixColor } from './view';
-import { ChargeControls, StrokeHandler } from './input';
+import { ChargeControls, Joystick, StrokeHandler } from './input';
 import { RiderPath, StrokePace } from './path';
 import { ChargeAudio } from './audio';
-import { directInput, directZones, reinsInput } from './direct';
+import { directInput, directZones, reinsInput, joystickInput } from './direct';
 import { Vec2 } from '../types';
 
 export interface ChargeResult {
@@ -40,10 +40,22 @@ function writeFlag(key: string, value: boolean): void {
 }
 
 /** 'direct': hold a finger / the mouse where to ride. 'route': draw the path to ride. */
-export type ControlScheme = 'direct' | 'route';
+export type ControlScheme = 'joystick' | 'direct' | 'route';
 
+const SCHEME_ORDER: ControlScheme[] = ['joystick', 'direct', 'route'];
+const SCHEME_LABEL: Record<ControlScheme, string> = {
+  joystick: 'joystick',
+  direct: 'point & ride',
+  route: 'draw route',
+};
+
+/** Saved choice, else the joystick on touch screens (a thumb would hide the horses) and point & ride elsewhere. */
 function readScheme(): ControlScheme {
-  try { return localStorage.getItem(SCHEME_KEY) === 'route' ? 'route' : 'direct'; } catch { return 'direct'; }
+  let stored: string | null = null;
+  try { stored = localStorage.getItem(SCHEME_KEY); } catch { /* storage unavailable */ }
+  if (stored === 'joystick' || stored === 'direct' || stored === 'route') return stored;
+  const touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  return touch ? 'joystick' : 'direct';
 }
 
 function readBest(): number {
@@ -90,6 +102,7 @@ export class ChargeMode {
   /** Pointer position (surface px) while held down in point-and-ride mode. */
   private aim: Vec2 | null = null;
   private readonly controlsBtn = $('ch-controls-btn');
+  private readonly joystick = new Joystick($('ch-joy-zone'), $('ch-joy'), $('ch-joy-knob'));
   private readonly textBtn = $('ch-text-btn');
   /** Floating combat text, combo counter and banners — off by default for a cleaner screen. */
   private combatText = readFlag(TEXT_KEY, false);
@@ -126,7 +139,7 @@ export class ChargeMode {
     });
     this.updateMuteBtn();
     this.controlsBtn.addEventListener('click', () => {
-      this.scheme = this.scheme === 'direct' ? 'route' : 'direct';
+      this.scheme = SCHEME_ORDER[(SCHEME_ORDER.indexOf(this.scheme) + 1) % SCHEME_ORDER.length];
       try { localStorage.setItem(SCHEME_KEY, this.scheme); } catch { /* storage unavailable */ }
       this.path.clear();
       this.aim = null;
@@ -201,6 +214,7 @@ export class ChargeMode {
     this.applyHudTheme(theme);
 
     this.controls.attach();
+    this.joystick.attach();
     window.addEventListener('resize', this.onResize);
     app.ticker.add(this.tick, this);
     app.start();
@@ -224,6 +238,7 @@ export class ChargeMode {
       this.app.stop();
     }
     this.controls.detach();
+    this.joystick.detach();
     this.audio.hush();
     window.removeEventListener('resize', this.onResize);
     this.view?.destroy();
@@ -249,6 +264,7 @@ export class ChargeMode {
     strokeStart: (p: Vec2) => {
       const view = this.view;
       if (!view || !this.sim || this.paused || this.endTimer >= 0) return;
+      if (this.scheme === 'joystick') return; // steering is on the stick
       if (this.scheme === 'direct') {
         this.aim = p;
         this.noteMoved();
@@ -267,6 +283,7 @@ export class ChargeMode {
     strokeMove: (p: Vec2, dist: number, dt: number) => {
       const view = this.view;
       if (!view || this.paused || this.endTimer >= 0) return;
+      if (this.scheme === 'joystick') return;
       if (this.scheme === 'direct') {
         this.aim = p;
         return;
@@ -298,6 +315,14 @@ export class ChargeMode {
       return reinsInput(keys.reins, L.facing, keys.gallop);
     }
     const kb: ChargeInput = { dirX: 0, dirY: 0, gallop: keys.gallop };
+    if (this.scheme === 'joystick') {
+      const o = this.joystick.offset;
+      if (!o || !L) return kb;
+      this.noteMoved();
+      const input = joystickInput(o.dx, o.dy, this.joystick.radius);
+      if (kb.gallop && (input.dirX !== 0 || input.dirY !== 0)) input.gallop = true;
+      return input;
+    }
     if (this.scheme === 'direct') {
       if (!this.aim || !L || !this.view) return kb;
       const s = this.view.worldToScreen(L);
@@ -328,8 +353,9 @@ export class ChargeMode {
 
   private applyScheme(): void {
     this.screen.dataset.controls = this.scheme;
-    this.controlsBtn.textContent = this.scheme === 'direct' ? 'Controls: point & ride' : 'Controls: draw route';
-    this.controlsBtn.title = this.scheme === 'direct' ? 'Switch to drawing routes' : 'Switch to point & ride';
+    this.controlsBtn.textContent = `Controls: ${SCHEME_LABEL[this.scheme]}`;
+    const next = SCHEME_ORDER[(SCHEME_ORDER.indexOf(this.scheme) + 1) % SCHEME_ORDER.length];
+    this.controlsBtn.title = `Switch to ${SCHEME_LABEL[next]}`;
   }
 
   private updateMuteBtn(): void {
@@ -366,7 +392,11 @@ export class ChargeMode {
       sim.step(h, this.stepInput(sim));
       for (const e of sim.events) this.frameEvents.push(e);
     }
-    if (this.scheme === 'direct') {
+    if (this.scheme === 'joystick') {
+      view.holdCamera = false;
+      view.drawRoute([], null, false);
+      view.drawAim(null, null, this.zones());
+    } else if (this.scheme === 'direct') {
       view.holdCamera = false;
       view.drawRoute([], null, false);
       view.drawAim(sim.leader, this.aim ? view.screenToWorld(this.aim) : null, this.zones());
@@ -422,6 +452,7 @@ export class ChargeMode {
     this.app?.ticker.remove(this.tick, this);
     this.app?.stop();
     this.controls.detach();
+    this.joystick.detach();
     this.cb.onEnd(result);
   }
 

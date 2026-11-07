@@ -2,7 +2,7 @@ import { Application, Ticker } from 'pixi.js';
 import { Theme } from '../theme';
 import { CHARGE as C } from './config';
 import { ChargeSim, SimEvent, NO_INPUT, ChargeInput } from './sim';
-import { createBattleSpecs, createWaves, createSquadSpecs } from './scenario';
+import { createBattleSpecs, createSquadSpecs } from './scenario';
 import { ChargeView, mixColor } from './view';
 import { ChargeControls, Joystick, StrokeHandler } from './input';
 import { RiderPath, StrokePace } from './path';
@@ -195,7 +195,6 @@ export class ChargeMode {
     this.theme = theme;
     this.sim = new ChargeSim(createBattleSpecs(), {
       seed: (Math.random() * 1e9) | 0,
-      waves: createWaves(),
       squads: createSquadSpecs(),
     });
     this.audio.start();
@@ -485,14 +484,10 @@ export class ChargeMode {
       if (e.type === 'rout' && e.team === 'blue') this.banner('Our line is breaking — hurry!', 2200);
       if (e.type === 'rout' && e.team === 'red' && this.sim && this.sim.outcome === 'playing') {
         const left = this.sim.battalions.filter(b => b.team === 'red' && !b.routed).length;
-        const coming = this.sim.pendingWaves.length;
-        if (left > 0) {
-          const more = coming > 0 ? ` · ${coming} wave${coming === 1 ? '' : 's'} to come` : '';
-          this.banner(`${left} enemy battalion${left === 1 ? '' : 's'} left${more}`, 1600);
-        }
+        if (left > 0) this.banner(`${left} enemy battalion${left === 1 ? '' : 's'} left`, 1600);
       }
       if (e.type === 'rider-down' && e.mine && e.wasLeader && this.sim?.leader) this.banner('A new rider takes the banner', 1600);
-      if (e.type === 'wave') this.banner(e.index >= 2 ? 'Enemy knights ride for your banner!' : 'Enemy reinforcements!', 2400);
+      if (e.type === 'hunt') this.banner('Enemy knights ride for your banner!', 2400);
       if (e.type === 'muster') this.banner('Fresh riders at camp — ride in to take command', 2600);
       if (e.type === 'join') this.banner(`+${e.count} riders join your squadron`, 1600);
     }

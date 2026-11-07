@@ -1,87 +1,71 @@
 import { CHARGE as C } from './config';
-import { BattalionSpec, SquadSpec, Wave } from './sim';
+import { BattalionSpec, SquadSpec } from './sim';
 
 const DOWN = Math.PI / 2;
 const UP = -Math.PI / 2;
 
 /**
- * The battle: two long infantry lines locked in combat across the middle of the field,
- * red archers and reserves behind theirs, and open flanks for the squadron to ride around.
+ * One giant battle, everyone on the field from the first moment: two long infantry
+ * lines locked in combat across the middle, archers behind each, second lines that
+ * march up to fill holes, and open flanks for the squadron to ride around.
+ * Break the whole red army and the day is won.
  */
 export function createBattleSpecs(): BattalionSpec[] {
   const specs: BattalionSpec[] = [];
   const cx = C.WORLD_W / 2;
   const fy = C.FRONT_Y;
   const lineGap = 125;
-  const frontCount = 6;
+  const frontCount = 8;
+  const at = (i: number, n: number, gap: number) => cx + (i - (n - 1) / 2) * gap;
 
   // Red front line — swords and pikes alternate.
   for (let i = 0; i < frontCount; i++) {
-    const x = cx + (i - (frontCount - 1) / 2) * lineGap;
     const type = i % 2 === 0 ? 'swordsman' : 'pikeman';
-    specs.push({ team: 'red', type, role: 'front', x, y: fy - 20, facing: DOWN, count: 24, cols: 8 });
+    specs.push({ team: 'red', type, role: 'front', x: at(i, frontCount, lineGap), y: fy - 20, facing: DOWN, count: 24, cols: 8 });
   }
   // Blue front line.
   for (let i = 0; i < frontCount; i++) {
-    const x = cx + (i - (frontCount - 1) / 2) * lineGap;
-    specs.push({ team: 'blue', type: 'swordsman', role: 'front', x, y: fy + 20, facing: UP, count: 24, cols: 8 });
+    specs.push({ team: 'blue', type: 'swordsman', role: 'front', x: at(i, frontCount, lineGap), y: fy + 20, facing: UP, count: 24, cols: 8 });
   }
 
-  // Red archers behind their line.
-  for (const dx of [-250, 0, 250]) {
-    specs.push({ team: 'red', type: 'archer', role: 'archer', x: cx + dx, y: fy - 170, facing: DOWN, count: 20, cols: 10 });
+  // Archers behind each line.
+  for (let i = 0; i < 4; i++) {
+    specs.push({ team: 'red', type: 'archer', role: 'archer', x: at(i, 4, 250), y: fy - 170, facing: DOWN, count: 20, cols: 10 });
   }
-  // Blue archers behind ours.
-  for (const dx of [-150, 150]) {
-    specs.push({ team: 'blue', type: 'archer', role: 'archer', x: cx + dx, y: fy + 170, facing: UP, count: 18, cols: 9 });
+  for (let i = 0; i < 3; i++) {
+    specs.push({ team: 'blue', type: 'archer', role: 'archer', x: at(i, 3, 260), y: fy + 170, facing: UP, count: 18, cols: 9 });
   }
 
-  // Blue reserves: a second line of pikes that moves up when the first breaks, and
-  // turns to face enemy horse — lead pursuing knights onto them.
-  specs.push({ team: 'blue', type: 'pikeman', role: 'reserve', x: cx - 330, y: fy + 300, facing: UP, count: 20, cols: 5 });
-  specs.push({ team: 'blue', type: 'pikeman', role: 'reserve', x: cx + 330, y: fy + 300, facing: UP, count: 20, cols: 5 });
+  // Blue second line: pikes on the wings that turn to face enemy horse (lead pursuing
+  // knights onto them) and swords in the centre; each moves up when the line breaks.
+  specs.push({ team: 'blue', type: 'pikeman', role: 'reserve', x: cx - 380, y: fy + 300, facing: UP, count: 20, cols: 5 });
+  specs.push({ team: 'blue', type: 'swordsman', role: 'reserve', x: cx, y: fy + 320, facing: UP, count: 20, cols: 5 });
+  specs.push({ team: 'blue', type: 'pikeman', role: 'reserve', x: cx + 380, y: fy + 300, facing: UP, count: 20, cols: 5 });
 
-  // Red reserves guarding the rear — they wheel toward the squadron.
-  specs.push({ team: 'red', type: 'pikeman', role: 'reserve', x: cx - 470, y: fy - 300, facing: DOWN, count: 20, cols: 5 });
-  specs.push({ team: 'red', type: 'pikeman', role: 'reserve', x: cx + 470, y: fy - 300, facing: DOWN, count: 20, cols: 5 });
-  specs.push({ team: 'red', type: 'swordsman', role: 'reserve', x: cx, y: fy - 360, facing: DOWN, count: 24, cols: 6 });
+  // Red second line in deep blocks — catch them from behind before they plug a gap.
+  for (let i = 0; i < 4; i++) {
+    const type = i % 2 === 0 ? 'pikeman' : 'swordsman';
+    specs.push({ team: 'red', type, role: 'reserve', x: at(i, 4, 300), y: fy - 300, facing: DOWN, count: 22, cols: 5 });
+  }
+  // Red flank guards and a last reserve in the rear — they wheel toward the squadron.
+  specs.push({ team: 'red', type: 'pikeman', role: 'reserve', x: cx - 720, y: fy - 250, facing: DOWN, count: 20, cols: 5 });
+  specs.push({ team: 'red', type: 'pikeman', role: 'reserve', x: cx + 720, y: fy - 250, facing: DOWN, count: 20, cols: 5 });
+  specs.push({ team: 'red', type: 'swordsman', role: 'reserve', x: cx, y: fy - 460, facing: DOWN, count: 24, cols: 6 });
 
   return specs;
 }
 
 /**
- * Red reinforcements march in from their camp in columns. Columns on the march
- * show their flanks — catch them before they reach the fight.
- */
-export function createWaves(): Wave[] {
-  const cx = C.WORLD_W / 2;
-  const y = 40;
-  const col = (type: BattalionSpec['type'], x: number, count = 20): BattalionSpec =>
-    ({ team: 'red', type, role: type === 'archer' ? 'archer' : 'front', x, y, facing: DOWN, count, cols: 4 });
-  return [
-    { time: 45, specs: [col('swordsman', cx - 600), col('pikeman', cx - 520), col('archer', cx + 560, 16)] },
-    {
-      time: 100,
-      specs: [col('swordsman', cx + 520), col('swordsman', cx + 600), col('pikeman', cx - 80), col('pikeman', cx + 80)],
-      // Knights that ride straight for your banner.
-      squads: [{ team: 'red', ai: 'hunter', x: cx - 300, y: 30, facing: DOWN, count: 8 }],
-    },
-    {
-      time: 160,
-      specs: [col('swordsman', cx - 640), col('pikeman', cx - 560), col('swordsman', cx + 560), col('pikeman', cx + 640), col('archer', cx, 16)],
-      squads: [{ team: 'red', ai: 'hunter', x: cx + 300, y: 30, facing: DOWN, count: 10 }],
-    },
-  ];
-}
-
-/**
  * Cavalry on the field from the start: an allied troop already raiding on the far
- * flank (ride into it to take command) and red knights guarding the enemy rear.
+ * flank (ride into it to take command), red knights guarding both rear flanks, and
+ * a hunting party that waits behind the red army before riding for your banner.
  */
 export function createSquadSpecs(): SquadSpec[] {
   const cx = C.WORLD_W / 2;
   return [
     { team: 'blue', ai: 'raider', x: cx + 860, y: C.FRONT_Y + 360, facing: UP, count: 8 },
     { team: 'red', ai: 'guard', x: cx + 640, y: C.FRONT_Y - 430, facing: DOWN, count: 8 },
+    { team: 'red', ai: 'guard', x: cx - 640, y: C.FRONT_Y - 430, facing: DOWN, count: 8 },
+    { team: 'red', ai: 'hunter', x: cx, y: C.FRONT_Y - 600, facing: DOWN, count: 10, muster: 70 },
   ];
 }

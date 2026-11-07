@@ -178,7 +178,9 @@ export type SimEvent =
   | { type: 'rally'; x: number; y: number; id: number }
   | { type: 'rout'; x: number; y: number; team: Team; byPlayer: boolean; type2: UnitType }
   | { type: 'combo'; count: number }
-  | { type: 'wave'; index: number; battalions: number; x: number; y: number };
+  | { type: 'wave'; index: number; battalions: number; x: number; y: number }
+  /** Hunting knights leave their muster and ride for the player's banner. */
+  | { type: 'hunt'; x: number; y: number; count: number };
 
 export type Outcome = 'playing' | 'victory' | 'defeat';
 
@@ -843,7 +845,10 @@ export class ChargeSim {
 
     switch (sq.phase) {
       case 'muster':
-        if (sq.phaseTimer <= 0) sq.phase = 'approach';
+        if (sq.phaseTimer <= 0) {
+          sq.phase = 'approach';
+          if (sq.ai === 'hunter') this.events.push({ type: 'hunt', x: L.x, y: L.y, count: sq.riders.length });
+        }
         return this.rideTo(L, sq.home, false);
       case 'retreat':
         if (sq.team === 'red') {

@@ -132,6 +132,7 @@ export class ChargeAudio {
         this.horn(e.team === 'red' ? [392, 523] : [330, 247], 0.5);
         break;
       case 'wave':
+      case 'hunt':
         this.horn([220, 220, 294], 0.6);
         break;
       case 'join':

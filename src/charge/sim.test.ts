@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ChargeSim, attackSide, wedgeSlots, BattalionSpec, SimEvent } from './sim';
 import { CHARGE as C } from './config';
-import { createBattleSpecs, createWaves } from './scenario';
+import { createBattleSpecs, createSquadSpecs } from './scenario';
 
 const DOWN = Math.PI / 2;
 const UP = -Math.PI / 2;
@@ -180,13 +180,28 @@ describe('battle scenario', () => {
   }, 30000); // simulates several minutes of battle
 });
 
+describe('one giant battle', () => {
+  it('the whole army is on the field from the start, hunters waiting to ride', () => {
+    const sim = new ChargeSim(createBattleSpecs(), { seed: 1, squads: createSquadSpecs() });
+    expect(sim.pendingWaves).toHaveLength(0);
+    expect(sim.redStanding).toBe(sim.initialRed);
+    const hunters = sim.squadrons.find(sq => sq.ai === 'hunter')!;
+    expect(hunters.phase).toBe('muster');
+    let hunted = false;
+    for (let t = 0; t < 75 && !hunted; t += 1 / 30) {
+      sim.step(1 / 30, { dirX: 0, dirY: 0, gallop: false });
+      if (sim.events.some(e => e.type === 'hunt')) hunted = true;
+    }
+    expect(hunted).toBe(true);
+  }, 30000);
+});
+
 describe('reinforcements', () => {
   it('waves arrive on schedule and count toward the enemy army', () => {
-    const waves = createWaves();
+    const waves = [{ time: 10, specs: [block({ x: 300, y: 40 }), block({ x: 600, y: 40 })], squads: [{ team: 'red' as const, ai: 'hunter' as const, x: 400, y: 30, facing: DOWN, count: 5 }] }];
     const sim = new ChargeSim([block()], { seed: 1, squad: null, waves });
     const total = sim.initialRed;
-    const waveSoldiers = waves.flatMap(w => [...w.specs, ...(w.squads ?? [])]).reduce((n, s) => n + s.count, 0);
-    expect(total).toBe(24 + waveSoldiers);
+    expect(total).toBe(24 * 3 + 5);
     expect(sim.battalions).toHaveLength(1);
     let arrived = false;
     for (let t = 0; t < waves[0].time + 0.1; t += 1 / 30) {
@@ -194,7 +209,7 @@ describe('reinforcements', () => {
       if (sim.events.some(e => e.type === 'wave')) arrived = true;
     }
     expect(arrived).toBe(true);
-    expect(sim.battalions.length).toBe(1 + waves[0].specs.length);
+    expect(sim.battalions.length).toBe(3);
     expect(sim.initialRed).toBe(total);
   });
 

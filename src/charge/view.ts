@@ -387,7 +387,7 @@ export class ChargeView {
     this.drawOverlay(sim);
     this.updateCamera(sim, dt);
     this.updatePopups(dt);
-    this.flushStains();
+    this.flushStains(dt);
   }
 
   private handleEvents(sim: ChargeSim, events: SimEvent[], dt: number): void {
@@ -612,8 +612,13 @@ export class ChargeView {
     this.particles = keep;
   }
 
-  private flushStains(): void {
-    if (!this.stainDirty) return;
+  private stainTimer = 0;
+
+  /** Bake pending stains into the ground texture a few times a second (one extra GPU pass each). */
+  private flushStains(dt: number): void {
+    this.stainTimer += dt;
+    if (!this.stainDirty || this.stainTimer < 0.2) return;
+    this.stainTimer = 0;
     this.app.renderer.render({ container: this.stainBatch, target: this.stainRT, clear: false });
     this.stainBatch.clear();
     this.stainDirty = false;
@@ -788,30 +793,43 @@ export class ChargeView {
   }
 
   private popup(x: number, y: number, msg: string, color: number, size: number, life = 0.9): void {
-    if (this.popups.length >= MAX_POPUPS) {
-      const old = this.popups.shift()!;
-      old.text.destroy();
+    if (this.popups.length >= MAX_POPUPS) this.releasePopup(this.popups.shift()!.text);
+    // Reuse text objects: creating a fresh one per popup allocates a canvas and texture.
+    let text = this.freePopups.pop();
+    if (!text) {
+      text = new Text({
+        text: msg,
+        style: {
+          fontFamily: 'Segoe UI, system-ui, sans-serif',
+          fontSize: size,
+          fontWeight: '800',
+          fill: color,
+          stroke: { color: this.theme.bg, width: 3 },
+          letterSpacing: 1,
+        },
+      });
+      text.anchor.set(0.5);
+      this.popupLayer.addChild(text);
+    } else {
+      text.text = msg;
+      text.style.fontSize = size;
+      text.style.fill = color;
+      text.visible = true;
     }
-    const text = new Text({
-      text: msg,
-      style: {
-        fontFamily: 'Segoe UI, system-ui, sans-serif',
-        fontSize: size,
-        fontWeight: '800',
-        fill: color,
-        stroke: { color: this.theme.bg, width: 3 },
-        letterSpacing: 1,
-      },
-    });
-    text.anchor.set(0.5);
-    this.popupLayer.addChild(text);
     this.popups.push({ text, x, y, age: 0, life });
+  }
+
+  private readonly freePopups: Text[] = [];
+
+  private releasePopup(text: Text): void {
+    text.visible = false;
+    this.freePopups.push(text);
   }
 
   private updatePopups(dt: number): void {
     this.popups = this.popups.filter(p => {
       p.age += dt;
-      if (p.age >= p.life) { p.text.destroy(); return false; }
+      if (p.age >= p.life) { this.releasePopup(p.text); return false; }
       const k = p.age / p.life;
       const s = this.worldToScreen({ x: p.x, y: p.y });
       p.text.position.set(s.x, s.y - 18 - k * 30);

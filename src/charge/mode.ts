@@ -43,6 +43,9 @@ function writeBest(score: number): void {
 }
 
 const STEP = 1 / 60;
+/** Longest real-time gap one frame catches up on (e.g. after a tab switch). */
+const MAX_FRAME_DT = 0.25;
+const MAX_STEPS_PER_FRAME = Math.ceil(MAX_FRAME_DT / STEP) + 1;
 const END_DELAY = 2.2;
 /** Drawing faster than this share of the screen's long side per second means gallop. */
 const GALLOP_STROKE_SPEED = 0.6;
@@ -132,11 +135,15 @@ export class ChargeMode {
     const app = new Application();
     this.appReady = app.init({
       resizeTo: this.host,
-      antialias: true,
-      resolution: window.devicePixelRatio || 1,
+      // Above 2x density the extra pixels cost far more GPU time than they show;
+      // dense screens don't need edge smoothing either.
+      antialias: (window.devicePixelRatio || 1) < 1.5,
+      resolution: Math.min(2, window.devicePixelRatio || 1),
       autoDensity: true,
       autoStart: false,
     }).then(() => {
+      // Pixi caps each tick at 100 ms by default; let slow frames report their real length.
+      app.ticker.minFPS = 1 / MAX_FRAME_DT;
       this.host.appendChild(app.canvas);
       app.canvas.style.touchAction = 'none';
       this.app = app;
@@ -309,16 +316,19 @@ export class ChargeMode {
   private tick(ticker: Ticker): void {
     const sim = this.sim, view = this.view;
     if (!sim || !view) return;
-    const rawDt = Math.min(ticker.deltaMS / 1000, 0.1);
+    // Game time always follows real time: a slow frame is caught up with extra
+    // simulation steps rather than slowing the battle down.
+    const rawDt = Math.min(ticker.deltaMS / 1000, MAX_FRAME_DT);
     if (this.paused) return;
 
-    // Slow motion while the battle's outcome sinks in.
     const drawing = this.controls.drawing && this.endTimer < 0;
-    const dt = this.endTimer >= 0 ? rawDt * 0.35 : rawDt;
+    const dt = rawDt;
 
     this.acc += dt;
     this.frameEvents.length = 0;
-    while (this.acc >= STEP) {
+    let steps = 0;
+    while (this.acc >= STEP && steps < MAX_STEPS_PER_FRAME) {
+      steps++;
       this.acc -= STEP;
       sim.step(STEP, this.stepInput(sim));
       for (const e of sim.events) this.frameEvents.push(e);

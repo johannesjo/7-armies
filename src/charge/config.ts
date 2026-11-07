@@ -92,6 +92,20 @@ export const CHARGE = {
   THROWN_CREDIT: 0.9,
   /** How long a felled man's body keeps flying and bowling others over (s). */
   FLYING_TIME: 0.6,
+  // --- Cavalry against cavalry ---
+  /** A follower within this distance of his place counts toward the wedge's cohesion. */
+  COHESION_DIST: 9,
+  /** A fully tight wedge hits other horsemen this much heavier (x1 + weight). */
+  COHESION_WEIGHT: 0.6,
+  /** Clash shock dealt to an AI squadron by the side it was hit on, and per rider it loses. */
+  CLASH_SHOCK: { front: 0.25, flank: 1.2, rear: 2.2 },
+  LOSS_SHOCK: 0.6,
+  /** Shock that breaks an AI squadron, how fast shock fades, and how long it stays scattered. */
+  SQUAD_BREAK_SHOCK: 4,
+  SQUAD_SHOCK_DECAY: 0.5,
+  SQUAD_BROKEN_TIME: 3.5,
+  /** Points for a knight your own troops kill while he hunts you, relative to killing him yourself. */
+  LURE_SCORE_MULT: 0.75,
   RIDER_CLASH_DV0: 35,
   RIDER_CLASH_K: 0.1,
   /** How hard a footman can push to regain his place (world units/s²). */

@@ -356,6 +356,8 @@
     .ch-bar > div { height: 100%; width: 100%; border-radius: 4px; transition: width 0.12s linear; }
     #ch-speed { background: var(--ch-blue-light, #8fb6f0); transition: width 0.1s linear, background 0.2s; }
     #ch-speed.charging { background: var(--ch-gallop, #e6b03a); }
+    #ch-form { background: var(--ch-blue-light, #8fb6f0); transition: width 0.15s linear, background 0.2s; }
+    #ch-form.loose { background: var(--ch-warn, #d8402e); }
     #ch-red { background: var(--ch-red); }
     #ch-blue { background: var(--ch-blue); }
     .ch-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.7; }
@@ -650,6 +652,8 @@
         <span id="ch-riders">♞ 12/12</span>
         <span class="ch-label">Speed</span>
         <div class="ch-bar"><div id="ch-speed"></div></div>
+        <span class="ch-label">Formation</span>
+        <div class="ch-bar"><div id="ch-form"></div></div>
       </div>
       <div class="ch-center">
         <div id="ch-score">0</div>
@@ -681,7 +685,7 @@
     </div>
     <div id="ch-pause" role="dialog" aria-modal="true" aria-label="Paused">
       <h2>Paused</h2>
-      <p class="ch-help"><span class="ctl-joystick">Steer with the stick at the bottom right — push further to ride faster, into the outer ring to gallop.</span><span class="ctl-direct">Hold your finger or the mouse button where you want to ride — the further from your squadron, the faster it goes, and far out it gallops.</span><span class="ctl-route">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it.</span> Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Wheel wide: on a sharp turn the riders on the outside of your wedge fall behind. Pikes facing you will stop a charge, and enemy knights will hunt you. Keep moving — riders that stall in the crowd get pulled down. Ride into allied cavalry troops to take them under your command (up to 30 riders); fresh troops muster at the blue camp, where your wounded heal and fallen riders are replaced. A full gallop hits hardest but turns wide; slow down to turn tight.</p>
+      <p class="ch-help"><span class="ctl-joystick">Steer with the stick at the bottom right — push further to ride faster, into the outer ring to gallop.</span><span class="ctl-direct">Hold your finger or the mouse button where you want to ride — the further from your squadron, the faster it goes, and far out it gallops.</span><span class="ctl-route">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it.</span> Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Wheel wide: on a sharp turn the riders on the outside of your wedge fall behind, and a loose wedge loses to a tight one. Hit enemy horsemen in the flank or rear to scatter them — or lead pursuing knights onto our pikes and archers. Pikes facing you will stop a charge, and enemy knights will hunt you. Keep moving — riders that stall in the crowd get pulled down. Ride into allied cavalry troops to take them under your command (up to 30 riders); fresh troops muster at the blue camp, where your wounded heal and fallen riders are replaced. A full gallop hits hardest but turns wide; slow down to turn tight.</p>
       <button id="ch-resume-btn">Resume</button>
       <button id="ch-controls-btn">Controls: point &amp; ride</button>
       <button id="ch-text-btn" aria-pressed="false">Combat text: off</button>

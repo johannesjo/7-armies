@@ -729,7 +729,13 @@ export class ChargeView {
             this.popup(e.x, e.y, e.wasLeader ? 'Leader down!' : 'Rider down', t.labelWarn, 13);
           } else if (e.byPlayer) {
             this.popup(e.x, e.y, `Knight down +${e.points}`, t.elevationBonus, 14);
+          } else if (e.lured) {
+            this.popup(e.x, e.y, `Lured +${e.points}`, t.elevationBonus, 15);
           }
+          break;
+        case 'squad-break':
+          this.popup(e.x, e.y - 14, e.team === 'red' ? 'Scattered!' : 'Our riders scatter', e.team === 'red' ? t.elevationBonus : t.labelWarn, 17, 1.2);
+          this.burstDust(e.x, e.y, 0, 6);
           break;
         case 'join':
           this.popup(e.x, e.y - 16, `+${e.count} riders!`, t.blue, 20, 1.4);

@@ -56,7 +56,7 @@ export interface Soldier {
 
 /** Who controls a squadron: the player, or one of the AI behaviours. */
 export type SquadAI = 'player' | 'raider' | 'guard' | 'hunter';
-export type SquadPhase = 'muster' | 'approach' | 'charge' | 'retreat' | 'idle';
+export type SquadPhase = 'muster' | 'approach' | 'charge' | 'retreat' | 'idle' | 'broken';
 
 export interface Squadron {
   id: number;
@@ -73,6 +73,12 @@ export interface Squadron {
   targetSquad: Squadron | null;
   /** Where a charge through the target exits. */
   chargeExit: Vec2 | null;
+  /** Share of followers close to their place in the wedge (1 = tight, 0 = strung out). */
+  cohesion: number;
+  /** Shock from losing clashes; enough of it breaks an AI squadron. Decays over time. */
+  shock: number;
+  /** Where a broken squadron flees from. */
+  fleeFrom: Vec2 | null;
   /** The leader's recent path; followers ride along it, offset into their lane. */
   trail: TrailPoint[];
   /** Distance the leader has ridden (the arc position of the newest trail point). */
@@ -163,8 +169,9 @@ export type SimEvent =
   | { type: 'volley'; id: number; team: Team; x: number; y: number; radius: number; flight: number; atPlayer: boolean }
   | { type: 'arrow-land'; x: number; y: number; angle: number; hit: boolean; team: Team }
   | { type: 'rider-hit'; x: number; y: number; id: number; damage: number; mine: boolean }
-  | { type: 'rider-down'; x: number; y: number; angle: number; id: number; wasLeader: boolean; team: Team; mine: boolean; byPlayer: boolean; points: number }
+  | { type: 'rider-down'; x: number; y: number; angle: number; id: number; wasLeader: boolean; team: Team; mine: boolean; byPlayer: boolean; points: number; lured: boolean }
   | { type: 'join'; x: number; y: number; count: number }
+  | { type: 'squad-break'; x: number; y: number; team: Team; byPlayer: boolean }
   | { type: 'muster'; x: number; y: number; count: number }
   | { type: 'rally'; x: number; y: number; id: number }
   | { type: 'rout'; x: number; y: number; team: Team; byPlayer: boolean; type2: UnitType }
@@ -260,6 +267,8 @@ export class ChargeSim {
   ridersJoined = 0;
   /** Men knocked down by comrades thrown into them (bowling). */
   bowled = 0;
+  /** Enemy knights killed by your infantry or archers while they hunted you. */
+  lured = 0;
   /** The freshly killed, still flying from the blow that felled them — they bowl over the living. */
   flying: { body: Soldier; t: number }[] = [];
   combo = 0;
@@ -438,6 +447,9 @@ export class ChargeSim {
       targetBat: null,
       targetSquad: null,
       chargeExit: null,
+      cohesion: 1,
+      shock: 0,
+      fleeFrom: null,
       trail: [],
       trailS: 0,
     };
@@ -582,6 +594,7 @@ export class ChargeSim {
     // and little spare speed to regain its place. On a curve the outer lanes are
     // longer, so riders there fall behind; sharp turns string the squadron out.
     const maxFollow = Math.min(C.GALLOP_SPEED, Math.max(L.speed, C.CANTER_SPEED * 0.6)) * C.FOLLOW_CATCH_UP;
+    let tight = 0;
     for (let i = 1; i < sq.riders.length; i++) {
       const f = sq.riders[i];
       // Steer toward a point a little ahead of the slot (smooth curves), but pace
@@ -612,7 +625,10 @@ export class ChargeSim {
       f.vx = Math.cos(f.facing) * f.speed;
       f.vy = Math.sin(f.facing) * f.speed;
       this.integrateRider(f, dt);
+      if (dist < C.COHESION_DIST) tight++;
     }
+    sq.cohesion = sq.riders.length > 1 ? tight / (sq.riders.length - 1) : 1;
+    sq.shock = Math.max(0, sq.shock - C.SQUAD_SHOCK_DECAY * dt);
   }
 
   /** Pull a point inside the field, so lanes that run off the edge don't pin riders against it. */
@@ -834,6 +850,14 @@ export class ChargeSim {
         }
         if (Math.hypot(L.x - C.CAMP_X, L.y - C.CAMP_Y) < C.CAMP_R * 0.5) sq.phase = 'idle';
         return this.rideTo(L, { x: C.CAMP_X, y: C.CAMP_Y }, false);
+      case 'broken': {
+        // Scattered: gallop away from whoever broke us, then regroup and come again.
+        if (sq.phaseTimer <= 0) { sq.phase = 'approach'; sq.phaseTimer = 0; break; }
+        const from = sq.fleeFrom ?? { x: L.x, y: L.y + 1 };
+        const dx = L.x - from.x, dy = L.y - from.y;
+        const d = Math.hypot(dx, dy) || 1;
+        return { dirX: dx / d, dirY: dy / d, gallop: true };
+      }
       case 'idle':
         // Wounded allies wait in camp to be collected, or ride out again once healed.
         if (sq.riders.length > C.AI_RETREAT_AT && sq.riders.every(r => r.hp > r.maxHp * 0.9)) sq.phase = 'approach';
@@ -1378,8 +1402,16 @@ export class ChargeSim {
     }
     sq.riders = sq.riders.filter(x => x !== r);
     if (mine) this.ridersLost++;
-    const points = byPlayer && !mine ? this.scoreKill(side, C.KNIGHT_SCORE_MULT) : 0;
-    this.events.push({ type: 'rider-down', x: r.x, y: r.y, angle, id: r.id, wasLeader, team: r.team, mine, byPlayer, points });
+    let points = byPlayer && !mine ? this.scoreKill(side, C.KNIGHT_SCORE_MULT) : 0;
+    // A knight felled by our infantry or archers while hunting you: you lured him there.
+    const lured = !byPlayer && !mine && r.team === 'red' && !!this.player && sq.targetSquad === this.player;
+    if (lured) {
+      points = Math.round(C.KILL_SCORE * C.KNIGHT_SCORE_MULT * C.LURE_SCORE_MULT);
+      this.score += points;
+      this.lured++;
+    }
+    if (!mine && sq.riders.length > 0) this.shockSquad(sq, C.LOSS_SHOCK, r, byPlayer);
+    this.events.push({ type: 'rider-down', x: r.x, y: r.y, angle, id: r.id, wasLeader, team: r.team, mine, byPlayer, points, lured });
   }
 
   /**
@@ -1388,7 +1420,11 @@ export class ChargeSim {
    * rear, or lying on the ground, they go flying.
    */
   private effectiveMass(victim: Soldier, rammer: Soldier): number {
-    if (victim.rider) return victim.mass * this.chargeWeight(victim);
+    if (victim.rider) {
+      // Against other horsemen, a tight wedge hits (and holds) as one body.
+      const wedge = rammer.rider && victim.squad ? 1 + C.COHESION_WEIGHT * victim.squad.cohesion : 1;
+      return victim.mass * this.chargeWeight(victim) * wedge;
+    }
     if (victim.down > 0) return C.DOWN_MASS;
     if (!rammer.rider || victim.fleeing) return victim.mass;
     const side = attackSide(Math.atan2(rammer.vy, rammer.vx), this.victimFacing(victim));
@@ -1482,6 +1518,8 @@ export class ChargeSim {
       const mine = other.squad === this.player;
       const side = attackSide(Math.atan2(other.vy, other.vx), victim.facing);
       this.events.push({ type: 'impact', x: victim.x, y: victim.y, angle, side, pike: false });
+      // Hit in the flank or rear, a squadron is thrown into disorder.
+      if (victim.squad) this.shockSquad(victim.squad, C.CLASH_SHOCK[side], other, mine);
       this.damageRider(victim, (dv - C.RIDER_CLASH_DV0) * C.RIDER_CLASH_K * sideMultiplier(side), angle, mine, side);
       return;
     }
@@ -1533,6 +1571,26 @@ export class ChargeSim {
       }
     }
     this.flying.length = live;
+  }
+
+  /** How heavy a horseman is in a clash with other horsemen (speed and wedge included). */
+  clashWeight(r: Soldier): number {
+    return r.mass * this.chargeWeight(r) * (r.squad ? 1 + C.COHESION_WEIGHT * r.squad.cohesion : 1);
+  }
+
+  /** Add clash shock to an AI squadron; past the threshold it breaks and scatters. */
+  private shockSquad(sq: Squadron, amount: number, from: Soldier, byPlayer: boolean): void {
+    if (sq === this.player) return;
+    sq.shock += amount;
+    if (sq.shock < C.SQUAD_BREAK_SHOCK || sq.phase === 'broken' || sq.phase === 'retreat') return;
+    const L = sq.riders[0];
+    sq.phase = 'broken';
+    sq.phaseTimer = C.SQUAD_BROKEN_TIME;
+    sq.fleeFrom = { x: from.x, y: from.y };
+    sq.shock = 0;
+    sq.targetSquad = null;
+    sq.targetBat = null;
+    if (L) this.events.push({ type: 'squad-break', x: L.x, y: L.y, team: sq.team, byPlayer });
   }
 
   /** Riders keep the momentum collisions left them (their steering builds on it next step). */

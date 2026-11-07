@@ -138,6 +138,9 @@ export class ChargeAudio {
       case 'rally':
         this.chime(e.type === 'join' ? [660, 880, 1100] : [880]);
         break;
+      case 'squad-break':
+        this.horn(e.team === 'red' ? [523, 659] : [294, 220], 0.45);
+        break;
       case 'muster':
         this.horn([392, 494, 587], 0.35);
         break;

@@ -22,7 +22,22 @@ interface Dying {
   vy: number;
   spin: number;
   age: number;
+  /** How high the body is thrown (0 = slumps, 1 = launched). */
+  lift: number;
 }
+
+/** A charge connecting: slash, shockwave and (against pikes) sparks. */
+interface ImpactFx {
+  x: number;
+  y: number;
+  angle: number;
+  age: number;
+  strength: number;
+  rear: boolean;
+  pike: boolean;
+}
+
+const IMPACT_FX_LIFE = 0.26;
 
 interface Particle {
   x: number;
@@ -72,6 +87,8 @@ export class ChargeView {
   private readonly stainRT: RenderTexture;
   private readonly stainSprite: Sprite;
   private readonly stainBatch = new Graphics();
+  /** Off-stage container baked into the ground texture: stains plus fallen soldiers. */
+  private readonly bakeRoot = new Container();
   private stainDirty = false;
   private readonly telegraph = new Graphics();
   private readonly route = new Graphics();
@@ -87,6 +104,7 @@ export class ChargeView {
   private readonly units = new Map<number, UnitGfx>();
   private dying: Dying[] = [];
   private particles: Particle[] = [];
+  private impacts: ImpactFx[] = [];
   private popups: Popup[] = [];
   private readonly contexts = new Map<string, { body: GraphicsContext; weapon: GraphicsContext }>();
   private readonly ink: number;
@@ -108,7 +126,8 @@ export class ChargeView {
     // Beyond the field: forest floor on grass, a darker margin otherwise.
     app.renderer.background.color = theme.grass ? 0x33441f : mixColor(theme.bg, this.ink, 0.18);
 
-    this.stainRT = RenderTexture.create({ width: C.WORLD_W, height: C.WORLD_H, resolution: 1 });
+    this.stainRT = RenderTexture.create({ width: C.WORLD_W, height: C.WORLD_H, resolution: 1.25 });
+    this.bakeRoot.addChild(this.stainBatch);
     this.stainSprite = new Sprite(this.stainRT);
 
     this.drawGround();
@@ -122,7 +141,7 @@ export class ChargeView {
   destroy(): void {
     this.app.stage.removeChild(this.root);
     this.root.destroy({ children: true });
-    this.stainBatch.destroy();
+    this.bakeRoot.destroy({ children: true });
     this.stainRT.destroy(true);
     this.grassTexture?.destroy(true);
     for (const c of this.contexts.values()) { c.body.destroy(); c.weapon.destroy(); }
@@ -136,7 +155,7 @@ export class ChargeView {
   }
 
   private baseZoom(): number {
-    return Math.max(0.8, Math.min(3, Math.max(this.viewW, this.viewH) / 820));
+    return Math.max(0.8, Math.min(3, Math.max(this.viewW, this.viewH) / 740));
   }
 
   /** Snap the camera to the squadron (on start). */
@@ -464,16 +483,99 @@ export class ChargeView {
     return u;
   }
 
-  private killUnit(id: number, angle: number, speed: number): void {
+  /** The fallen stay on the field: bake the body, darkened, with its weapon dropped beside it. */
+  private layCorpse(root: Container): void {
+    root.removeFromParent();
+    root.alpha = 0.78;
+    root.scale.set(0.95);
+    const body = root.children[0] as Graphics | undefined;
+    const weapon = root.children[1] as Graphics | undefined;
+    if (body) body.tint = 0x8c8c8c;
+    if (weapon) {
+      weapon.visible = true;
+      weapon.tint = 0x9a9a9a;
+      weapon.rotation = (this.rand() - 0.5) * 2.4;
+      weapon.position.set((this.rand() - 0.5) * 4, (this.rand() - 0.5) * 4);
+    }
+    this.bakeRoot.addChild(root);
+    this.stainDirty = true;
+  }
+
+  private killUnit(id: number, angle: number, speed: number, lift: number): void {
     const u = this.units.get(id);
     if (!u) return;
     this.units.delete(id);
+    // Trampled men are flung along the charge, a little to either side.
+    const a = angle + (this.rand() - 0.5) * 0.9;
     this.dying.push({
       root: u.root,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      spin: (this.rand() - 0.5) * 10,
+      vx: Math.cos(a) * speed,
+      vy: Math.sin(a) * speed,
+      spin: (this.rand() - 0.5) * (6 + lift * 14),
       age: 0,
+      lift,
+    });
+  }
+
+  /** Slash, shockwave and flying earth where a charge connects. */
+  private impactFx(x: number, y: number, angle: number, side: 'front' | 'flank' | 'rear', pike: boolean): void {
+    const strength = side === 'rear' ? 1.25 : side === 'flank' ? 1 : 0.8;
+    if (this.impacts.length > 40) this.impacts.shift();
+    this.impacts.push({ x, y, angle, age: 0, strength, rear: side === 'rear', pike });
+    // Clods of earth thrown forward and to the sides.
+    const n = 2 + Math.floor(this.rand() * 3);
+    for (let i = 0; i < n; i++) {
+      const a = angle + (this.rand() - 0.5) * 2.2;
+      const sp = 50 + this.rand() * 90;
+      this.addParticle({
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, age: 0,
+        life: 0.35 + this.rand() * 0.25, size: 0.8 + this.rand() * 0.9, grow: -0.6,
+        color: this.theme.dirt, alpha: 0.9, stain: false,
+      });
+    }
+    this.burstDust(x, y, angle, 2);
+    if (pike) {
+      // Splinters from shattered lances.
+      for (let i = 0; i < 4; i++) {
+        const a = angle + Math.PI + (this.rand() - 0.5) * 2.6;
+        const sp = 60 + this.rand() * 80;
+        this.addParticle({
+          x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, age: 0,
+          life: 0.4 + this.rand() * 0.3, size: 0.7, grow: 0,
+          color: this.theme.wood, alpha: 1, stain: false,
+        });
+      }
+    }
+  }
+
+  private drawImpacts(dt: number): void {
+    const g = this.fx;
+    const t = this.theme;
+    this.impacts = this.impacts.filter(fx => {
+      fx.age += dt;
+      const k = fx.age / IMPACT_FX_LIFE;
+      if (k >= 1) return false;
+      const fade = 1 - k;
+      const c = Math.cos(fx.angle), sn = Math.sin(fx.angle);
+      // Shockwave ring.
+      const ringColor = fx.rear ? t.hpMid : t.trim;
+      g.circle(fx.x, fx.y, (3 + k * 13) * fx.strength).stroke({ width: 1.6 * fade, color: ringColor, alpha: 0.55 * fade });
+      // Crescent slash facing the direction of the charge.
+      const r = 8 * fx.strength;
+      const cx = fx.x - c * r * 0.55, cy = fx.y - sn * r * 0.55;
+      const a0 = fx.angle - 0.95, a1 = fx.angle + 0.95;
+      g.moveTo(cx + Math.cos(a0) * r, cy + Math.sin(a0) * r).arc(cx, cy, r, a0, a1)
+        .stroke({ width: (2.6 - k * 2) * fx.strength, color: 0xffffff, alpha: 0.85 * fade * fade, cap: 'round' });
+      if (fx.pike) {
+        // Sparks off steel.
+        for (let i = 0; i < 5; i++) {
+          const a = fx.angle + Math.PI + (i - 2) * 0.55;
+          const d0 = 2 + k * 6, d1 = d0 + 4 * fade;
+          g.moveTo(fx.x + Math.cos(a) * d0, fx.y + Math.sin(a) * d0).lineTo(fx.x + Math.cos(a) * d1, fx.y + Math.sin(a) * d1)
+            .stroke({ width: 1, color: 0xfff1b0, alpha: fade });
+        }
+      }
+      return true;
     });
   }
 
@@ -483,7 +585,9 @@ export class ChargeView {
     this.handleEvents(sim, events, dt);
     this.syncUnits(sim, dt);
     this.spawnTrail(sim, dt);
+    this.spawnHaze(sim, dt);
     this.updateParticles(dt);
+    this.drawImpacts(dt);
     this.drawArrows(sim);
     this.drawTelegraphs(sim);
     this.drawOverlay(sim);
@@ -498,8 +602,7 @@ export class ChargeView {
     for (const e of events) {
       switch (e.type) {
         case 'impact': {
-          this.shake = Math.min(7, this.shake + (e.side === 'rear' ? 1.6 : e.side === 'flank' ? 1.1 : 0.6));
-          this.burstDust(e.x, e.y, e.angle, 3);
+          this.impactFx(e.x, e.y, e.angle, e.side, e.pike);
           if (e.pike) this.popup(e.x, e.y, 'PIKES!', t.labelWarn, 13);
           else if (e.side !== 'front' && this.sidePopupCooldown <= 0) {
             this.sidePopupCooldown = 0.5;
@@ -512,7 +615,7 @@ export class ChargeView {
           this.pulse(e.id);
           break;
         case 'kill':
-          this.killUnit(e.id, e.angle, e.byPlayer ? 170 : 90);
+          this.killUnit(e.id, e.angle, e.byPlayer ? 190 : 70, e.byPlayer ? 1 : 0.15);
           this.blood(e.x, e.y, e.angle, e.byPlayer ? 7 : 4, 1.2);
           this.stainBatch.circle(e.x, e.y, 2 + this.rand() * 2).fill({ color: t.redStain, alpha: 0.35 * t.bloodAlpha });
           this.stainDirty = true;
@@ -525,15 +628,15 @@ export class ChargeView {
           break;
         case 'rider-hit':
           this.pulse(e.id);
-          if (e.mine) this.shake = Math.min(7, this.shake + 0.8);
+          if (e.mine) this.shake = Math.min(2, this.shake + 0.25);
           break;
         case 'rider-down':
-          this.killUnit(e.id, e.angle, 130);
+          this.killUnit(e.id, e.angle, 120, 0.6);
           this.blood(e.x, e.y, e.angle, e.mine ? 8 : 5, 1.4);
           this.burstDust(e.x, e.y, e.angle, e.mine ? 8 : 4);
           if (e.mine) {
             this.popup(e.x, e.y, e.wasLeader ? 'Leader down!' : 'Rider down', t.labelWarn, 13);
-            this.shake = Math.min(8, this.shake + 3);
+            this.shake = Math.min(2.5, this.shake + 1.2);
           } else if (e.byPlayer) {
             this.popup(e.x, e.y, `Knight down +${e.points}`, t.elevationBonus, 14);
           }
@@ -578,7 +681,9 @@ export class ChargeView {
       seen.add(s.id);
       const u = this.gfxFor(s);
       u.root.position.set(s.x, s.y);
-      u.root.rotation = s.facing;
+      // Men in the ranks don't all face exactly the same way.
+      const quirk = ((s.id * 0.618034) % 1) - 0.5;
+      u.root.rotation = s.facing + (s.rider || s.fleeing ? 0 : quirk * 0.28);
       if (s.fleeing !== u.fleeing) {
         u.fleeing = s.fleeing;
         u.weapon.visible = !s.fleeing; // weapons thrown down
@@ -586,16 +691,20 @@ export class ChargeView {
       this.animateFighting(u, s, sim.time);
       const hpK = s.hp / s.maxHp;
       u.root.alpha = (s.fleeing ? 0.6 : 0.55) + 0.45 * hpK;
-      let scale = 1;
+      let scale = 0.94 + ((s.id * 0.3779) % 1) * 0.12;
+      let sx = 1, sy = 1;
       if (u.pulse > 0) {
-        u.pulse -= dt;
-        scale = 1.25;
+        // Squash and stretch when struck.
+        u.pulse = Math.max(0, u.pulse - dt);
+        const q = Math.sin((u.pulse / 0.12) * Math.PI);
+        sx = 1 + 0.3 * q;
+        sy = 1 - 0.22 * q;
       }
       if (s.rider && s.speed > C.CHARGE_MIN_SPEED) {
         // Galloping bob.
         scale *= 1 + 0.06 * Math.sin(sim.time * 18 + s.id);
       }
-      u.root.scale.set(scale);
+      u.root.scale.set(scale * sx, scale * sy);
     }
     for (const [id, u] of this.units) {
       if (!seen.has(id)) {
@@ -604,17 +713,24 @@ export class ChargeView {
       }
     }
 
-    const DUR = 0.6;
+    const DUR = 0.55;
     this.dying = this.dying.filter(d => {
       d.age += dt;
       const k = d.age / DUR;
-      if (k >= 1) { d.root.destroy({ children: true }); return false; }
-      const decel = 1 - k * 0.85;
+      if (k >= 1) {
+        // Thud: a puff of dust where the body lands.
+        if (d.lift > 0.4) this.burstDust(d.root.x, d.root.y, Math.atan2(d.vy, d.vx), 3);
+        this.layCorpse(d.root);
+        return false;
+      }
+      const decel = 1 - k * 0.9;
       d.root.x += d.vx * dt * decel;
       d.root.y += d.vy * dt * decel;
-      d.root.rotation += d.spin * dt * (1 - k);
-      d.root.alpha = 1 - k;
-      d.root.scale.set(1 - 0.4 * k);
+      d.root.rotation += d.spin * dt * (1 - k * 0.7);
+      // Up through the air and back down (seen from above: grows, then shrinks to rest).
+      const air = Math.sin(k * Math.PI) * d.lift;
+      d.root.scale.set(1 + 0.4 * air);
+      d.root.alpha = 1;
       return true;
     });
   }
@@ -669,6 +785,22 @@ export class ChargeView {
         x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, age: 0,
         life: 0.5 + this.rand() * 0.4, size: 2 + this.rand() * 2, grow: 4,
         color: this.dust, alpha: 0.4, stain: false,
+      });
+    }
+  }
+
+  /** Dust kicked up wherever lines are locked in melee. */
+  private spawnHaze(sim: ChargeSim, dt: number): void {
+    for (const b of sim.battalions) {
+      if (b.routed || b.engagedTimer <= 0 || this.rand() > dt * 2.2) continue;
+      const men = b.grid;
+      const s = men[Math.floor(this.rand() * Math.min(men.length, b.cols * 2))];
+      if (!s || !s.alive) continue;
+      this.addParticle({
+        x: s.x + (this.rand() - 0.5) * 8, y: s.y + (this.rand() - 0.5) * 8,
+        vx: 6 + (this.rand() - 0.5) * 6, vy: (this.rand() - 0.5) * 6, age: 0,
+        life: 1.6 + this.rand() * 1.2, size: 4 + this.rand() * 4, grow: 7,
+        color: this.dust, alpha: 0.13, stain: false,
       });
     }
   }
@@ -744,8 +876,11 @@ export class ChargeView {
     this.stainTimer += dt;
     if (!this.stainDirty || this.stainTimer < 0.2) return;
     this.stainTimer = 0;
-    this.app.renderer.render({ container: this.stainBatch, target: this.stainRT, clear: false });
+    this.app.renderer.render({ container: this.bakeRoot, target: this.stainRT, clear: false });
     this.stainBatch.clear();
+    if (this.bakeRoot.children.length > 1) {
+      for (const corpse of this.bakeRoot.removeChildren(1)) corpse.destroy({ children: true });
+    }
     this.stainDirty = false;
   }
 
@@ -800,18 +935,33 @@ export class ChargeView {
     const t = this.theme;
     const L = sim.leader;
 
-    // Morale bars over enemy battalions near the action.
+    // Battalion standards: a waving team flag over every formed battalion, with a
+    // slim morale bar under red flags near the action.
     for (const b of sim.battalions) {
-      if (b.routed || b.team !== 'red') continue;
-      if (L && Math.hypot(b.x - L.x, b.y - L.y) > 520 && b.morale > 60) continue;
-      const rows = Math.ceil(b.grid.length / b.cols);
-      const ext = Math.max(b.cols, rows) * b.spacing * 0.5;
-      const w = 34, h = 3.5;
-      const x = b.x - w / 2, y = b.y - ext - 12;
+      if (b.routed) continue;
+      const color = b.team === 'blue' ? t.blue : t.red;
+      const dark = b.team === 'blue' ? t.blueDark : t.redDark;
+      const px = b.x - Math.cos(b.facing) * b.spacing * 0.6;
+      const py = b.y - Math.sin(b.facing) * b.spacing * 0.6;
+      const top = py - 18;
+      const wave = sim.time * 5 + b.id;
+      g.moveTo(px, py).lineTo(px, top).stroke({ width: 1.1, color: t.wood });
+      const pts: number[] = [px, top];
+      for (let i = 1; i <= 4; i++) pts.push(px + i * 3, top + Math.sin(wave - i * 0.9) * 1.3 * (i / 4));
+      for (let i = 4; i >= 1; i--) pts.push(px + i * 3, top + 7 + Math.sin(wave - i * 0.9) * 1.3 * (i / 4));
+      pts.push(px, top + 7);
+      g.poly(pts).fill(color).stroke({ width: 0.6, color: dark });
+      g.moveTo(px + 1.5, top + 3.5).lineTo(px + 10, top + 3.5 + Math.sin(wave - 3) * 1).stroke({ width: 1, color: t.trim, alpha: 0.7 });
+      g.circle(px, top - 0.8, 0.9).fill(t.steel);
+
+      if (b.team !== 'red') continue;
+      if (L && Math.hypot(b.x - L.x, b.y - L.y) > 450 && b.morale > 50) continue;
+      const w = 22, h = 2.4;
+      const x = px - w / 2, y = py + 3;
       const m = Math.max(0, Math.min(1, b.morale / 100));
-      const color = m > 0.6 ? t.hpHigh : m > 0.3 ? t.hpMid : t.hpLow;
-      g.roundRect(x - 1, y - 1, w + 2, h + 2, 2).fill({ color: t.hpBg, alpha: 0.55 });
-      g.roundRect(x, y, w * m, h, 1.5).fill({ color, alpha: 0.95 });
+      const mc = m > 0.6 ? t.hpHigh : m > 0.3 ? t.hpMid : t.hpLow;
+      g.roundRect(x - 0.8, y - 0.8, w + 1.6, h + 1.6, 1.5).fill({ color: 0x000000, alpha: 0.35 });
+      g.roundRect(x, y, w * m, h, 1.2).fill({ color: mc, alpha: 0.9 });
     }
 
     // Banners on other squadrons' leaders; allied troops show they can be collected.

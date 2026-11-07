@@ -43,6 +43,9 @@ export interface Soldier {
   squad: Squadron | null;
   /** Sim time of the last blow struck (hit or miss), for attack animations. */
   lastAttack: number;
+  /** Personal offset from the formation slot, so ranks look like men, not tiles. */
+  jx: number;
+  jy: number;
 }
 
 /** Who controls a squadron: the player, or one of the AI behaviours. */
@@ -373,6 +376,10 @@ export class ChargeSim {
       const s = this.makeSoldier(spec.team, spec.type, p.x, p.y, spec.facing);
       s.bat = bat;
       s.attackTimer = this.rand() * C.MELEE_COOLDOWN_MAX;
+      s.jx = (this.rand() - 0.5) * C.RANK_JITTER;
+      s.jy = (this.rand() - 0.5) * C.RANK_JITTER;
+      s.x += s.jx;
+      s.y += s.jy;
       bat.grid[i] = s;
       this.soldiers.push(s);
     }
@@ -399,6 +406,8 @@ export class ChargeSim {
       fleeDrift: 0,
       squad: null,
       lastAttack: -99,
+      jx: 0,
+      jy: 0,
     };
   }
 
@@ -1066,8 +1075,8 @@ export class ChargeSim {
       } else if (s.bat) {
         const idx = s.bat.grid.indexOf(s);
         const p = this.slotPos(s.bat, idx);
-        dvx = (p.x - s.x) * 3;
-        dvy = (p.y - s.y) * 3;
+        dvx = (p.x + s.jx - s.x) * 3;
+        dvy = (p.y + s.jy - s.y) * 3;
         const m = Math.hypot(dvx, dvy);
         if (m > maxSpeed) { dvx *= maxSpeed / m; dvy *= maxSpeed / m; }
       }

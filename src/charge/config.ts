@@ -94,6 +94,8 @@ export const CHARGE = {
   TEAM_MELEE_MULT: { blue: 0.85, red: 1 },
   FLEE_SPEED: 58,
   ADVANCE_SPEED: 14,
+  /** Each soldier stands up to this far (world units) off his exact slot. */
+  RANK_JITTER: 3.4,
   MARCH_SPEED: 30,
   MARCH_DISTANCE: 260,
   BATTALION_TURN_RATE: 0.4,

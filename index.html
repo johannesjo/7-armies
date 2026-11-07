@@ -480,6 +480,41 @@
     #ch-pause button:hover { background: #3a3a5a; }
     #ch-pause .ch-help { font-size: 13px; opacity: 0.75; max-width: 420px; text-align: center; line-height: 1.6; padding: 0 16px; }
 
+    /* Cavalry Charge HUD panels and framing */
+    #ch-vignette {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(ellipse at center, transparent 55%, rgba(8, 12, 4, 0.42) 100%);
+    }
+    body.day-mode #ch-vignette { background: radial-gradient(ellipse at center, transparent 60%, rgba(90, 70, 40, 0.18) 100%); }
+    #charge-hud .ch-col, #charge-hud .ch-center {
+      background: rgba(14, 18, 10, 0.5);
+      backdrop-filter: blur(3px);
+      -webkit-backdrop-filter: blur(3px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 8px 12px;
+      color: #f2eee2;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+    }
+    #charge-hud .ch-center { min-width: 110px; }
+    #ch-riders { color: #f2eee2; }
+    #ch-riders::first-letter { color: var(--ch-blue-light, #8fb6f0); }
+    #ch-riders.low { color: var(--ch-warn); }
+    #charge-hud .ch-bar { background: rgba(255, 255, 255, 0.14); }
+    #ch-minimap { border-color: rgba(255, 255, 255, 0.18); border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); }
+    #ch-buttons button { border-radius: 8px; background: rgba(14, 18, 10, 0.5); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+    #ch-banner { color: #f6f0dc; text-shadow: 0 2px 14px rgba(0, 0, 0, 0.7), 0 0 2px rgba(0, 0, 0, 0.8); }
+    body.day-mode #charge-hud .ch-col, body.day-mode #charge-hud .ch-center {
+      background: rgba(250, 245, 230, 0.7);
+      border-color: rgba(120, 100, 70, 0.2);
+      color: #443322;
+      text-shadow: none;
+    }
+    body.day-mode #ch-riders { color: #443322; }
+    body.day-mode #charge-hud .ch-bar { background: rgba(68, 51, 34, 0.15); }
+    body.day-mode #ch-banner { color: #3a2a1a; text-shadow: 0 1px 8px rgba(255, 255, 255, 0.85); }
     @media (pointer: coarse) {
       #ch-hint .touch-only { display: inline; }
       #ch-hint .mouse-only { display: none; }
@@ -566,6 +601,7 @@
 
   <div id="charge-screen" class="screen" aria-label="Cavalry Charge">
     <div id="charge-canvas"></div>
+    <div id="ch-vignette"></div>
     <div id="ch-damage"></div>
     <div id="charge-hud">
       <div class="ch-col">

@@ -398,6 +398,7 @@ export class ChargeMode {
 
   private applyHudTheme(theme: Theme): void {
     this.screen.style.setProperty('--ch-blue', hex(theme.blue));
+    this.screen.style.setProperty('--ch-blue-light', hex(mixColor(theme.blue, 0xffffff, 0.45)));
     this.screen.style.setProperty('--ch-red', hex(theme.red));
     this.screen.style.setProperty('--ch-warn', hex(theme.labelWarn));
     this.screen.style.setProperty('--ch-good', hex(theme.elevationBonus));

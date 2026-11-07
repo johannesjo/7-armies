@@ -5,6 +5,7 @@ import { drawUnitArt } from '../unit-art';
 import { CHARGE as C } from './config';
 import { ChargeSim, SimEvent, Soldier, mulberry32 } from './sim';
 import { PathPoint } from './path';
+import { DirectZones } from './direct';
 
 interface UnitGfx {
   root: Container;
@@ -73,6 +74,7 @@ export class ChargeView {
   private stainDirty = false;
   private readonly telegraph = new Graphics();
   private readonly route = new Graphics();
+  private readonly aimG = new Graphics();
   /** A route is being drawn: follow more gently and keep the zoom steady. */
   holdCamera = false;
   private readonly unitLayer = new Container();
@@ -108,7 +110,7 @@ export class ChargeView {
     this.stainSprite = new Sprite(this.stainRT);
 
     this.drawGround();
-    this.world.addChild(this.ground, this.stainSprite, this.route, this.telegraph, this.unitLayer, this.fx, this.arrowsG, this.overlay);
+    this.world.addChild(this.ground, this.stainSprite, this.route, this.aimG, this.telegraph, this.unitLayer, this.fx, this.arrowsG, this.overlay);
     this.root.addChild(this.world, this.popupLayer);
     app.stage.addChild(this.root);
     // Start from a blank stain layer (render textures may hold stale GPU memory).
@@ -214,6 +216,36 @@ export class ChargeView {
     const endColor = end.gallop ? gallopColor : canterColor;
     g.circle(end.x, end.y, 6).stroke({ width: 1.5, color: endColor, alpha: 0.85 * boost });
     g.circle(end.x, end.y, 2).fill({ color: endColor, alpha: 0.85 * boost });
+  }
+
+  /**
+   * Point-and-ride feedback while the pointer is held: rings around the leader
+   * where canter and gallop begin, and a line to the pointer coloured by pace.
+   */
+  drawAim(leader: Soldier | null, aim: Vec2 | null, zones: DirectZones): void {
+    const g = this.aimG;
+    g.clear();
+    if (!leader || !aim) return;
+    const t = this.theme;
+    const z = this.zoom;
+    const canterR = zones.canter / z, gallopR = zones.gallop / z;
+    const dx = aim.x - leader.x, dy = aim.y - leader.y;
+    const d = Math.hypot(dx, dy);
+    const galloping = d * z >= zones.gallop;
+    const color = galloping ? t.hpMid : t.blue;
+
+    g.circle(leader.x, leader.y, canterR).stroke({ width: 1, color: t.blue, alpha: 0.22 });
+    g.circle(leader.x, leader.y, gallopR).stroke({ width: galloping ? 2 : 1, color: t.hpMid, alpha: galloping ? 0.55 : 0.3 });
+    if (d * z < zones.dead) {
+      g.circle(aim.x, aim.y, 4).stroke({ width: 1.5, color: t.blue, alpha: 0.6 });
+      return;
+    }
+    const nx = dx / d, ny = dy / d;
+    const start = 13;
+    g.moveTo(leader.x + nx * start, leader.y + ny * start).lineTo(aim.x, aim.y)
+      .stroke({ width: galloping ? 2.5 : 1.5, color, alpha: 0.6, cap: 'round' });
+    g.circle(aim.x, aim.y, galloping ? 7 : 5).stroke({ width: 1.8, color, alpha: 0.85 });
+    g.circle(aim.x, aim.y, 1.8).fill({ color, alpha: 0.85 });
   }
 
   /** Visible world rectangle (for the minimap). */

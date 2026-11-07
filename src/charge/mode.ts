@@ -7,6 +7,7 @@ import { ChargeView, mixColor } from './view';
 import { ChargeControls, StrokeHandler } from './input';
 import { RiderPath, StrokePace } from './path';
 import { ChargeAudio } from './audio';
+import { directInput, directZones } from './direct';
 import { Vec2 } from '../types';
 
 export interface ChargeResult {
@@ -24,6 +25,14 @@ export interface ChargeResult {
 }
 
 const BEST_KEY = 'charge.best';
+const SCHEME_KEY = 'charge.controls';
+
+/** 'direct': hold a finger / the mouse where to ride. 'route': draw the path to ride. */
+export type ControlScheme = 'direct' | 'route';
+
+function readScheme(): ControlScheme {
+  try { return localStorage.getItem(SCHEME_KEY) === 'route' ? 'route' : 'direct'; } catch { return 'direct'; }
+}
 
 function readBest(): number {
   try { return Number(localStorage.getItem(BEST_KEY)) || 0; } catch { return 0; }
@@ -63,6 +72,10 @@ export class ChargeMode {
   private theme: Theme | null = null;
   private lastRiders = -1;
   private readonly path = new RiderPath();
+  private scheme: ControlScheme = readScheme();
+  /** Pointer position (surface px) while held down in point-and-ride mode. */
+  private aim: Vec2 | null = null;
+  private readonly controlsBtn = $('ch-controls-btn');
   private readonly pace = new StrokePace(800);
   private movedOnce = false;
   private bannerTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -95,6 +108,14 @@ export class ChargeMode {
       this.updateMuteBtn();
     });
     this.updateMuteBtn();
+    this.controlsBtn.addEventListener('click', () => {
+      this.scheme = this.scheme === 'direct' ? 'route' : 'direct';
+      try { localStorage.setItem(SCHEME_KEY, this.scheme); } catch { /* storage unavailable */ }
+      this.path.clear();
+      this.aim = null;
+      this.applyScheme();
+    });
+    this.applyScheme();
     this.controls.onPause = () => this.togglePause();
     this.controls.handler = this.strokes;
     $('ch-pause-btn').addEventListener('click', () => this.togglePause());
@@ -147,6 +168,7 @@ export class ChargeMode {
     this.lastRiders = -1;
     this.movedOnce = false;
     this.path.clear();
+    this.aim = null;
     this.pauseEl.classList.remove('active');
     this.applyHudTheme(theme);
 
@@ -199,6 +221,11 @@ export class ChargeMode {
     strokeStart: (p: Vec2) => {
       const view = this.view;
       if (!view || !this.sim || this.paused || this.endTimer >= 0) return;
+      if (this.scheme === 'direct') {
+        this.aim = p;
+        this.noteMoved();
+        return;
+      }
       const end = this.path.end;
       let extend = false;
       if (end) {
@@ -212,10 +239,16 @@ export class ChargeMode {
     strokeMove: (p: Vec2, dist: number, dt: number) => {
       const view = this.view;
       if (!view || this.paused || this.endTimer >= 0) return;
+      if (this.scheme === 'direct') {
+        this.aim = p;
+        return;
+      }
       const gallop = this.pace.sample(dist, dt);
       this.path.add(view.screenToWorld(p), gallop);
     },
-    strokeEnd: () => {},
+    strokeEnd: () => {
+      this.aim = null;
+    },
   };
 
   private noteMoved(): void {
@@ -235,6 +268,13 @@ export class ChargeMode {
       return kb;
     }
     const L = sim.leader;
+    if (this.scheme === 'direct') {
+      if (!this.aim || !L || !this.view) return kb;
+      const s = this.view.worldToScreen(L);
+      const input = directInput(this.aim.x - s.x, this.aim.y - s.y, this.zones());
+      if (kb.gallop && (input.dirX !== 0 || input.dirY !== 0)) input.gallop = true;
+      return input;
+    }
     if (this.path.active && L) {
       const input = this.path.steer(L);
       if (kb.gallop && this.path.active) input.gallop = true;
@@ -242,6 +282,16 @@ export class ChargeMode {
     }
     if (kb.gallop) this.noteMoved();
     return kb;
+  }
+
+  private zones() {
+    return directZones(this.host.clientWidth, this.host.clientHeight);
+  }
+
+  private applyScheme(): void {
+    this.screen.dataset.controls = this.scheme;
+    this.controlsBtn.textContent = this.scheme === 'direct' ? 'Controls: point & ride' : 'Controls: draw route';
+    this.controlsBtn.title = this.scheme === 'direct' ? 'Switch to drawing routes' : 'Switch to point & ride';
   }
 
   private updateMuteBtn(): void {
@@ -273,10 +323,17 @@ export class ChargeMode {
       sim.step(STEP, this.stepInput(sim));
       for (const e of sim.events) this.frameEvents.push(e);
     }
-    view.holdCamera = drawing;
-    view.drawRoute(this.path.points, sim.leader, drawing);
+    if (this.scheme === 'direct') {
+      view.holdCamera = false;
+      view.drawRoute([], null, false);
+      view.drawAim(sim.leader, this.aim ? view.screenToWorld(this.aim) : null, this.zones());
+    } else {
+      view.holdCamera = drawing;
+      view.drawAim(null, null, this.zones());
+      view.drawRoute(this.path.points, sim.leader, drawing);
+    }
     view.render(sim, this.frameEvents, dt);
-    this.screen.classList.toggle('drawing', drawing);
+    this.screen.classList.toggle('drawing', drawing && this.scheme === 'route');
     this.handleHudEvents(this.frameEvents);
     const L = sim.leader;
     if (this.endTimer < 0) this.audio.update(rawDt, L ? Math.min(1, L.speed / C.GALLOP_SPEED) : 0, sim.riders.length, this.frameEvents);

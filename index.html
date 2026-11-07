@@ -432,6 +432,8 @@
     }
     #charge-screen.drawing #ch-drawing-tag { opacity: 1; }
     #charge-canvas { cursor: crosshair; }
+    #charge-screen[data-controls="direct"] .ctl-route,
+    #charge-screen[data-controls="route"] .ctl-direct { display: none; }
     #ch-damage {
       position: absolute;
       inset: 0;
@@ -582,8 +584,9 @@
     <canvas id="ch-minimap" aria-hidden="true"></canvas>
     <div id="ch-banner" aria-live="polite"></div>
     <div id="ch-hint">
-      <b>Draw your route</b> — <span class="mouse-only">drag with the mouse</span><span class="touch-only">drag your finger</span> and your squadron rides it. Click or tap a spot to ride straight there.<br>
-      <span class="legend canter"></span> draw slowly to canter · <span class="legend gallop"></span> flick quickly to gallop<br>
+      <span class="ctl-direct"><b>Point where to ride</b> — keep <span class="touch-only">your finger</span><span class="mouse-only">the mouse button held</span> on the field and your squadron rides toward it. Closer = slower, further = faster, far out = <b>gallop</b>.<br></span>
+      <span class="ctl-route"><b>Draw your route</b> — <span class="mouse-only">drag with the mouse</span><span class="touch-only">drag your finger</span> and your squadron rides it.<br>
+      <span class="legend canter"></span> draw slowly to canter · <span class="legend gallop"></span> flick quickly to gallop<br></span>
       Hit flanks <b>×2</b> and rears <b>×3</b> · dodge the red circles · ride into <b>allied troops</b> to take command of them
       <span class="mouse-only"><br><kbd>WASD</kbd> steers directly · <kbd>Space</kbd> / right mouse forces a gallop</span>
     </div>
@@ -594,8 +597,9 @@
     </div>
     <div id="ch-pause" role="dialog" aria-modal="true" aria-label="Paused">
       <h2>Paused</h2>
-      <p class="ch-help">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it. Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Pikes facing you will stop a charge, and enemy knights will hunt you. Keep moving — riders that stall in the crowd get pulled down. Ride into allied cavalry troops to take them under your command (up to 30 riders); fresh troops muster at the blue camp, where you can also rest and rally.</p>
+      <p class="ch-help"><span class="ctl-direct">Hold your finger or the mouse button where you want to ride — the further from your squadron, the faster it goes, and far out it gallops.</span><span class="ctl-route">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it.</span> Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Pikes facing you will stop a charge, and enemy knights will hunt you. Keep moving — riders that stall in the crowd get pulled down. Ride into allied cavalry troops to take them under your command (up to 30 riders); fresh troops muster at the blue camp, where you can also rest and rally.</p>
       <button id="ch-resume-btn">Resume</button>
+      <button id="ch-controls-btn">Controls: point &amp; ride</button>
       <button id="ch-quit-btn">Quit to menu</button>
     </div>
   </div>

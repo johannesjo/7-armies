@@ -73,7 +73,7 @@ export class ChargeView {
   private stainDirty = false;
   private readonly telegraph = new Graphics();
   private readonly route = new Graphics();
-  /** Freeze the camera (e.g. while a route is being drawn) so strokes stay put. */
+  /** A route is being drawn: follow more gently and keep the zoom steady. */
   holdCamera = false;
   private readonly unitLayer = new Container();
   private readonly fx = new Graphics();
@@ -131,7 +131,7 @@ export class ChargeView {
   }
 
   private baseZoom(): number {
-    return Math.max(0.9, Math.min(3.2, Math.max(this.viewW, this.viewH) / 720));
+    return Math.max(0.8, Math.min(3, Math.max(this.viewW, this.viewH) / 820));
   }
 
   /** Snap the camera to the squadron (on start). */
@@ -692,24 +692,19 @@ export class ChargeView {
     const L = sim.leader;
     const base = this.baseZoom();
     let targetZoom = base;
-    if (this.holdCamera) {
-      // Hold still while a route is drawn so strokes stay under the finger,
-      // but never let the squadron leave the middle of the screen.
-      targetZoom = this.zoom;
-      if (L) {
-        const ax = (this.viewW / this.zoom) * 0.3, ay = (this.viewH / this.zoom) * 0.3;
-        const dx = L.x - this.camX, dy = L.y - this.camY;
-        if (Math.abs(dx) > ax) this.camX += dx - Math.sign(dx) * ax;
-        if (Math.abs(dy) > ay) this.camY += dy - Math.sign(dy) * ay;
-      }
-    } else if (L) {
+    if (L) {
+      // Keep the whole squadron centred, nudged a little toward where it is heading,
+      // so there is room on every side to draw the next route.
+      const c = sim.squadCenter();
       const k = Math.min(1, L.speed / C.GALLOP_SPEED);
-      targetZoom = base * (1 - 0.1 * k);
-      const tx = L.x + L.vx * 0.5;
-      const ty = L.y + L.vy * 0.5;
-      const f = 1 - Math.exp(-4 * dt);
+      const look = this.holdCamera ? 0.12 : 0.25;
+      const tx = c.x + L.vx * look;
+      const ty = c.y + L.vy * look;
+      // Follow a little more gently while a route is being drawn so strokes don't swim.
+      const f = 1 - Math.exp(-(this.holdCamera ? 3.5 : 6) * dt);
       this.camX += (tx - this.camX) * f;
       this.camY += (ty - this.camY) * f;
+      targetZoom = this.holdCamera ? this.zoom : base * (1 - 0.08 * k);
     }
     this.zoom += (targetZoom - this.zoom) * (1 - Math.exp(-2 * dt));
 

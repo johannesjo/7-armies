@@ -1,19 +1,21 @@
-import { Application, Container, Graphics, GraphicsContext, RenderTexture, Sprite, Text, Texture } from 'pixi.js';
-import { paintGrass } from '../ground';
+import { Application, Container, Graphics, RenderTexture, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
+import { paintGrassTile, paintGroundOverlay } from '../ground';
 import { Team, UnitType, Vec2 } from '../types';
 import { Theme } from '../theme';
 import { drawUnitArt, HORSE_VARIANTS, attackPose, attackDuration } from '../unit-art';
 import { CHARGE as C } from './config';
-import { ChargeSim, SimEvent, Soldier, mulberry32 } from './sim';
+import { ChargeSim, SimEvent, Soldier, angleDiff, mulberry32 } from './sim';
 import { PathPoint } from './path';
 import { DirectZones } from './direct';
 
 interface UnitGfx {
   root: Container;
-  body: Graphics;
-  weapon: Graphics;
+  body: Sprite;
+  weapon: Sprite;
   pulse: number;
   fleeing: boolean;
+  /** Current weapon turn toward the nearest enemy (eased). */
+  aimRot: number;
 }
 
 interface Dying {
@@ -106,7 +108,14 @@ export class ChargeView {
   private particles: Particle[] = [];
   private impacts: ImpactFx[] = [];
   private popups: Popup[] = [];
-  private readonly contexts = new Map<string, { body: GraphicsContext; weapon: GraphicsContext }>();
+  /** Pre-rendered unit art: a body and a weapon texture per unit design. */
+  private readonly unitTextures = new Map<string, { body: Texture; weapon: Texture; bx: number; by: number; wx: number; wy: number }>();
+  /** Textures this view created and must free. */
+  private readonly ownedTextures: Texture[] = [];
+  private readonly particleLayer = new Container();
+  private readonly particlePool: Sprite[] = [];
+  private dotHard: Texture | null = null;
+  private dotSoft: Texture | null = null;
   private readonly ink: number;
   private readonly dust: number;
 
@@ -131,7 +140,7 @@ export class ChargeView {
     this.stainSprite = new Sprite(this.stainRT);
 
     this.drawGround();
-    this.world.addChild(this.ground, this.stainSprite, this.route, this.aimG, this.telegraph, this.unitLayer, this.fx, this.arrowsG, this.overlay);
+    this.world.addChild(this.ground, this.stainSprite, this.route, this.aimG, this.telegraph, this.unitLayer, this.particleLayer, this.fx, this.arrowsG, this.overlay);
     this.root.addChild(this.world, this.popupLayer);
     app.stage.addChild(this.root);
     // Start from a blank stain layer (render textures may hold stale GPU memory).
@@ -144,8 +153,10 @@ export class ChargeView {
     this.bakeRoot.destroy({ children: true });
     this.stainRT.destroy(true);
     this.grassTexture?.destroy(true);
-    for (const c of this.contexts.values()) { c.body.destroy(); c.weapon.destroy(); }
-    this.contexts.clear();
+    for (const c of this.unitTextures.values()) { c.body.destroy(true); c.weapon.destroy(true); }
+    this.unitTextures.clear();
+    for (const tex of this.ownedTextures) tex.destroy(true);
+    this.ownedTextures.length = 0;
     this.units.clear();
   }
 
@@ -294,81 +305,93 @@ export class ChargeView {
     return Math.max(front, camp, redCamp);
   };
 
-  /** Realistic meadow: noise-painted grass, tufts, flowers, stones, bushes and a forest border. */
-  private drawGrass(g: Graphics): void {
+  /** Realistic meadow: tiled close-up grass, broad colour patches, trampled earth and scenery sprites. */
+  private drawGrass(): void {
     const t = this.theme;
     const rand = mulberry32(4321);
-    const canvas = paintGrass(C.WORLD_W, C.WORLD_H, t, { scale: 4, seed: 11, earth: this.earthAt });
-    this.grassTexture = Texture.from(canvas);
-    const sprite = new Sprite(this.grassTexture);
-    sprite.width = C.WORLD_W;
-    sprite.height = C.WORLD_H;
-    this.world.addChild(sprite);
+    const own = (canvas: HTMLCanvasElement) => {
+      const tex = Texture.from(canvas);
+      this.ownedTextures.push(tex);
+      return tex;
+    };
+
+    const grass = new TilingSprite({ texture: own(paintGrassTile(t, 512, 3)), width: C.WORLD_W, height: C.WORLD_H });
+    grass.tileScale.set(0.5);
+    const overlay = new Sprite(own(paintGroundOverlay(C.WORLD_W, C.WORLD_H, t, this.earthAt, 3)));
+    overlay.width = C.WORLD_W;
+    overlay.height = C.WORLD_H;
+    this.world.addChild(grass, overlay);
+
+    // Scenery as sprites baked from a handful of drawings.
+    const deco = new Container();
+    this.world.addChild(deco);
+    const keep = (b: { tex: Texture; ax: number; ay: number }) => { this.ownedTextures.push(b.tex); return b; };
+    const treeTex = [0, 1, 2].map(v => keep(this.bake(g => {
+      const r = 26;
+      g.circle(r * 0.28, r * 0.34, r).fill({ color: 0x000000, alpha: 0.28 });
+      const lobes = 6 + v;
+      for (let i = 0; i < lobes; i++) {
+        const a = (i / lobes) * Math.PI * 2 + v;
+        g.circle(Math.cos(a) * r * 0.45, Math.sin(a) * r * 0.45, r * 0.6).fill(mixColor(t.grassDark, 0x16220c, 0.45 + 0.05 * v));
+      }
+      g.circle(-r * 0.12, -r * 0.12, r * 0.62).fill(mixColor(t.grassDark, 0x1c2a10, 0.15));
+      g.circle(-r * 0.32, -r * 0.34, r * 0.3).fill({ color: t.grassLight, alpha: 0.32 });
+    }, 2)));
+    const bushTex = [0, 1, 2].map(v => keep(this.bake(g => {
+      const r = 8;
+      g.ellipse(r * 0.3, r * 0.4, r * 1.3, r * 0.9).fill({ color: 0x000000, alpha: 0.25 });
+      for (let i = 0; i < 4 + v; i++) {
+        const a = (i / (4 + v)) * Math.PI * 2;
+        g.circle(Math.cos(a) * r * 0.4, Math.sin(a) * r * 0.3, r * 0.55).fill(mixColor(t.grassDark, 0x1c2a10, 0.3 + v * 0.08));
+      }
+      g.circle(-r * 0.25, -r * 0.25, r * 0.3).fill({ color: t.grassLight, alpha: 0.35 });
+    }, 3)));
+    const stoneTex = [0, 1, 2].map(v => keep(this.bake(g => {
+      const r = 2.2 + v * 0.6;
+      g.ellipse(0.6, 0.7, r * 1.25, r).fill({ color: 0x000000, alpha: 0.25 });
+      g.ellipse(0, 0, r * 1.25, r).fill(mixColor(t.obstacleFill, 0x000000, v * 0.12));
+      g.circle(-r * 0.35, -r * 0.3, r * 0.4).fill({ color: 0xffffff, alpha: 0.2 });
+    }, 4)));
+    const petals = [0xf6f2e4, 0xf0d24a, 0xb592d8, 0xe9a0b4];
+    const flowerTex = petals.map(color => keep(this.bake(g => {
+      const r2 = mulberry32(color);
+      for (let k = 0; k < 7; k++) g.circle((r2() - 0.5) * 14, (r2() - 0.5) * 14, 0.7 + r2() * 0.5).fill({ color, alpha: 0.95 });
+    }, 4)));
+    const place = (b: { tex: Texture; ax: number; ay: number }, x: number, y: number, scale: number) => {
+      const sp = new Sprite(b.tex);
+      sp.anchor.set(b.ax, b.ay);
+      sp.position.set(x, y);
+      sp.scale.set(scale);
+      sp.rotation = rand() * Math.PI * 2;
+      deco.addChild(sp);
+    };
 
     // Forest beyond the field edge.
-    const tree = (x: number, y: number, r: number) => {
-      g.circle(x + r * 0.25, y + r * 0.3, r).fill({ color: 0x000000, alpha: 0.25 });
-      g.circle(x, y, r).fill(mixColor(t.grassDark, 0x1c2a10, 0.45));
-      g.circle(x - r * 0.25, y - r * 0.25, r * 0.6).fill({ color: t.grassDark, alpha: 0.9 });
-      g.circle(x - r * 0.35, y - r * 0.35, r * 0.28).fill({ color: t.grassLight, alpha: 0.35 });
-    };
     const band = 170;
-    for (let i = 0; i < 520; i++) {
+    for (let i = 0; i < 300; i++) {
       const side = Math.floor(rand() * 4);
       const along = rand();
-      const depth = 10 + rand() * band;
-      const x = side === 0 ? along * (C.WORLD_W + band * 2) - band : side === 1 ? C.WORLD_W + depth : side === 2 ? along * (C.WORLD_W + band * 2) - band : -depth;
+      const depth = 14 + rand() * band;
+      const x = side === 0 || side === 2 ? along * (C.WORLD_W + band * 2) - band : side === 1 ? C.WORLD_W + depth : -depth;
       const y = side === 0 ? -depth : side === 2 ? C.WORLD_H + depth : along * (C.WORLD_H + band * 2) - band;
-      tree(x, y, 14 + rand() * 18);
+      place(treeTex[Math.floor(rand() * treeTex.length)], x, y, 0.6 + rand() * 0.7);
     }
-
-    // Grass tufts in a few shades.
-    const shades = [mixColor(t.grassDark, 0x000000, 0.25), mixColor(t.grassLight, 0xffffff, 0.12), t.grassDry];
-    for (const shade of shades) {
-      g.setStrokeStyle({ width: 0.9, color: shade, alpha: 0.7 });
-      for (let i = 0; i < 1300; i++) {
-        const x = rand() * C.WORLD_W, y = rand() * C.WORLD_H;
-        if (this.earthAt(x, y) > 0.55) continue;
-        const s = 1.6 + rand() * 2.2;
-        g.moveTo(x - s * 0.7, y).lineTo(x - s * 0.2, y - s).moveTo(x, y).lineTo(x + s * 0.1, y - s * 1.2)
-          .moveTo(x + s * 0.6, y).lineTo(x + s * 0.4, y - s * 0.9);
-      }
-      g.stroke();
-    }
-
-    // Wildflowers.
-    const petals = [0xf6f2e4, 0xf0d24a, 0xb592d8, 0xe9a0b4];
-    for (let i = 0; i < 260; i++) {
-      const cx = rand() * C.WORLD_W, cy = rand() * C.WORLD_H;
-      if (this.earthAt(cx, cy) > 0.3) continue;
-      const color = petals[Math.floor(rand() * petals.length)];
-      const n = 3 + Math.floor(rand() * 5);
-      for (let k = 0; k < n; k++) g.circle(cx + (rand() - 0.5) * 14, cy + (rand() - 0.5) * 14, 0.7 + rand() * 0.5).fill({ color, alpha: 0.9 });
-    }
-
-    // Stones.
-    for (let i = 0; i < 140; i++) {
-      const x = rand() * C.WORLD_W, y = rand() * C.WORLD_H;
-      const r = 0.8 + rand() * 2.2;
-      g.ellipse(x + 0.5, y + 0.6, r * 1.2, r).fill({ color: 0x000000, alpha: 0.2 });
-      g.ellipse(x, y, r * 1.2, r).fill(mixColor(t.obstacleFill, 0x000000, rand() * 0.3));
-      g.circle(x - r * 0.3, y - r * 0.3, r * 0.4).fill({ color: 0xffffff, alpha: 0.18 });
-    }
-
-    // Bushes near the edges of the field.
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 70; i++) {
       const edge = Math.floor(rand() * 4);
       const inset = 15 + rand() * 90;
       const x = edge === 1 ? C.WORLD_W - inset : edge === 3 ? inset : rand() * C.WORLD_W;
       const y = edge === 0 ? inset : edge === 2 ? C.WORLD_H - inset : rand() * C.WORLD_H;
       if (this.earthAt(x, y) > 0.1) continue;
-      const r = 5 + rand() * 6;
-      g.ellipse(x + r * 0.3, y + r * 0.4, r * 1.3, r * 0.9).fill({ color: 0x000000, alpha: 0.22 });
-      for (let k = 0; k < 4; k++) {
-        g.circle(x + (rand() - 0.5) * r, y + (rand() - 0.5) * r * 0.7, r * (0.5 + rand() * 0.3))
-          .fill(mixColor(t.grassDark, 0x1c2a10, 0.25 + rand() * 0.25));
-      }
-      g.circle(x - r * 0.3, y - r * 0.3, r * 0.3).fill({ color: t.grassLight, alpha: 0.35 });
+      place(bushTex[Math.floor(rand() * bushTex.length)], x, y, 0.7 + rand() * 0.7);
+    }
+    for (let i = 0; i < 140; i++) {
+      const x = rand() * C.WORLD_W, y = rand() * C.WORLD_H;
+      place(stoneTex[Math.floor(rand() * stoneTex.length)], x, y, 0.7 + rand() * 0.6);
+    }
+    for (let i = 0; i < 170; i++) {
+      const x = rand() * C.WORLD_W, y = rand() * C.WORLD_H;
+      if (this.earthAt(x, y) > 0.3) continue;
+      place(flowerTex[Math.floor(rand() * flowerTex.length)], x, y, 0.8 + rand() * 0.5);
     }
   }
 
@@ -377,7 +400,7 @@ export class ChargeView {
     const t = this.theme;
     const rand = mulberry32(1234);
     if (t.grass) {
-      this.drawGrass(g);
+      this.drawGrass();
       this.drawCamps(g, rand);
       return;
     }
@@ -458,27 +481,50 @@ export class ChargeView {
 
   // --- Units -----------------------------------------------------------------------
 
-  private context(type: UnitType, team: Team, r: number, variant: number): { body: GraphicsContext; weapon: GraphicsContext } {
+  /** Resolution for pre-rendered art: crisp at the closest zoom on dense screens. */
+  private get artResolution(): number {
+    return Math.min(6, 3 * this.app.renderer.resolution);
+  }
+
+  /** Render vector art once into a texture; returns it with the anchor that keeps its origin. */
+  private bake(draw: (g: Graphics) => void, resolution = this.artResolution): { tex: Texture; ax: number; ay: number } {
+    const g = new Graphics();
+    draw(g);
+    const b = g.getLocalBounds();
+    const tex = this.app.renderer.generateTexture({ target: g, resolution, antialias: true });
+    g.destroy();
+    const w = Math.max(1e-3, b.width), h = Math.max(1e-3, b.height);
+    return { tex, ax: -b.x / w, ay: -b.y / h };
+  }
+
+  private texturesFor(type: UnitType, team: Team, r: number, variant: number) {
     const key = `${type}:${team}:${r}:${variant}`;
-    let ctx = this.contexts.get(key);
-    if (!ctx) {
-      ctx = { body: new GraphicsContext(), weapon: new GraphicsContext() };
-      drawUnitArt(ctx.body, ctx.weapon, type, team, r, this.theme, variant);
-      this.contexts.set(key, ctx);
+    let t = this.unitTextures.get(key);
+    if (!t) {
+      // Body and weapon are baked separately so the weapon can still swing and thrust.
+      const scratch = new Graphics();
+      const body = this.bake(g => drawUnitArt(g, scratch, type, team, r, this.theme, variant));
+      scratch.clear();
+      const weapon = this.bake(g => drawUnitArt(scratch, g, type, team, r, this.theme, variant));
+      scratch.destroy();
+      t = { body: body.tex, weapon: weapon.tex, bx: body.ax, by: body.ay, wx: weapon.ax, wy: weapon.ay };
+      this.unitTextures.set(key, t);
     }
-    return ctx;
+    return t;
   }
 
   private gfxFor(s: Soldier): UnitGfx {
     let u = this.units.get(s.id);
     if (u) return u;
-    const ctx = this.context(s.type, s.team, s.radius, s.type === 'cavalry' ? s.id % HORSE_VARIANTS : 0);
+    const t = this.texturesFor(s.type, s.team, s.radius, s.type === 'cavalry' ? s.id % HORSE_VARIANTS : 0);
     const root = new Container();
-    const body = new Graphics(ctx.body);
-    const weapon = new Graphics(ctx.weapon);
+    const body = new Sprite(t.body);
+    body.anchor.set(t.bx, t.by);
+    const weapon = new Sprite(t.weapon);
+    weapon.anchor.set(t.wx, t.wy);
     root.addChild(body, weapon);
     this.unitLayer.addChild(root);
-    u = { root, body, weapon, pulse: 0, fleeing: false };
+    u = { root, body, weapon, pulse: 0, fleeing: false, aimRot: 0 };
     this.units.set(s.id, u);
     return u;
   }
@@ -488,8 +534,8 @@ export class ChargeView {
     root.removeFromParent();
     root.alpha = 0.78;
     root.scale.set(0.95);
-    const body = root.children[0] as Graphics | undefined;
-    const weapon = root.children[1] as Graphics | undefined;
+    const body = root.children[0] as Sprite | undefined;
+    const weapon = root.children[1] as Sprite | undefined;
     if (body) body.tint = 0x8c8c8c;
     if (weapon) {
       weapon.visible = true;
@@ -550,6 +596,7 @@ export class ChargeView {
 
   private drawImpacts(dt: number): void {
     const g = this.fx;
+    g.clear();
     const t = this.theme;
     this.impacts = this.impacts.filter(fx => {
       fx.age += dt;
@@ -688,7 +735,7 @@ export class ChargeView {
         u.fleeing = s.fleeing;
         u.weapon.visible = !s.fleeing; // weapons thrown down
       }
-      this.animateFighting(u, s, sim.time);
+      this.animateFighting(u, s, sim.time, dt);
       const hpK = s.hp / s.maxHp;
       u.root.alpha = (s.fleeing ? 0.6 : 0.55) + 0.45 * hpK;
       let scale = 0.94 + ((s.id * 0.3779) % 1) * 0.12;
@@ -739,7 +786,7 @@ export class ChargeView {
    * Weapon and body motion for a blow (sword cut, pike thrust, lance thrust) and a
    * restless sway for soldiers locked in the line.
    */
-  private animateFighting(u: UnitGfx, s: Soldier, time: number): void {
+  private animateFighting(u: UnitGfx, s: Soldier, time: number, dt: number): void {
     const r = s.radius;
     let wRot = 0, wX = 0, bX = 0, bY = 0;
     if (!s.fleeing) {
@@ -752,9 +799,14 @@ export class ChargeView {
         bY = Math.sin(time * 4.3 + s.id) * r * 0.08;
       }
     }
+    // Weapons track the nearest enemy, within what an arm (or a horse's neck) allows.
+    const reach = s.type === 'cavalry' ? 0.55 : s.type === 'pikeman' ? 1.0 : 1.3;
+    const target = Number.isNaN(s.aim) || s.fleeing ? 0
+      : Math.max(-reach, Math.min(reach, angleDiff(s.aim, u.root.rotation)));
+    u.aimRot += (target - u.aimRot) * Math.min(1, dt * 7);
     u.body.position.set(bX, bY);
     u.weapon.position.set(bX + wX, bY);
-    u.weapon.rotation = wRot;
+    u.weapon.rotation = u.aimRot + wRot;
   }
 
   // --- Particles & stains ----------------------------------------------------------------
@@ -840,12 +892,24 @@ export class ChargeView {
     this.stainDirty = true;
   }
 
+  private dotTextures(): { hard: Texture; soft: Texture } {
+    if (!this.dotHard || !this.dotSoft) {
+      this.dotHard = this.bake(g => g.circle(0, 0, 8).fill(0xffffff), 1).tex;
+      this.dotSoft = this.bake(g => {
+        for (let i = 8; i >= 1; i--) g.circle(0, 0, i).fill({ color: 0xffffff, alpha: 0.16 });
+      }, 1).tex;
+    }
+    return { hard: this.dotHard, soft: this.dotSoft };
+  }
+
+  /** Particles are pooled sprites (blood and earth crisp, dust and haze soft). */
   private updateParticles(dt: number): void {
-    const g = this.fx;
-    g.clear();
     const t = this.theme;
     const stainAlpha = t.bloodAlpha * (1 - t.bloodFade * 0.7);
+    const dots = this.dotTextures();
     const keep: Particle[] = [];
+    const decay = Math.exp(-5 * dt);
+    let n = 0;
     for (const p of this.particles) {
       p.age += dt;
       if (p.age >= p.life) {
@@ -856,16 +920,30 @@ export class ChargeView {
         }
         continue;
       }
-      const decay = Math.exp(-5 * dt);
       p.vx *= decay;
       p.vy *= decay;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       const k = p.age / p.life;
       const size = Math.max(0.3, p.size + p.grow * p.age);
-      g.circle(p.x, p.y, size).fill({ color: p.color, alpha: p.alpha * (1 - k) });
+      let spr = this.particlePool[n];
+      if (!spr) {
+        spr = new Sprite(dots.hard);
+        spr.anchor.set(0.5);
+        this.particlePool.push(spr);
+        this.particleLayer.addChild(spr);
+      }
+      const soft = p.grow > 0;
+      spr.texture = soft ? dots.soft : dots.hard;
+      spr.visible = true;
+      spr.position.set(p.x, p.y);
+      spr.scale.set(size / 8);
+      spr.tint = p.color;
+      spr.alpha = p.alpha * (1 - k) * (soft ? 1.4 : 1);
+      n++;
       keep.push(p);
     }
+    for (let i = n; i < this.particlePool.length; i++) this.particlePool[i].visible = false;
     this.particles = keep;
   }
 

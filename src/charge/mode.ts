@@ -293,8 +293,11 @@ export class ChargeMode {
     return kb;
   }
 
+  /** Speed zones for point-and-ride, cached (reading layout sizes every step is costly). */
+  private cachedZones: ReturnType<typeof directZones> | null = null;
+
   private zones() {
-    return directZones(this.host.clientWidth, this.host.clientHeight);
+    return this.cachedZones ??= directZones(this.host.clientWidth, this.host.clientHeight);
   }
 
   private applyScheme(): void {
@@ -311,6 +314,7 @@ export class ChargeMode {
   }
 
   private resize(): void {
+    this.cachedZones = null;
     if (!this.app || !this.view) return;
     this.view.resize(this.host.clientWidth, this.host.clientHeight);
   }
@@ -483,11 +487,16 @@ export class ChargeMode {
     ctx.stroke();
 
     const dot = Math.max(1, 1.5 * dpr);
-    for (const s of sim.soldiers) {
-      if (s.rider) continue;
-      ctx.globalAlpha = s.fleeing ? 0.3 : 0.85;
-      ctx.fillStyle = s.team === 'blue' ? hex(theme.blue) : hex(theme.red);
-      ctx.fillRect(s.x * sx - dot / 2, s.y * sy - dot / 2, dot, dot);
+    // One pass per team and state, so the fill style changes only four times.
+    for (const team of ['blue', 'red'] as const) {
+      for (const fleeing of [false, true]) {
+        ctx.globalAlpha = fleeing ? 0.3 : 0.85;
+        ctx.fillStyle = hex(team === 'blue' ? theme.blue : theme.red);
+        for (const s of sim.soldiers) {
+          if (s.rider || s.team !== team || s.fleeing !== fleeing) continue;
+          ctx.fillRect(s.x * sx - dot / 2, s.y * sy - dot / 2, dot, dot);
+        }
+      }
     }
 
     // Incoming volleys.

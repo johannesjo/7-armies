@@ -1,5 +1,5 @@
-import { Application, Graphics, Container, Text, Sprite, Texture } from 'pixi.js';
-import { paintGrass } from './ground';
+import { Application, Graphics, Container, Text, Sprite, Texture, TilingSprite } from 'pixi.js';
+import { paintGrassTile, paintGroundOverlay } from './ground';
 import { Unit, Obstacle, Projectile, ElevationZone, Vec2 } from './types';
 import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
@@ -15,6 +15,7 @@ export class Renderer {
   private obstacleGraphics: Container | null = null;
   private bgGraphics: Container | null = null;
   private grassTexture: Texture | null = null;
+  private patchTexture: Texture | null = null;
   private projectileGraphics: Graphics | null = null;
   private _effects: EffectsManager | null = null;
   private zoneLabels: { rect: Obstacle; label: Text; hovered: boolean; dragActive: boolean }[] = [];
@@ -54,13 +55,19 @@ export class Renderer {
     }
     this.grassTexture?.destroy(true);
     this.grassTexture = null;
+    this.patchTexture?.destroy(true);
+    this.patchTexture = null;
     this.bgGraphics = new Container();
     if (this.theme.grass) {
-      this.grassTexture = Texture.from(paintGrass(MAP_WIDTH, MAP_HEIGHT, this.theme, { scale: 2, seed: 5 }));
-      const grass = new Sprite(this.grassTexture);
-      grass.width = MAP_WIDTH;
-      grass.height = MAP_HEIGHT;
-      this.bgGraphics.addChild(grass);
+      // Tiled close-up grass with broad colour patches over it.
+      this.grassTexture = Texture.from(paintGrassTile(this.theme, 512, 5));
+      const grass = new TilingSprite({ texture: this.grassTexture, width: MAP_WIDTH, height: MAP_HEIGHT });
+      grass.tileScale.set(0.4);
+      this.patchTexture = Texture.from(paintGroundOverlay(MAP_WIDTH, MAP_HEIGHT, this.theme, null, 5, 5));
+      const patches = new Sprite(this.patchTexture);
+      patches.width = MAP_WIDTH;
+      patches.height = MAP_HEIGHT;
+      this.bgGraphics.addChild(grass, patches);
     }
     this.app.stage.addChildAt(this.bgGraphics, 0);
 

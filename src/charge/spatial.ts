@@ -3,6 +3,8 @@ export class SpatialGrid<T extends { x: number; y: number }> {
   private readonly cols: number;
   private readonly rows: number;
   private readonly cells: T[][];
+  /** Indices of non-empty cells, so clearing touches only those. */
+  private readonly used: number[] = [];
 
   constructor(width: number, height: number, private readonly cell: number) {
     this.cols = Math.max(1, Math.ceil(width / cell));
@@ -11,7 +13,8 @@ export class SpatialGrid<T extends { x: number; y: number }> {
   }
 
   clear(): void {
-    for (const c of this.cells) c.length = 0;
+    for (const i of this.used) this.cells[i].length = 0;
+    this.used.length = 0;
   }
 
   private cx(x: number): number {
@@ -23,7 +26,10 @@ export class SpatialGrid<T extends { x: number; y: number }> {
   }
 
   insert(item: T): void {
-    this.cells[this.cy(item.y) * this.cols + this.cx(item.x)].push(item);
+    const i = this.cy(item.y) * this.cols + this.cx(item.x);
+    const cell = this.cells[i];
+    if (cell.length === 0) this.used.push(i);
+    cell.push(item);
   }
 
   /** Collect items whose cell overlaps the query circle's bounding box (caller filters by distance). */

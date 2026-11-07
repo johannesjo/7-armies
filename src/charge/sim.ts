@@ -46,6 +46,9 @@ export interface Soldier {
   /** Personal offset from the formation slot, so ranks look like men, not tiles. */
   jx: number;
   jy: number;
+  /** Direction to the nearest enemy within reach (NaN if none) — where weapons point. */
+  aim: number;
+  aimTimer: number;
 }
 
 /** Who controls a squadron: the player, or one of the AI behaviours. */
@@ -408,6 +411,8 @@ export class ChargeSim {
       lastAttack: -99,
       jx: 0,
       jy: 0,
+      aim: NaN,
+      aimTimer: 0,
     };
   }
 
@@ -481,6 +486,7 @@ export class ChargeSim {
     this.updateBattalions(dt);
     this.moveInfantry(dt);
     this.rebuildGrid();
+    this.updateAim(dt);
     this.riderCombat(dt);
     this.infantryCombat(dt);
     this.separate();
@@ -1097,6 +1103,27 @@ export class ChargeSim {
   private rebuildGrid(): void {
     this.grid.clear();
     for (const s of this.soldiers) if (s.alive) this.grid.insert(s);
+  }
+
+  /** A few times a second, everyone notes the nearest enemy so weapons can point at it. */
+  private updateAim(dt: number): void {
+    for (const s of this.soldiers) {
+      if (!s.alive) continue;
+      s.aimTimer -= dt;
+      if (s.aimTimer > 0) continue;
+      s.aimTimer = 0.2 + this.rand() * 0.15;
+      if (s.fleeing) { s.aim = NaN; continue; }
+      const near = this.grid.query(s.x, s.y, C.AIM_RADIUS, this.near);
+      let best = C.AIM_RADIUS * C.AIM_RADIUS;
+      let aim = NaN;
+      for (const o of near) {
+        if (!o.alive || o.team === s.team) continue;
+        const dx = o.x - s.x, dy = o.y - s.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < best) { best = d2; aim = Math.atan2(dy, dx); }
+      }
+      s.aim = aim;
+    }
   }
 
   // --- Combat -------------------------------------------------------------------

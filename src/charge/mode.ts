@@ -26,6 +26,18 @@ export interface ChargeResult {
 
 const BEST_KEY = 'charge.best';
 const SCHEME_KEY = 'charge.controls';
+const TEXT_KEY = 'charge.combatText';
+
+function readFlag(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === '1';
+  } catch { return fallback; }
+}
+
+function writeFlag(key: string, value: boolean): void {
+  try { localStorage.setItem(key, value ? '1' : '0'); } catch { /* storage unavailable */ }
+}
 
 /** 'direct': hold a finger / the mouse where to ride. 'route': draw the path to ride. */
 export type ControlScheme = 'direct' | 'route';
@@ -67,7 +79,6 @@ export class ChargeMode {
   private view: ChargeView | null = null;
   private sim: ChargeSim | null = null;
   private controls: ChargeControls;
-  private acc = 0;
   private paused = false;
   private endTimer = -1;
   private hudTimer = 0;
@@ -79,6 +90,9 @@ export class ChargeMode {
   /** Pointer position (surface px) while held down in point-and-ride mode. */
   private aim: Vec2 | null = null;
   private readonly controlsBtn = $('ch-controls-btn');
+  private readonly textBtn = $('ch-text-btn');
+  /** Floating combat text, combo counter and banners (off = a cleaner screen). */
+  private combatText = readFlag(TEXT_KEY, true);
   private readonly pace = new StrokePace(800);
   private movedOnce = false;
   private bannerTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -119,6 +133,13 @@ export class ChargeMode {
       this.applyScheme();
     });
     this.applyScheme();
+    this.textBtn.addEventListener('click', () => {
+      this.combatText = !this.combatText;
+      writeFlag(TEXT_KEY, this.combatText);
+      this.view?.setCombatText(this.combatText);
+      this.updateTextBtn();
+    });
+    this.updateTextBtn();
     this.controls.onPause = () => this.togglePause();
     this.controls.handler = this.strokes;
     $('ch-pause-btn').addEventListener('click', () => this.togglePause());
@@ -165,11 +186,11 @@ export class ChargeMode {
     });
     this.audio.start();
     this.view = new ChargeView(app, theme);
+    this.view.setCombatText(this.combatText);
     app.resize();
     this.resize();
     this.view.focus(this.sim.leader!);
 
-    this.acc = 0;
     this.endTimer = -1;
     this.paused = false;
     this.lastRiders = -1;
@@ -300,6 +321,11 @@ export class ChargeMode {
     return this.cachedZones ??= directZones(this.host.clientWidth, this.host.clientHeight);
   }
 
+  private updateTextBtn(): void {
+    this.textBtn.textContent = `Combat text: ${this.combatText ? 'on' : 'off'}`;
+    this.textBtn.setAttribute('aria-pressed', String(this.combatText));
+  }
+
   private applyScheme(): void {
     this.screen.dataset.controls = this.scheme;
     this.controlsBtn.textContent = this.scheme === 'direct' ? 'Controls: point & ride' : 'Controls: draw route';
@@ -330,13 +356,14 @@ export class ChargeMode {
     const drawing = this.controls.drawing && this.endTimer < 0;
     const dt = rawDt;
 
-    this.acc += dt;
+    // Advance by exactly the real time since the last frame, in slices of at most
+    // 1/60 s. A fixed step would run 0 or 2 steps on some frames (constantly on
+    // 90/120 Hz screens), which reads as stutter even at a high frame rate.
     this.frameEvents.length = 0;
-    let steps = 0;
-    while (this.acc >= STEP && steps < MAX_STEPS_PER_FRAME) {
-      steps++;
-      this.acc -= STEP;
-      sim.step(STEP, this.stepInput(sim));
+    const steps = Math.min(MAX_STEPS_PER_FRAME, Math.max(1, Math.ceil(dt / STEP - 1e-6)));
+    const h = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      sim.step(h, this.stepInput(sim));
       for (const e of sim.events) this.frameEvents.push(e);
     }
     if (this.scheme === 'direct') {
@@ -365,7 +392,7 @@ export class ChargeMode {
     if (sim.outcome !== 'playing') {
       if (this.endTimer < 0) {
         this.endTimer = END_DELAY;
-        this.banner(sim.outcome === 'victory' ? 'Victory!' : 'Defeat', END_DELAY * 1000);
+        this.banner(sim.outcome === 'victory' ? 'Victory!' : 'Defeat', END_DELAY * 1000, true);
       }
       this.endTimer -= rawDt;
       if (this.endTimer <= 0) this.finish();
@@ -410,7 +437,9 @@ export class ChargeMode {
     this.screen.style.setProperty('--ch-bg', hex(mixColor(theme.bg, theme.labelFill, 0.18)));
   }
 
-  private banner(text: string, ms: number): void {
+  /** Centre-screen message; skipped when combat text is off unless `force` (victory/defeat). */
+  private banner(text: string, ms: number, force = false): void {
+    if (!this.combatText && !force) return;
     this.bannerEl.textContent = text;
     this.bannerEl.classList.add('active');
     if (this.bannerTimeout) clearTimeout(this.bannerTimeout);
@@ -453,7 +482,7 @@ export class ChargeMode {
     this.staminaEl.style.width = `${(sim.stamina / C.STAMINA_MAX) * 100}%`;
     this.staminaEl.classList.toggle('low', sim.stamina < C.STAMINA_MIN_TO_GALLOP);
     this.scoreEl.textContent = sim.score.toLocaleString();
-    this.comboEl.textContent = sim.combo >= 3 ? `${sim.combo}× trample` : '';
+    this.comboEl.textContent = this.combatText && sim.combo >= 3 ? `${sim.combo}× trample` : '';
     const red = sim.redStanding / sim.initialRed;
     const blue = sim.blueLineStanding / sim.blueLineInitial;
     this.redBar.style.width = `${red * 100}%`;

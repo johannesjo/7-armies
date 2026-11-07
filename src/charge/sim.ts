@@ -457,17 +457,20 @@ export class ChargeSim {
   }
 
   /** World position of formation slot i (row 0 is the front rank). */
-  slotPos(b: Battalion, i: number): Vec2 {
+  slotPos(b: Battalion, i: number, out: Vec2 = { x: 0, y: 0 }): Vec2 {
     const rows = Math.ceil(b.grid.length / b.cols);
     const col = i % b.cols;
     const row = Math.floor(i / b.cols);
-    const local = {
-      x: ((rows - 1) / 2 - row) * b.spacing,
-      y: (col - (b.cols - 1) / 2) * b.spacing,
-    };
-    const p = rotate(local, b.facing);
-    return { x: b.x + p.x, y: b.y + p.y };
+    const lx = ((rows - 1) / 2 - row) * b.spacing;
+    const ly = (col - (b.cols - 1) / 2) * b.spacing;
+    const c = Math.cos(b.facing), sn = Math.sin(b.facing);
+    out.x = b.x + lx * c - ly * sn;
+    out.y = b.y + lx * sn + ly * c;
+    return out;
   }
+
+  /** Scratch vector reused every step (avoids thousands of short-lived objects). */
+  private readonly tmp: Vec2 = { x: 0, y: 0 };
 
   // ---------------------------------------------------------------------------
 
@@ -497,7 +500,10 @@ export class ChargeSim {
     this.comboTimer -= dt;
     if (this.comboTimer <= 0) this.combo = 0;
 
-    this.soldiers = this.soldiers.filter(s => s.alive);
+    // Drop the dead in place rather than allocating a fresh array every step.
+    let live = 0;
+    for (const s of this.soldiers) if (s.alive) this.soldiers[live++] = s;
+    this.soldiers.length = live;
     this.squadrons = this.squadrons.filter(sq => sq === this.player || sq.riders.some(r => r.alive));
     this.checkOutcome();
   }
@@ -1080,7 +1086,7 @@ export class ChargeSim {
         s.facing = turnToward(s.facing, Math.atan2(dvy, dvx), 6 * dt);
       } else if (s.bat) {
         const idx = s.bat.grid.indexOf(s);
-        const p = this.slotPos(s.bat, idx);
+        const p = this.slotPos(s.bat, idx, this.tmp);
         dvx = (p.x + s.jx - s.x) * 3;
         dvy = (p.y + s.jy - s.y) * 3;
         const m = Math.hypot(dvx, dvy);

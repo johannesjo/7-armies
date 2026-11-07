@@ -1,4 +1,4 @@
-import { Application, Container, Graphics, RenderTexture, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
+import { Application, BitmapFont, BitmapText, Container, Graphics, RenderTexture, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
 import { paintGrassTile, paintGroundOverlay } from '../ground';
 import { Team, UnitType, Vec2 } from '../types';
 import { Theme } from '../theme';
@@ -16,6 +16,8 @@ interface UnitGfx {
   fleeing: boolean;
   /** Current weapon turn toward the nearest enemy (eased). */
   aimRot: number;
+  /** Frame on which this unit was last seen alive (avoids a Set per frame). */
+  stamp: number;
 }
 
 interface Dying {
@@ -56,7 +58,7 @@ interface Particle {
 }
 
 interface Popup {
-  text: Text;
+  text: BitmapText;
   x: number;
   y: number;
   age: number;
@@ -64,6 +66,36 @@ interface Popup {
 }
 
 const MAX_PARTICLES = 900;
+
+const sharedTextures = new Map<HTMLCanvasElement, Texture>();
+/** One long-lived texture per cached canvas (never destroyed, reused across battles). */
+function sharedTexture(canvas: HTMLCanvasElement): Texture {
+  let tex = sharedTextures.get(canvas);
+  if (!tex) {
+    tex = Texture.from(canvas);
+    sharedTextures.set(canvas, tex);
+  }
+  return tex;
+}
+
+/**
+ * Combat text uses a bitmap font: glyphs are rasterised once, so changing a popup's
+ * text costs nothing (a canvas Text re-renders and re-uploads its texture each time).
+ * White fill and a black outline, tinted per popup.
+ */
+const COMBAT_FONT = 'ChargeCombat';
+let combatFontInstalled = false;
+function ensureCombatFont(): void {
+  if (combatFontInstalled) return;
+  BitmapFont.install({
+    name: COMBAT_FONT,
+    style: { fontFamily: 'Segoe UI, system-ui, sans-serif', fontSize: 40, fontWeight: '800', fill: 0xffffff, stroke: { color: 0x101408, width: 7 }, letterSpacing: 1 },
+    chars: [['A', 'Z'], ['a', 'z'], ['0', '9'], ' !+×-·:'],
+    resolution: 1,
+    padding: 4,
+  });
+  combatFontInstalled = true;
+}
 const MAX_POPUPS = 14;
 
 /** Linear blend between two 0xRRGGBB colors. */
@@ -104,6 +136,7 @@ export class ChargeView {
   private readonly popupLayer = new Container();
 
   private readonly units = new Map<number, UnitGfx>();
+  private unitStamp = 0;
   private dying: Dying[] = [];
   private particles: Particle[] = [];
   private impacts: ImpactFx[] = [];
@@ -143,6 +176,7 @@ export class ChargeView {
     this.world.addChild(this.ground, this.stainSprite, this.route, this.aimG, this.telegraph, this.unitLayer, this.particleLayer, this.fx, this.arrowsG, this.overlay);
     this.root.addChild(this.world, this.popupLayer);
     app.stage.addChild(this.root);
+    this.prewarm();
     // Start from a blank stain layer (render textures may hold stale GPU memory).
     app.renderer.render({ container: new Container(), target: this.stainRT, clear: true, clearColor: [0, 0, 0, 0] });
   }
@@ -309,15 +343,10 @@ export class ChargeView {
   private drawGrass(): void {
     const t = this.theme;
     const rand = mulberry32(4321);
-    const own = (canvas: HTMLCanvasElement) => {
-      const tex = Texture.from(canvas);
-      this.ownedTextures.push(tex);
-      return tex;
-    };
-
-    const grass = new TilingSprite({ texture: own(paintGrassTile(t, 512, 3)), width: C.WORLD_W, height: C.WORLD_H });
+    // The grass tile and its texture live for the whole session (shared by every battle).
+    const grass = new TilingSprite({ texture: sharedTexture(paintGrassTile(t, 768, 3)), width: C.WORLD_W, height: C.WORLD_H });
     grass.tileScale.set(0.5);
-    const overlay = new Sprite(own(paintGroundOverlay(C.WORLD_W, C.WORLD_H, t, this.earthAt, 3)));
+    const overlay = new Sprite(sharedTexture(paintGroundOverlay(C.WORLD_W, C.WORLD_H, t, this.earthAt, 4, 11, 'charge')));
     overlay.width = C.WORLD_W;
     overlay.height = C.WORLD_H;
     this.world.addChild(grass, overlay);
@@ -497,6 +526,19 @@ export class ChargeView {
     return { tex, ax: -b.x / w, ay: -b.y / h };
   }
 
+  /**
+   * Bake every unit design up front: baking on first sight (the first knights, a new
+   * horse coat) would hitch the game mid-battle.
+   */
+  private prewarm(): void {
+    ensureCombatFont();
+    this.dotTextures();
+    for (const team of ['blue', 'red'] as const) {
+      for (const type of ['swordsman', 'pikeman', 'archer'] as const) this.texturesFor(type, team, C.INFANTRY_RADIUS[type], 0);
+      for (let v = 0; v < HORSE_VARIANTS; v++) this.texturesFor('cavalry', team, C.RIDER_RADIUS, v);
+    }
+  }
+
   private texturesFor(type: UnitType, team: Team, r: number, variant: number) {
     const key = `${type}:${team}:${r}:${variant}`;
     let t = this.unitTextures.get(key);
@@ -524,7 +566,7 @@ export class ChargeView {
     weapon.anchor.set(t.wx, t.wy);
     root.addChild(body, weapon);
     this.unitLayer.addChild(root);
-    u = { root, body, weapon, pulse: 0, fleeing: false, aimRot: 0 };
+    u = { root, body, weapon, pulse: 0, fleeing: false, aimRot: 0, stamp: this.unitStamp };
     this.units.set(s.id, u);
     return u;
   }
@@ -722,11 +764,11 @@ export class ChargeView {
   }
 
   private syncUnits(sim: ChargeSim, dt: number): void {
-    const seen = new Set<number>();
+    const stamp = ++this.unitStamp;
     for (const s of sim.soldiers) {
       if (!s.alive) continue;
-      seen.add(s.id);
       const u = this.gfxFor(s);
+      u.stamp = stamp;
       u.root.position.set(s.x, s.y);
       // Men in the ranks don't all face exactly the same way.
       const quirk = ((s.id * 0.618034) % 1) - 0.5;
@@ -754,7 +796,7 @@ export class ChargeView {
       u.root.scale.set(scale * sx, scale * sy);
     }
     for (const [id, u] of this.units) {
-      if (!seen.has(id)) {
+      if (u.stamp !== stamp) {
         u.root.destroy({ children: true });
         this.units.delete(id);
       }
@@ -907,9 +949,9 @@ export class ChargeView {
     const t = this.theme;
     const stainAlpha = t.bloodAlpha * (1 - t.bloodFade * 0.7);
     const dots = this.dotTextures();
-    const keep: Particle[] = [];
     const decay = Math.exp(-5 * dt);
     let n = 0;
+    let live = 0;
     for (const p of this.particles) {
       p.age += dt;
       if (p.age >= p.life) {
@@ -941,10 +983,10 @@ export class ChargeView {
       spr.tint = p.color;
       spr.alpha = p.alpha * (1 - k) * (soft ? 1.4 : 1);
       n++;
-      keep.push(p);
+      this.particles[live++] = p;
     }
+    this.particles.length = live;
     for (let i = n; i < this.particlePool.length; i++) this.particlePool[i].visible = false;
-    this.particles = keep;
   }
 
   private stainTimer = 0;
@@ -1111,28 +1153,42 @@ export class ChargeView {
     this.world.position.set(this.viewW / 2 - cx * this.zoom + sx, this.viewH / 2 - cy * this.zoom + sy);
   }
 
-  private readonly joinTags = new Map<number, Text>();
+  private readonly joinTags = new Map<number, BitmapText>();
+  private showText = true;
+  private frameNo = 0;
+
+  /** Turn floating combat text (popups and JOIN tags) on or off. */
+  setCombatText(on: boolean): void {
+    this.showText = on;
+    this.popupLayer.visible = on;
+    if (!on) {
+      for (const p of this.popups) this.releasePopup(p.text);
+      this.popups.length = 0;
+    }
+  }
+
+  private makeText(size: number): BitmapText {
+    ensureCombatFont();
+    const text = new BitmapText({ text: '', style: { fontFamily: COMBAT_FONT, fontSize: size } });
+    this.popupLayer.addChild(text);
+    return text;
+  }
 
   /** "JOIN +n" tags over allied troops so it's obvious you can collect them. */
   private updateJoinTags(sim: ChargeSim): void {
-    const seen = new Set<number>();
+    if (!this.showText) return;
+    const stamp = ++this.frameNo;
     const L = sim.leader;
     for (const sq of sim.squadrons) {
       if (sq === sim.player || sq.team !== 'blue' || sq.riders.length === 0 || !L) continue;
-      seen.add(sq.id);
       let tag = this.joinTags.get(sq.id);
       if (!tag) {
-        tag = new Text({
-          text: '',
-          style: {
-            fontFamily: 'Segoe UI, system-ui, sans-serif', fontSize: 12, fontWeight: '800',
-            fill: this.theme.grass ? this.theme.trim : this.theme.blue, stroke: { color: this.theme.textOutline, width: 3 }, letterSpacing: 1,
-          },
-        });
+        tag = this.makeText(12);
         tag.anchor.set(0.5, 1);
-        this.popupLayer.addChild(tag);
+        tag.tint = this.theme.grass ? this.theme.trim : this.theme.blue;
         this.joinTags.set(sq.id, tag);
       }
+      (tag as BitmapText & { stamp?: number }).stamp = stamp;
       const label = `JOIN +${sq.riders.length}`;
       if (tag.text !== label) tag.text = label;
       const c = sim.squadCenter(sq);
@@ -1141,40 +1197,25 @@ export class ChargeView {
       tag.alpha = 0.7 + 0.3 * Math.sin(sim.time * 4);
     }
     for (const [id, tag] of this.joinTags) {
-      if (!seen.has(id)) { tag.destroy(); this.joinTags.delete(id); }
+      if ((tag as BitmapText & { stamp?: number }).stamp !== stamp) { tag.destroy(); this.joinTags.delete(id); }
     }
   }
 
   private popup(x: number, y: number, msg: string, color: number, size: number, life = 0.9): void {
+    if (!this.showText) return;
     if (this.popups.length >= MAX_POPUPS) this.releasePopup(this.popups.shift()!.text);
-    // Reuse text objects: creating a fresh one per popup allocates a canvas and texture.
-    let text = this.freePopups.pop();
-    if (!text) {
-      text = new Text({
-        text: msg,
-        style: {
-          fontFamily: 'Segoe UI, system-ui, sans-serif',
-          fontSize: size,
-          fontWeight: '800',
-          fill: color,
-          stroke: { color: this.theme.textOutline, width: 3 },
-          letterSpacing: 1,
-        },
-      });
-      text.anchor.set(0.5);
-      this.popupLayer.addChild(text);
-    } else {
-      text.text = msg;
-      text.style.fontSize = size;
-      text.style.fill = color;
-      text.visible = true;
-    }
+    const text = this.freePopups.pop() ?? this.makeText(size);
+    text.anchor.set(0.5);
+    text.text = msg;
+    text.style.fontSize = size;
+    text.tint = color;
+    text.visible = true;
     this.popups.push({ text, x, y, age: 0, life });
   }
 
-  private readonly freePopups: Text[] = [];
+  private readonly freePopups: BitmapText[] = [];
 
-  private releasePopup(text: Text): void {
+  private releasePopup(text: BitmapText): void {
     text.visible = false;
     this.freePopups.push(text);
   }

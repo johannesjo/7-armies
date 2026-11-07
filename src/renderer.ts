@@ -15,6 +15,7 @@ export class Renderer {
   private obstacleGraphics: Container | null = null;
   private bgGraphics: Container | null = null;
   private grassTexture: Texture | null = null;
+  private grassTile: HTMLCanvasElement | null = null;
   private patchTexture: Texture | null = null;
   private projectileGraphics: Graphics | null = null;
   private _effects: EffectsManager | null = null;
@@ -53,15 +54,18 @@ export class Renderer {
       this.app.stage.removeChild(this.bgGraphics);
       this.bgGraphics.destroy({ children: true });
     }
-    this.grassTexture?.destroy(true);
-    this.grassTexture = null;
     this.patchTexture?.destroy(true);
     this.patchTexture = null;
     this.bgGraphics = new Container();
     if (this.theme.grass) {
       // Tiled close-up grass with broad colour patches over it.
-      this.grassTexture = Texture.from(paintGrassTile(this.theme, 512, 5));
-      const grass = new TilingSprite({ texture: this.grassTexture, width: MAP_WIDTH, height: MAP_HEIGHT });
+      // The tile canvas is cached for the session, so its texture is kept too.
+      const tile = paintGrassTile(this.theme, 768, 3);
+      if (this.grassTile !== tile) {
+        this.grassTile = tile;
+        this.grassTexture = Texture.from(tile);
+      }
+      const grass = new TilingSprite({ texture: this.grassTexture!, width: MAP_WIDTH, height: MAP_HEIGHT });
       grass.tileScale.set(0.4);
       this.patchTexture = Texture.from(paintGroundOverlay(MAP_WIDTH, MAP_HEIGHT, this.theme, null, 5, 5));
       const patches = new Sprite(this.patchTexture);

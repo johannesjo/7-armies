@@ -41,6 +41,8 @@ export interface Soldier {
   fleeDrift: number;
   /** Cavalry squadron this rider belongs to. */
   squad: Squadron | null;
+  /** Sim time of the last blow struck (hit or miss), for attack animations. */
+  lastAttack: number;
 }
 
 /** Who controls a squadron: the player, or one of the AI behaviours. */
@@ -396,6 +398,7 @@ export class ChargeSim {
       speed: 0,
       fleeDrift: 0,
       squad: null,
+      lastAttack: -99,
     };
   }
 
@@ -1114,6 +1117,7 @@ export class ChargeSim {
         if (r.speed >= C.CHARGE_MIN_SPEED && d < contact) {
           if (s.trampleImmune > 0) continue;
           s.trampleImmune = C.TRAMPLE_IMMUNITY;
+          if (this.time - r.lastAttack > 0.3) r.lastAttack = this.time;
           const side = attackSide(heading, this.victimFacing(s));
           if (s.rider) {
             // Horse against horse: both lose momentum, the faster and better-angled rider wins.
@@ -1164,6 +1168,7 @@ export class ChargeSim {
       // Too slow to trample: fight from the saddle.
       if (r.alive && meleeTarget && r.speed < C.CHARGE_MIN_SPEED && r.attackTimer <= 0) {
         r.attackTimer = C.RIDER_MELEE_COOLDOWN;
+        r.lastAttack = this.time;
         const ang = Math.atan2(meleeTarget.y - r.y, meleeTarget.x - r.x);
         const side = attackSide(ang, this.victimFacing(meleeTarget));
         if (meleeTarget.bat && mine) meleeTarget.bat.lastPlayerHit = this.time;
@@ -1192,6 +1197,7 @@ export class ChargeSim {
 
       if (s.bat) s.bat.engagedTimer = 1.2;
       s.attackTimer = C.MELEE_COOLDOWN_MIN + this.rand() * (C.MELEE_COOLDOWN_MAX - C.MELEE_COOLDOWN_MIN);
+      s.lastAttack = this.time;
       const ang = Math.atan2(target.y - s.y, target.x - s.x);
       s.facing = ang;
 

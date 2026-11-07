@@ -130,3 +130,45 @@ export function drawUnitArt(shape: Canvas, weapon: Canvas, type: UnitType, team:
     }
   }
 }
+
+export interface AttackPose {
+  /** Weapon rotation offset (rad). */
+  wRot: number;
+  /** Weapon push along the facing (world units). */
+  wX: number;
+  /** Body lunge along the facing (world units). */
+  bX: number;
+}
+
+const REST: AttackPose = { wRot: 0, wX: 0, bX: 0 };
+
+function easeOut(t: number): number {
+  return 1 - (1 - t) * (1 - t);
+}
+
+/** How long a blow takes to play out (s). */
+export function attackDuration(type: UnitType): number {
+  return type === 'pikeman' ? 0.45 : type === 'cavalry' ? 0.3 : 0.38;
+}
+
+/**
+ * Pose for a blow `since` seconds after it started: swordsmen (and archers in melee)
+ * wind up and cut across, pikemen and riders draw back and thrust.
+ */
+export function attackPose(type: UnitType, r: number, since: number): AttackPose {
+  const dur = attackDuration(type);
+  if (since < 0 || since >= dur) return REST;
+  const p = since / dur;
+  if (type === 'pikeman' || type === 'cavalry') {
+    const back = type === 'cavalry' ? r * 0.3 : r * 0.6;
+    const reach = type === 'cavalry' ? r * 0.7 : r * 1.3;
+    const wX = p < 0.3 ? -back * (p / 0.3)
+      : p < 0.5 ? -back + (reach + back) * easeOut((p - 0.3) / 0.2)
+      : reach * (1 - (p - 0.5) / 0.5);
+    return { wRot: 0, wX, bX: Math.sin(p * Math.PI) * r * 0.25 };
+  }
+  const wRot = p < 0.3 ? -0.9 * (p / 0.3)
+    : p < 0.6 ? -0.9 + 1.7 * easeOut((p - 0.3) / 0.3)
+    : 0.8 * (1 - (p - 0.6) / 0.4);
+  return { wRot, wX: 0, bX: Math.sin(p * Math.PI) * r * 0.35 };
+}

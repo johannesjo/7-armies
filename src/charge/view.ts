@@ -2,7 +2,7 @@ import { Application, Container, Graphics, GraphicsContext, RenderTexture, Sprit
 import { paintGrass } from '../ground';
 import { Team, UnitType, Vec2 } from '../types';
 import { Theme } from '../theme';
-import { drawUnitArt, HORSE_VARIANTS } from '../unit-art';
+import { drawUnitArt, HORSE_VARIANTS, attackPose, attackDuration } from '../unit-art';
 import { CHARGE as C } from './config';
 import { ChargeSim, SimEvent, Soldier, mulberry32 } from './sim';
 import { PathPoint } from './path';
@@ -583,6 +583,7 @@ export class ChargeView {
         u.fleeing = s.fleeing;
         u.weapon.visible = !s.fleeing; // weapons thrown down
       }
+      this.animateFighting(u, s, sim.time);
       const hpK = s.hp / s.maxHp;
       u.root.alpha = (s.fleeing ? 0.6 : 0.55) + 0.45 * hpK;
       let scale = 1;
@@ -616,6 +617,28 @@ export class ChargeView {
       d.root.scale.set(1 - 0.4 * k);
       return true;
     });
+  }
+
+  /**
+   * Weapon and body motion for a blow (sword cut, pike thrust, lance thrust) and a
+   * restless sway for soldiers locked in the line.
+   */
+  private animateFighting(u: UnitGfx, s: Soldier, time: number): void {
+    const r = s.radius;
+    let wRot = 0, wX = 0, bX = 0, bY = 0;
+    if (!s.fleeing) {
+      const since = time - s.lastAttack;
+      if (since >= 0 && since < attackDuration(s.type)) {
+        ({ wRot, wX, bX } = attackPose(s.type, r, since));
+      } else if (s.bat && s.bat.engagedTimer > 0) {
+        // Shoving and bracing in the press of the line.
+        bX = Math.sin(time * 6 + s.id * 1.7) * r * 0.12;
+        bY = Math.sin(time * 4.3 + s.id) * r * 0.08;
+      }
+    }
+    u.body.position.set(bX, bY);
+    u.weapon.position.set(bX + wX, bY);
+    u.weapon.rotation = wRot;
   }
 
   // --- Particles & stains ----------------------------------------------------------------

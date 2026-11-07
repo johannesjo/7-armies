@@ -47,6 +47,8 @@ export interface Unit {
   piercing?: boolean;
   damageReduction?: number;
   knockbackVel?: Vec2;
+  /** performance.now() (ms) when this unit last struck in melee — drives attack animations. */
+  swingAt?: number;
 }
 
 export interface Projectile {

@@ -304,3 +304,15 @@ describe('cavalry squadrons', () => {
     expect(sim.outcome).toBe('victory');
   });
 });
+
+describe('fighting animation signal', () => {
+  it('soldiers in contact keep swinging, hit or miss', () => {
+    const sim = new ChargeSim([block({ y: 600 }), block({ team: 'blue', y: 640, facing: UP })], { seed: 2, squad: null });
+    for (let t = 0; t < 4; t += 1 / 30) sim.step(1 / 30);
+    const swung = sim.soldiers.filter(s => s.lastAttack > 0).length;
+    // The front ranks (8 per side) should all be trading blows.
+    expect(swung).toBeGreaterThanOrEqual(12);
+    // Far more swings than hits — misses are animated too.
+    expect(swung).toBeGreaterThan(sim.soldiers.filter(s => s.hp < s.maxHp).length);
+  });
+});

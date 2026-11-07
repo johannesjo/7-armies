@@ -5,7 +5,7 @@ import { MAP_WIDTH, MAP_HEIGHT } from './constants';
 import { createEffectsManager, EffectsManager } from './effects';
 import { mergeObstacles } from './obstacle-merge';
 import { Theme, NIGHT_THEME } from './theme';
-import { drawUnitArt, artVariant } from './unit-art';
+import { drawUnitArt, artVariant, attackPose } from './unit-art';
 
 export class Renderer {
   private app: Application;
@@ -268,10 +268,17 @@ export class Renderer {
       container.x = unit.pos.x;
       container.y = unit.pos.y;
 
-      // Rotate gun barrel / weapon indicator
-      (container.getChildAt(1) as Graphics).rotation = unit.gunAngle;
-      // Rotate body with the facing direction
-      (container.getChildAt(0) as Graphics).rotation = unit.gunAngle;
+      // Body and weapon face the unit's heading; a melee blow swings or thrusts the weapon.
+      const body = container.getChildAt(0) as Graphics;
+      const weapon = container.getChildAt(1) as Graphics;
+      const pose = unit.swingAt !== undefined
+        ? attackPose(unit.type, unit.radius, (performance.now() - unit.swingAt) / 1000)
+        : { wRot: 0, wX: 0, bX: 0 };
+      const fx = Math.cos(unit.gunAngle), fy = Math.sin(unit.gunAngle);
+      body.rotation = unit.gunAngle;
+      body.position.set(fx * pose.bX, fy * pose.bX);
+      weapon.rotation = unit.gunAngle + pose.wRot;
+      weapon.position.set(fx * (pose.bX + pose.wX), fy * (pose.bX + pose.wX));
 
       // HP feedback via alpha + scale (no per-unit health bars at this scale)
       const hpRatio = unit.hp / unit.maxHp;

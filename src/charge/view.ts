@@ -777,10 +777,11 @@ export class ChargeView {
       // Men in the ranks don't all face exactly the same way.
       const quirk = ((s.id * 0.618034) % 1) - 0.5;
       u.root.rotation = s.facing + (s.rider || s.fleeing ? 0 : quirk * 0.28);
-      if (s.fleeing !== u.fleeing) {
-        u.fleeing = s.fleeing;
-        u.weapon.visible = !s.fleeing; // weapons thrown down
-      }
+      // Knocked down: lying tipped over on his side, weapon dropped, until he gets up.
+      const down = !s.rider && s.down > 0;
+      if (down) u.root.rotation += (s.id % 2 === 0 ? 1 : -1) * 1.35;
+      u.fleeing = s.fleeing;
+      u.weapon.visible = !s.fleeing && !down; // weapons thrown down
       this.animateFighting(u, s, sim.time, dt);
       const hpK = s.hp / s.maxHp;
       u.root.alpha = (s.fleeing ? 0.6 : 0.55) + 0.45 * hpK;
@@ -797,6 +798,7 @@ export class ChargeView {
         // Galloping bob.
         scale *= 1 + 0.06 * Math.sin(sim.time * 18 + s.id);
       }
+      if (down) { sx *= 1.12; sy *= 0.7; }
       u.root.scale.set(scale * sx, scale * sy);
     }
     for (const [id, u] of this.units) {

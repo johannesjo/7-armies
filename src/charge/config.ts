@@ -118,6 +118,12 @@ export const CHARGE = {
   COHESION_DIST: 9,
   /** A fully tight wedge hits other horsemen this much heavier (x1 + weight). */
   COHESION_WEIGHT: 0.6,
+  /**
+   * A horseman rammed from behind (or the side) counts as only this share of his
+   * weight in the collision: he's shoved on, and the rider who hit him keeps most of
+   * his speed. Head-on, both horses meet at full weight.
+   */
+  RAM_YIELD: { rear: 0.08, flank: 0.3 },
   /** Clash shock dealt to an AI squadron by the side it was hit on, and per rider it loses. */
   CLASH_SHOCK: { front: 0.25, flank: 1.2, rear: 2.2 },
   LOSS_SHOCK: 0.6,

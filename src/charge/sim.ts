@@ -1894,7 +1894,15 @@ export class ChargeSim {
     if (victim.rider) {
       // Against other horsemen, a tight wedge hits (and holds) as one body.
       const wedge = rammer.rider && victim.squad ? 1 + C.COHESION_WEIGHT * victim.squad.cohesion : 1;
-      return victim.mass * this.chargeWeight(victim) * wedge;
+      let m = victim.mass * this.chargeWeight(victim) * wedge;
+      // Struck from behind (or the side), a horseman can't brace or turn into the blow:
+      // he's shoved on and aside, and the charge that hit him barely checks.
+      if (rammer.rider && rammer.team !== victim.team) {
+        const side = attackSide(Math.atan2(victim.y - rammer.y, victim.x - rammer.x), victim.facing);
+        if (side === 'rear') m *= C.RAM_YIELD.rear;
+        else if (side === 'flank') m *= C.RAM_YIELD.flank;
+      }
+      return m;
     }
     if (victim.down > 0) return C.DOWN_MASS;
     if (!rammer.rider || victim.fleeing) return victim.mass;

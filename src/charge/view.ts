@@ -1652,12 +1652,8 @@ export class ChargeView {
       const bx = SL.x - Math.cos(SL.facing) * 3, by = SL.y - Math.sin(SL.facing) * 3;
       const wave = Math.sin(sim.time * 9 + sq.id) * 1.2;
       if (this.upright) {
-        // Standards over riding squadrons: the general's tall and gilt, ringed in gold.
+        // Standards over riding squadrons: the general's tall and gilt.
         const general = sq.ai === 'general';
-        if (general) {
-          const pulse = 0.5 + 0.3 * Math.sin(sim.time * 5);
-          g.ellipse(SL.x, SL.y, 12, 7).stroke({ width: 1.2, color: t.hpMid, alpha: pulse });
-        }
         paintStandard(g, bx, by, general ? 30 : 22, color, general ? 0xd8b050 : mixColor(color, t.trim, 0.75), sim.time * 9 + sq.id, general ? 1.15 : 0.8, general);
         if (sq.team === 'blue') {
           const c = sim.squadCenter(sq);
@@ -1667,9 +1663,8 @@ export class ChargeView {
         continue;
       }
       if (sq.ai === 'general') {
-        // The general: a tall gold-edged standard and a pulsing ring — hunt him down.
-        const pulse = 0.65 + 0.35 * Math.sin(sim.time * 5);
-        g.circle(SL.x, SL.y, 13).stroke({ width: 1.8, color: t.hpMid, alpha: pulse });
+        // The general: a tall gold-edged standard — hunt him down.
+
         g.moveTo(bx, by).lineTo(bx, by - 22).stroke({ width: 1.3, color: t.wood });
         g.poly([bx, by - 22, bx + 12, by - 20 + wave, bx + 11, by - 14 + wave, bx, by - 13])
           .fill(color).stroke({ width: 1, color: t.hpMid });
@@ -1721,8 +1716,8 @@ export class ChargeView {
   }
 
   /**
-   * Calls for help: a pulsing ring round the enemy battalion to break, with an arc
-   * showing the time left; off screen, an arrow at the screen's edge points the way.
+   * Calls for help: a small marker over the enemy battalion to break (no ring round
+   * it); off screen, an arrow at the screen's edge points the way, with the time left.
    */
   private drawCalls(g: Graphics, sim: ChargeSim): void {
     const t = this.theme;
@@ -1735,22 +1730,10 @@ export class ChargeView {
       const pulse = 0.55 + 0.45 * Math.sin(sim.time * 6 + c.id);
       const urgent = left < 0.3;
       const color = urgent ? t.labelWarn : t.hpMid;
-      const rx = (b.cols / 2) * b.spacing + 18, ry = rx * 0.62;
-      g.ellipse(b.x, b.y, rx, ry).stroke({ width: 2, color, alpha: 0.35 + 0.45 * pulse });
-      // Time left: an arc round the top of the ring that shrinks away.
-      const a0 = -Math.PI / 2 - Math.PI * left, a1 = -Math.PI / 2 + Math.PI * left;
-      const steps = 24;
-      g.moveTo(b.x + Math.cos(a0) * (rx + 5), b.y + Math.sin(a0) * (ry + 5));
-      for (let i = 1; i <= steps; i++) {
-        const a = a0 + (a1 - a0) * (i / steps);
-        g.lineTo(b.x + Math.cos(a) * (rx + 5), b.y + Math.sin(a) * (ry + 5));
-      }
-      g.stroke({ width: 2.4, color, alpha: 0.9, cap: 'round' });
-      if (c.ally) {
-        // Our buckling line, faintly marked.
-        const ax = (c.ally.cols / 2) * c.ally.spacing + 14;
-        g.ellipse(c.ally.x, c.ally.y, ax, ax * 0.62).stroke({ width: 1.2, color: t.blue, alpha: 0.35 * pulse });
-      }
+      // A small marker bobbing over the battalion's standard, pointing down at it.
+      const bob = Math.sin(sim.time * 5 + c.id) * 2;
+      const mx = b.x - Math.cos(b.facing) * b.spacing * 0.6, my = b.y - Math.sin(b.facing) * b.spacing * 0.6 - 36 + bob;
+      g.poly([mx - 5, my - 6, mx + 5, my - 6, mx, my + 2]).fill({ color, alpha: 0.75 + 0.25 * pulse }).stroke({ width: 1, color: 0x1a140a, alpha: 0.6 });
 
       // Off screen: an arrow at the edge, pointing at it.
       const p = this.worldToScreen(b);

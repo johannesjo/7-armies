@@ -1,7 +1,8 @@
-import { Application, Container, Graphics } from 'pixi.js';
+import { Application, Container, Graphics, Sprite, Texture } from 'pixi.js';
 import { Theme } from '../theme';
 import { ChargeView, FieldLayout, mixColor } from '../charge/view';
 import { ChargeSim, SimEvent, Squadron, mulberry32 } from '../charge/sim';
+import { Team } from '../types';
 import { LANES as L } from './config';
 import { WOODS } from './map';
 import { LaneEvent, LaneSim, Structure } from './sim';
@@ -22,11 +23,61 @@ export class LaneView extends ChargeView {
   private readonly structs = new Map<number, StructGfx>();
   private readonly laneUi = new Graphics();
   private readonly pointerG = new Graphics();
+  /** Fog of war: one pixel per vision cell, stretched (smoothly) over the field. */
+  readonly fogCanvas: HTMLCanvasElement;
+  private readonly fogCtx: CanvasRenderingContext2D;
+  private readonly fogImg: ImageData;
+  private readonly fogTex: Texture;
+  private readonly fogSprite: Sprite;
+  private fogTimer = 0;
+  private sim: LaneSim | null = null;
+  /** Rings spreading from a commander's rally. */
+  private rings: { x: number; y: number; age: number; life: number; r: number; color: number }[] = [];
 
   constructor(app: Application, theme: Theme) {
     super(app, theme, LANE_FIELD);
+    const cols = Math.ceil(L.WORLD_W / L.FOG_CELL), rows = Math.ceil(L.WORLD_H / L.FOG_CELL);
+    this.fogCanvas = document.createElement('canvas');
+    this.fogCanvas.width = cols;
+    this.fogCanvas.height = rows;
+    this.fogCtx = this.fogCanvas.getContext('2d')!;
+    this.fogImg = this.fogCtx.createImageData(cols, rows);
+    this.fogTex = Texture.from(this.fogCanvas);
+    this.fogSprite = new Sprite(this.fogTex);
+    this.fogSprite.width = cols * L.FOG_CELL;
+    this.fogSprite.height = rows * L.FOG_CELL;
+    // Over the ground, under the men: the field dims where you can't see, and enemies there vanish.
+    this.world.addChildAt(this.fogSprite, this.world.getChildIndex(this.unitLayer));
     this.world.addChild(this.laneUi);
     this.root.addChild(this.pointerG);
+  }
+
+  override destroy(): void {
+    super.destroy();
+    this.fogTex.destroy(true);
+  }
+
+  /** Enemies outside what your side can see are hidden. */
+  protected override hiddenAt(team: Team, x: number, y: number): boolean {
+    return team !== 'blue' && !!this.sim && !this.sim.visible('blue', x, y);
+  }
+
+  private updateFog(sim: LaneSim, dt: number): void {
+    this.fogTimer -= dt;
+    if (this.fogTimer > 0) return;
+    this.fogTimer = 0.1;
+    this.fogSprite.visible = sim.fog;
+    if (!sim.fog) return;
+    const v = sim.vision.blue, d = this.fogImg.data;
+    const dark = this.theme.grass ? [12, 18, 8] : [40, 34, 26];
+    const a = this.theme.grass ? 118 : 70;
+    for (let k = 0; k < v.length; k++) {
+      const i = k * 4;
+      d[i] = dark[0]; d[i + 1] = dark[1]; d[i + 2] = dark[2];
+      d[i + 3] = v[k] ? 0 : a;
+    }
+    this.fogCtx.putImageData(this.fogImg, 0, 0);
+    this.fogTex.source.update();
   }
 
   /** Bare earth: the road down each lane, the yards round the keeps and the tower footings. */
@@ -99,17 +150,41 @@ export class LaneView extends ChargeView {
   }
 
   override render(sim: ChargeSim, events: SimEvent[], dt: number): void {
-    super.render(sim, events, dt);
     const ls = sim as LaneSim;
+    this.sim = ls;
+    this.updateFog(ls, dt);
+    super.render(sim, events, dt);
     this.syncStructures(ls);
-    this.drawLaneUi(ls);
+    this.drawLaneUi(ls, dt);
   }
 
   /** Popups and effects for the mode's own moments. */
   laneEvents(sim: LaneSim, events: readonly LaneEvent[]): void {
     const t = this.theme;
     for (const e of events) {
-      if (e.type === 'tower-down') {
+      if (e.type === 'siege') {
+        // Chips of stone fly from the wall, and dust.
+        if (this.hiddenAt(e.team === 'blue' ? 'red' : 'blue', e.x, e.y)) continue;
+        for (let i = 0; i < 4; i++) {
+          const a = e.angle + (this.rand() - 0.5) * 1.8, sp = 40 + this.rand() * 70;
+          this.addParticle({
+            x: e.x, y: e.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, age: 0, life: 0.35 + this.rand() * 0.3,
+            size: 0.8 + this.rand() * 0.9, grow: -0.6, color: mixColor(STONE, 0xffffff, this.rand() * 0.3), alpha: 0.95, stain: false,
+          });
+        }
+        this.burstDust(e.x, e.y, e.angle, 1);
+      } else if (e.type === 'ability') {
+        if (e.team !== 'blue' && this.hiddenAt(e.team, e.x, e.y)) continue;
+        const color = e.team === 'blue' ? t.blue : t.red;
+        if (e.ability === 'charge') {
+          this.impacts.push({ x: e.x, y: e.y, angle: 0, age: 0, strength: 2.2, rear: false, pike: false });
+          this.burstDust(e.x, e.y, 0, 8);
+          this.popup(e.x, e.y - 26, e.team === 'blue' ? 'CHARGE!' : 'Their horn sounds!', e.team === 'blue' ? t.hpMid : t.labelWarn, 20, 1.3);
+        } else {
+          this.rings.push({ x: e.x, y: e.y, age: 0, life: 0.9, r: L.RALLY_RADIUS, color });
+          this.popup(e.x, e.y - 26, e.count > 0 ? `RALLY! (${e.count})` : 'Rally — no foot near', color, 18, 1.4);
+        }
+      } else if (e.type === 'tower-down') {
         this.impacts.push({ x: e.x, y: e.y, angle: 0, age: 0, strength: 3.4, rear: true, pike: false });
         for (let i = 0; i < 4; i++) this.burstDust(e.x + (this.rand() - 0.5) * 30, e.y + (this.rand() - 0.5) * 20, this.rand() * 6.28, 8);
         const ours = e.team === 'blue';
@@ -257,12 +332,31 @@ export class LaneView extends ChargeView {
   }
 
   /** Health bars on towers, the reach of enemy towers near you, and where the rival is. */
-  private drawLaneUi(sim: LaneSim): void {
+  private drawLaneUi(sim: LaneSim, dt: number): void {
     const g = this.laneUi;
     g.clear();
     const t = this.theme;
     const Ld = sim.leader;
     const vp = this.viewport;
+
+    // Rallies: a ring spreading over the foot that took heart; those battalions glow gold.
+    this.rings = this.rings.filter(r => (r.age += dt) < r.life);
+    for (const r of this.rings) {
+      const k = r.age / r.life;
+      g.circle(r.x, r.y, r.r * (0.3 + 0.7 * k)).stroke({ width: 3, color: r.color, alpha: 0.7 * (1 - k) });
+    }
+    for (const b of sim.battalions) {
+      if (b.routed || !sim.isRallied(b) || this.hiddenAt(b.team, b.x, b.y)) continue;
+      const rows = Math.ceil(b.grid.length / b.cols);
+      const rad = Math.max(b.cols, rows) * b.spacing * 0.62;
+      g.circle(b.x, b.y, rad).stroke({ width: 2, color: t.hpMid, alpha: 0.35 + 0.2 * Math.sin(sim.time * 6 + b.id) });
+    }
+    // The horn sounding: a gold halo round the commander's leader.
+    for (const team of ['blue', 'red'] as const) {
+      const HL = sim.heroes[team].sq.riders[0];
+      if (!HL || !sim.charging(team) || this.hiddenAt(team, HL.x, HL.y)) continue;
+      g.circle(HL.x, HL.y, 16 + 2 * Math.sin(sim.time * 14)).stroke({ width: 2.5, color: t.hpMid, alpha: 0.7 });
+    }
     for (const st of sim.structures) {
       if (!st.alive) continue;
       const near = st.x > vp.x - 200 && st.x < vp.x + vp.w + 200 && st.y > vp.y - 200 && st.y < vp.y + vp.h + 200;
@@ -290,6 +384,8 @@ export class LaneView extends ChargeView {
       const color = st.team === 'blue' ? t.blue : t.red;
       g.roundRect(x - 1, y - 1, w + 2, h + 2, 2).fill({ color: 0x000000, alpha: 0.5 });
       g.roundRect(x, y, w * k, h, 1.5).fill({ color, alpha: vuln ? 0.95 : 0.45 });
+      // Flashes white while it's being worn down.
+      if (sim.time - st.lastHit < 0.12) g.roundRect(x, y, w * k, h, 1.5).fill({ color: 0xffffff, alpha: 0.7 });
       if (!vuln) {
         // Shielded: can't be harmed until the towers before it fall.
         const sx = st.x + w / 2 + 7, sy = y + 2;
@@ -301,7 +397,7 @@ export class LaneView extends ChargeView {
     const pg = this.pointerG;
     pg.clear();
     const R = sim.rival.sq.riders[0];
-    if (!R || !Ld) return;
+    if (!R || !Ld || this.hiddenAt('red', R.x, R.y)) return;
     const p = this.worldToScreen(R);
     const margin = 30;
     if (p.x > margin && p.x < this.viewW - margin && p.y > margin && p.y < this.viewH - margin) return;

@@ -2,7 +2,7 @@ import { Team, Vec2 } from '../types';
 import { CHARGE as C } from '../charge/config';
 import { Battalion, ChargeInput, ChargeSim, NO_INPUT, RiderMods, Soldier, Squadron, angleDiff, rotate } from '../charge/sim';
 import { LANES as L, enemyOf, xpToNext } from './config';
-import { CardId, HeroMods, aiPick, drawOffer, modsFromPicks } from './cards';
+import { CardId, CommanderKind, COMMANDER_KINDS, HeroMods, aiPick, drawOffer, modsFromPicks } from './cards';
 import { inWoods, lanePath, laneAt, navWaypoint, segmentHitsWoods, structureSpecs } from './map';
 
 export interface Structure {
@@ -39,9 +39,12 @@ interface HeroAi {
   navTimer: number;
 }
 
+export type AbilityId = 'charge' | 'rally';
+
 /** A commander: the squadron, its level, its cards, and whether it is in the saddle. */
 export interface Hero {
   team: Team;
+  kind: CommanderKind;
   sq: Squadron;
   /** Driven by the AI (the rival; both sides in headless test runs). */
   ai: HeroAi | null;
@@ -50,7 +53,14 @@ export interface Hero {
   picks: CardId[];
   /** Level-ups waiting for a card to be chosen, each a hand of up to three. */
   offers: CardId[][];
+  /** The kit from commander type and cards... */
   mods: HeroMods;
+  /** ...and with any ability running right now (what the fighting uses). */
+  eff: HeroMods;
+  /** Sim time each ability is ready again. */
+  ready: Record<AbilityId, number>;
+  /** The horn's effect lasts until this sim time. */
+  chargeUntil: number;
   dead: boolean;
   respawnAt: number;
   deaths: number;
@@ -70,7 +80,10 @@ export type LaneEvent =
   | { type: 'hero-down'; team: Team; x: number; y: number; respawn: number }
   | { type: 'hero-up'; team: Team; x: number; y: number }
   | { type: 'lane-wave'; index: number }
-  | { type: 'under-attack'; team: Team; kind: 'tower' | 'keep'; x: number; y: number };
+  | { type: 'under-attack'; team: Team; kind: 'tower' | 'keep'; x: number; y: number }
+  /** A commander's riders are hacking at a wall of `team` (alone: with only a quarter of the effect). */
+  | { type: 'siege'; team: Team; x: number; y: number; angle: number; alone: boolean }
+  | { type: 'ability'; team: Team; ability: AbilityId; x: number; y: number; count: number };
 
 interface LaneInfo {
   lane: number;
@@ -82,6 +95,11 @@ export interface LaneSimOptions {
   seed?: number;
   /** A human commands the blue squadron (false: AI on both sides, for headless runs). */
   human?: boolean;
+  /** Blue's kind of horse (default knights) and red's (default: picked at random). */
+  commander?: CommanderKind;
+  rivalCommander?: CommanderKind;
+  /** Fog of war (default on). */
+  fog?: boolean;
 }
 
 function turnToward(current: number, desired: number, maxStep: number): number {
@@ -105,6 +123,18 @@ export class LaneSim extends ChargeSim {
   private readonly laneInfo = new Map<number, LaneInfo>();
   private readonly paths: Record<Team, Vec2[][]>;
   private readonly underAttackAt = new Map<number, number>();
+  private readonly siegeFxAt = new Map<number, number>();
+  /** Battalions rallied by their commander, until this sim time. */
+  private readonly rallied = new Map<number, number>();
+  /** Horse archers: when each rider can loose again. */
+  private readonly shotReady = new Map<number, number>();
+  /** Fog of war: which cells each side can see (1 = seen). */
+  readonly fog: boolean;
+  readonly fogCols = Math.ceil(L.WORLD_W / L.FOG_CELL);
+  readonly fogRows = Math.ceil(L.WORLD_H / L.FOG_CELL);
+  readonly vision: Record<Team, Uint8Array>;
+  private fogTimer = 0;
+  private readonly woodsCell: Uint8Array;
 
   constructor(opts: LaneSimOptions = {}) {
     super([], { seed: opts.seed, squad: null, muster: false, world: { w: L.WORLD_W, h: L.WORLD_H } });
@@ -122,18 +152,35 @@ export class LaneSim extends ChargeSim {
         range: keep ? L.KEEP_RANGE : L.TOWER_RANGE, volleyTimer: 1 + this.rand() * 2, lastHit: -99,
       });
     }
+    this.fog = opts.fog ?? true;
+    const cells = this.fogCols * this.fogRows;
+    this.vision = { blue: new Uint8Array(cells), red: new Uint8Array(cells) };
+    this.woodsCell = new Uint8Array(cells);
+    for (let j = 0; j < this.fogRows; j++) {
+      for (let i = 0; i < this.fogCols; i++) {
+        this.woodsCell[j * this.fogCols + i] = inWoods((i + 0.5) * L.FOG_CELL, (j + 0.5) * L.FOG_CELL) ? 1 : 0;
+      }
+    }
     const human = opts.human ?? true;
-    const make = (team: Team, ai: boolean): Hero => {
+    const make = (team: Team, ai: boolean, kind: CommanderKind): Hero => {
       const p = this.spawnPoint(team);
-      const sq = this.addSquad({ team, ai: ai ? 'rival' : 'player', x: p.x, y: p.y, facing: p.facing, count: L.HERO_START, style: 'heavy' });
+      const mods = modsFromPicks([], kind);
+      const sq = this.addSquad({ team, ai: ai ? 'rival' : 'player', x: p.x, y: p.y, facing: p.facing, count: mods.maxRiders, style: kind === 'knights' ? 'heavy' : 'nimble' });
+      for (const r of sq.riders) {
+        r.hp = r.maxHp = C.RIDER_HP * mods.hp;
+        r.mass = C.MASS.cavalry * mods.mass;
+      }
       return {
-        team, sq, level: 1, xp: 0, picks: [], offers: [], mods: modsFromPicks([]),
+        team, kind, sq, level: 1, xp: 0, picks: [], offers: [], mods, eff: { ...mods },
+        ready: { charge: 0, rally: 0 }, chargeUntil: -1,
         ai: ai ? { mode: 'lane', lane: -1, laneTimer: 0, cardDelay: 0, wp: null, wpFor: null, navTimer: 0 } : null,
         dead: false, respawnAt: 0, deaths: 0, kills: 0, lastHurt: -99, remountTimer: 0, homeTimer: 0, inWoods: false,
       };
     };
-    this.heroes = { blue: make('blue', !human), red: make('red', true) };
+    const rivalKind = opts.rivalCommander ?? COMMANDER_KINDS[Math.floor(this.rand() * COMMANDER_KINDS.length)];
+    this.heroes = { blue: make('blue', !human, opts.commander ?? 'knights'), red: make('red', true, rivalKind) };
     if (human) this.player = this.heroes.blue.sq;
+    this.updateVision();
   }
 
   /** The human's commander (blue). */
@@ -159,19 +206,20 @@ export class LaneSim extends ChargeSim {
 
   override mods(sq: Squadron | null): Readonly<RiderMods> {
     if (sq && this.heroes) {
-      if (sq === this.heroes.blue.sq) return this.heroes.blue.mods;
-      if (sq === this.heroes.red.sq) return this.heroes.red.mods;
+      if (sq === this.heroes.blue.sq) return this.heroes.blue.eff;
+      if (sq === this.heroes.red.sq) return this.heroes.red.eff;
     }
     return super.mods(sq);
   }
 
   protected override riderBase(sq: Squadron): { hp: number; mass: number } {
     const h = this.heroes ? (sq === this.heroes.blue.sq ? this.heroes.blue : sq === this.heroes.red.sq ? this.heroes.red : null) : null;
-    return { hp: C.RIDER_HP * (h?.mods.hp ?? 1), mass: C.MASS.cavalry };
+    return { hp: C.RIDER_HP * (h?.mods.hp ?? 1), mass: C.MASS.cavalry * (h?.mods.mass ?? 1) };
   }
 
   protected override meleeMult(s: Soldier): number {
     let k = L.LANE_MELEE_MULT;
+    if (s.bat && (this.rallied.get(s.bat.id) ?? -1) > this.time) k *= L.RALLY_MELEE;
     // A commander's war banner puts heart into the foot around him.
     const h = this.heroes[s.team];
     const HL = h.sq.riders[0];
@@ -205,6 +253,7 @@ export class LaneSim extends ChargeSim {
   protected override preStep(dt: number): void {
     this.laneEvents.length = 0;
     this.spawnLaneWaves();
+    for (const team of ['blue', 'red'] as const) this.refreshEff(this.heroes[team]);
     void dt;
   }
 
@@ -213,8 +262,142 @@ export class LaneSim extends ChargeSim {
     this.slowInWoods();
     this.fireStructures(dt);
     this.siege(dt);
+    this.shootFromSaddle();
     this.updateHeroes(dt);
     this.clearField();
+    this.fogTimer -= dt;
+    if (this.fogTimer <= 0) {
+      this.fogTimer = L.FOG_INTERVAL;
+      this.updateVision();
+    }
+  }
+
+  // --- Abilities -----------------------------------------------------------------------
+
+  /** The kit the fighting uses: the commander's, plus the horn while it sounds. */
+  private refreshEff(h: Hero): void {
+    const e = h.eff, m = h.mods;
+    Object.assign(e, m);
+    if (this.time < h.chargeUntil) {
+      e.speed = m.speed * L.CHARGE_SPEED;
+      e.impact = m.impact * L.CHARGE_IMPACT;
+      e.shock = m.shock * L.CHARGE_SHOCK;
+      e.strike = m.strike * L.CHARGE_IMPACT;
+    }
+  }
+
+  /** Seconds until an ability can be used again (0 = ready). */
+  cooldown(team: Team, id: AbilityId): number {
+    return Math.max(0, this.heroes[team].ready[id] - this.time);
+  }
+
+  /** Is the horn sounding for this commander? */
+  charging(team: Team): boolean {
+    return this.time < this.heroes[team].chargeUntil;
+  }
+
+  /** Use an ability; returns whether it went off. */
+  useAbility(team: Team, id: AbilityId): boolean {
+    const h = this.heroes[team];
+    const HL = h.sq.riders[0];
+    if (h.dead || !HL || this.time < h.ready[id] || this.outcome !== 'playing') return false;
+    if (id === 'charge') {
+      h.chargeUntil = this.time + L.CHARGE_TIME;
+      h.ready.charge = this.time + L.CHARGE_COOLDOWN;
+      this.refreshEff(h);
+      this.laneEvents.push({ type: 'ability', team, ability: id, x: HL.x, y: HL.y, count: h.sq.riders.length });
+      return true;
+    }
+    // Rally: every battalion of ours near the commander takes heart.
+    let count = 0;
+    for (const b of this.battalions) {
+      if (b.team !== team || b.routed || Math.hypot(b.x - HL.x, b.y - HL.y) > L.RALLY_RADIUS) continue;
+      b.morale = 100;
+      b.sinceShock = 99;
+      this.rallied.set(b.id, this.time + L.RALLY_TIME);
+      count++;
+    }
+    h.ready.rally = this.time + L.RALLY_COOLDOWN;
+    this.laneEvents.push({ type: 'ability', team, ability: id, x: HL.x, y: HL.y, count });
+    return true;
+  }
+
+  /** Is this battalion fighting under a commander's rally right now? */
+  isRallied(b: Battalion): boolean {
+    return (this.rallied.get(b.id) ?? -1) > this.time;
+  }
+
+  /** Horse archers loose at the nearest enemy in bowshot, galloping or not. */
+  private shootFromSaddle(): void {
+    for (const team of ['blue', 'red'] as const) {
+      const h = this.heroes[team];
+      if (h.mods.archery <= 0 || h.dead) continue;
+      const interval = 1 / h.mods.archery;
+      for (const r of h.sq.riders) {
+        const ready = this.shotReady.get(r.id) ?? 0;
+        if (this.time < ready) continue;
+        const near = this.grid.query(r.x, r.y, L.HA_RANGE, this.near);
+        let best: Soldier | null = null;
+        let bestD: number = L.HA_RANGE;
+        for (const o of near) {
+          if (!o.alive || o.team === team || o.fleeing) continue;
+          const d = Math.hypot(o.x - r.x, o.y - r.y);
+          if (d < bestD) { bestD = d; best = o; }
+        }
+        if (!best) { this.shotReady.set(r.id, this.time + 0.25); continue; }
+        this.shotReady.set(r.id, this.time + interval * (0.8 + this.rand() * 0.4));
+        const flight = Math.max(0.35, Math.min(0.9, bestD / 320));
+        const tx = best.x + best.vx * flight + (this.rand() - 0.5) * 8;
+        const ty = best.y + best.vy * flight + (this.rand() - 0.5) * 8;
+        this.arrows.push({ sx: r.x, sy: r.y, tx, ty, t: 0, flight, team, volley: -1, power: L.HA_POWER_FOOT, riderPower: L.HA_POWER_RIDER });
+        r.lastAttack = this.time;
+      }
+    }
+  }
+
+  // --- Fog of war ------------------------------------------------------------------------
+
+  /** Can `team` see this point? (Everything is seen when fog is off.) */
+  visible(team: Team, x: number, y: number): boolean {
+    if (!this.fog) return true;
+    const i = Math.floor(x / L.FOG_CELL), j = Math.floor(y / L.FOG_CELL);
+    if (i < 0 || j < 0 || i >= this.fogCols || j >= this.fogRows) return false;
+    return this.vision[team][j * this.fogCols + i] === 1;
+  }
+
+  /** Each side sees round its foot, its commander and its towers — but only a little way into the woods. */
+  private updateVision(): void {
+    for (const team of ['blue', 'red'] as const) {
+      const v = this.vision[team];
+      v.fill(0);
+      for (const b of this.battalions) if (b.team === team && !b.routed) this.see(v, b.x, b.y, L.SIGHT_FOOT);
+      for (const st of this.structures) if (st.team === team && st.alive) this.see(v, st.x, st.y, st.range + L.SIGHT_TOWER);
+      const h = this.heroes[team];
+      const HL = h.sq.riders[0];
+      if (HL) {
+        this.see(v, HL.x, HL.y, L.SIGHT_HERO);
+        const tail = h.sq.riders[h.sq.riders.length - 1];
+        if (tail !== HL) this.see(v, tail.x, tail.y, L.SIGHT_HERO * 0.6);
+      }
+      // Your own keep's yard is always in view.
+      this.see(v, L.KEEP[team].x, L.KEEP[team].y, L.HOME_R + 120);
+    }
+  }
+
+  private see(v: Uint8Array, x: number, y: number, r: number): void {
+    const c = L.FOG_CELL;
+    const i0 = Math.max(0, Math.floor((x - r) / c)), i1 = Math.min(this.fogCols - 1, Math.floor((x + r) / c));
+    const j0 = Math.max(0, Math.floor((y - r) / c)), j1 = Math.min(this.fogRows - 1, Math.floor((y + r) / c));
+    const r2 = r * r, w2 = L.SIGHT_WOODS * L.SIGHT_WOODS;
+    for (let j = j0; j <= j1; j++) {
+      const dy = (j + 0.5) * c - y;
+      for (let i = i0; i <= i1; i++) {
+        const dx = (i + 0.5) * c - x;
+        const d2 = dx * dx + dy * dy;
+        const k = j * this.fogCols + i;
+        if (d2 <= (this.woodsCell[k] ? w2 : r2)) v[k] = 1;
+      }
+    }
   }
 
   protected override checkOutcome(): void {
@@ -490,13 +673,21 @@ export class LaneSim extends ChargeSim {
       }
       const h = this.heroes[enemy];
       let hacking = 0;
+      let hx = 0, hy = 0;
       for (const r of h.sq.riders) {
         if (r.speed >= C.CHARGE_MIN_SPEED) continue;
         if (Math.hypot(r.x - st.x, r.y - st.y) > st.r + L.SIEGE_REACH_RIDER) continue;
         hacking++;
+        hx += r.x; hy += r.y;
         if (this.rand() < dt / 0.8) r.lastAttack = this.time;
       }
       dmg += hacking * L.SIEGE_DPS_RIDER * dt * h.mods.siege * (escorted ? 1 : L.BACKDOOR_MULT);
+      if (hacking > 0 && this.time - (this.siegeFxAt.get(st.id) ?? -99) > 0.3) {
+        // Chips fly from the wall facing the riders.
+        this.siegeFxAt.set(st.id, this.time);
+        const a = Math.atan2(hy / hacking - st.y, hx / hacking - st.x);
+        this.laneEvents.push({ type: 'siege', team: st.team, x: st.x + Math.cos(a) * st.r, y: st.y + Math.sin(a) * st.r, angle: a, alone: !escorted });
+      }
       if (dmg <= 0) continue;
       st.hp -= dmg;
       st.lastHit = this.time;
@@ -619,7 +810,8 @@ export class LaneSim extends ChargeSim {
     const id = offer[index];
     const before = h.mods;
     h.picks.push(id);
-    h.mods = modsFromPicks(h.picks);
+    h.mods = modsFromPicks(h.picks, h.kind);
+    this.refreshEff(h);
     // Tougher riders: everyone's wounds scale with the new strength.
     if (h.mods.hp !== before.hp) {
       for (const r of h.sq.riders) {
@@ -704,8 +896,11 @@ export class LaneSim extends ChargeSim {
     const team = h.team, enemy = enemyOf(team);
     const keep = L.KEEP[team];
     const foe = this.heroes[enemy];
-    const F = foe.sq.riders[0] ?? null;
+    // It knows only what its own side can see.
+    const F0 = foe.sq.riders[0];
+    const F = F0 && this.visible(team, F0.x, F0.y) ? F0 : null;
     const max = h.mods.maxRiders;
+    this.aiAbilities(h, F);
     const n = sq.riders.length;
     const full = max * C.RIDER_HP * h.mods.hp;
     const health = this.strength(h) / full;
@@ -729,6 +924,7 @@ export class LaneSim extends ChargeSim {
         if (engage) {
           sq.targetSquad = foe.sq;
           sq.targetBat = null;
+          if (h.kind === 'archers') return this.steer(h, this.kite(Ld, F.x, F.y, 190, h), true);
           return this.steer(h, this.dogfightInput(sq, Ld, F, dt), false);
         }
         if (d < 320 && odds < 0.7) {
@@ -742,7 +938,7 @@ export class LaneSim extends ChargeSim {
     ai.laneTimer -= dt;
     if (ai.laneTimer <= 0 || ai.lane < 0) {
       ai.lane = this.chooseLane(h);
-      ai.laneTimer = 9 + this.rand() * 4;
+      ai.laneTimer = 18 + this.rand() * 8;
     }
     const lane = ai.lane;
 
@@ -768,11 +964,53 @@ export class LaneSim extends ChargeSim {
       if (far && sq.phase !== 'charge') {
         return this.goTo(h, target, true, 0);
       }
+      // Horse archers circle at bowshot; the rest ride round to an open side and charge.
+      if (h.kind === 'archers') return this.steer(h, this.kite(Ld, target.x, target.y, 170, h), true);
       return this.steer(h, this.chargeBattalionInput(sq, Ld, target), true);
     }
 
     // Hold behind our foot in the lane, out of reach of their towers.
     return this.goTo(h, this.holdPoint(h, lane), false, 40);
+  }
+
+  /**
+   * Circle a target at `radius`, the way horse archers fight: close in if too far,
+   * draw off if too near, otherwise ride round it.
+   */
+  private kite(Ld: Soldier, x: number, y: number, radius: number, h: Hero): ChargeInput {
+    const dx = Ld.x - x, dy = Ld.y - y;
+    const d = Math.hypot(dx, dy) || 1;
+    const ox = dx / d, oy = dy / d;
+    // Keep circling the way we're already going round.
+    const side = (Math.cos(Ld.facing) * -oy + Math.sin(Ld.facing) * ox) >= 0 ? 1 : -1;
+    const tx = -oy * side, ty = ox * side;
+    const pull = Math.max(-1, Math.min(1, (radius - d) / 80));
+    void h;
+    return { dirX: tx + ox * pull * 1.4, dirY: ty + oy * pull * 1.4, gallop: d < radius * 0.6 };
+  }
+
+  /** The rival sounds the horn as it charges home, and rallies its foot in a hard fight. */
+  private aiAbilities(h: Hero, F: Soldier | null): void {
+    const sq = h.sq, Ld = sq.riders[0];
+    if (!Ld) return;
+    if (this.time >= h.ready.charge && h.kind !== 'archers') {
+      const b = sq.targetBat;
+      const intoFoot = b && sq.phase === 'charge' && Math.hypot(b.x - Ld.x, b.y - Ld.y) < 170;
+      const intoHorse = F && sq.targetSquad && Math.hypot(F.x - Ld.x, F.y - Ld.y) < 220;
+      if (intoFoot || intoHorse) this.useAbility(h.team, 'charge');
+    } else if (this.time >= h.ready.charge && h.kind === 'archers' && F && Math.hypot(F.x - Ld.x, F.y - Ld.y) < 260) {
+      // Archers use the horn to get away (or to keep the circle wide).
+      this.useAbility(h.team, 'charge');
+    }
+    if (this.time >= h.ready.rally) {
+      let near = 0, hard = false;
+      for (const b of this.battalions) {
+        if (b.team !== h.team || b.routed || Math.hypot(b.x - Ld.x, b.y - Ld.y) > L.RALLY_RADIUS * 0.9) continue;
+        near++;
+        if ((b.engagedTimer > 0 && b.morale < 70) || this.coveredBy(enemyOf(h.team), b)) hard = true;
+      }
+      if (near >= 2 && hard) this.useAbility(h.team, 'rally');
+    }
   }
 
   /** Ride to `p`, round the woods by the passes. */
@@ -850,7 +1088,7 @@ export class LaneSim extends ChargeSim {
     let best: Battalion | null = null;
     let bestScore = Infinity;
     for (const b of this.battalions) {
-      if (b.team === h.team || b.routed) continue;
+      if (b.team === h.team || b.routed || !this.visible(h.team, b.x, b.y)) continue;
       const inLane = Math.abs(b.y - y) < L.LANE_HALF + 60 || (b.x < L.WOODS_X0 || b.x > L.WOODS_X1);
       if (!inLane || !this.safeTarget(h, b)) continue;
       const d = Math.hypot(b.x - Ld.x, b.y - Ld.y);
@@ -894,13 +1132,15 @@ export class LaneSim extends ChargeSim {
     const Ld = h.sq.riders[0];
     const enemy = enemyOf(h.team);
     const foe = this.heroes[enemy];
-    const F = foe.sq.riders[0];
+    const F0 = foe.sq.riders[0];
+    const F = F0 && this.visible(h.team, F0.x, F0.y) ? F0 : null;
     const odds = this.strength(h) / Math.max(1, this.strength(foe));
     let best = 1, bestScore = -Infinity;
     L.LANE_Y.forEach((y, lane) => {
-      let score = this.rand() * 0.8;
+      // Riding between lanes costs time: stay put unless another lane matters more.
+      let score = this.rand() * 0.8 + (lane === h.ai!.lane ? 1.2 : 0);
       for (const b of this.battalions) {
-        if (b.routed || Math.abs(b.y - y) > L.LANE_HALF) continue;
+        if (b.routed || Math.abs(b.y - y) > L.LANE_HALF || !this.visible(h.team, b.x, b.y)) continue;
         if (b.team === enemy) {
           score += 0.5;
           // Threatening our towers or keep: defend.

@@ -5,9 +5,9 @@ import { CHARGE as C } from '../charge/config';
 import { ChargeSim, SimEvent } from '../charge/sim';
 import type { ChargeRenderer } from '../charge/view3d';
 import { LANES as L, xpToNext } from './config';
-import { CARDS } from './cards';
+import { CARDS, COMMANDERS, CommanderKind } from './cards';
 import { WOODS } from './map';
-import { LaneEvent, LaneSim } from './sim';
+import { AbilityId, LaneEvent, LaneSim } from './sim';
 import { LaneView } from './view';
 
 export interface LaneResult {
@@ -23,6 +23,9 @@ export interface LaneResult {
   deaths: number;
   towers: number;
   cards: string[];
+  /** Your horse and the rival's. */
+  commander: string;
+  rivalCommander: string;
 }
 
 const END_DELAY = 3;
@@ -51,6 +54,15 @@ export class LaneMode extends ChargeMode {
   private readonly xpEl = $('ln-xp');
   private readonly rivalEl = $('ln-rival');
   private readonly respawnEl = $('ln-respawn');
+  private readonly abilityBtns: Record<AbilityId, HTMLButtonElement> = {
+    charge: $('ln-ab-charge') as HTMLButtonElement,
+    rally: $('ln-ab-rally') as HTMLButtonElement,
+  };
+  /** The kind of horse you lead next match (set from the menu). */
+  commander: CommanderKind = 'knights';
+  /** Sim time each teaching hint last showed (so they don't nag). */
+  private readonly hintAt: Record<string, number> = {};
+  private hackedOnce = false;
   /** The hand of cards on show (so the buttons are only rebuilt when it changes). */
   private shownHand = '';
 
@@ -59,11 +71,53 @@ export class LaneMode extends ChargeMode {
     this.laneEnd = cb.onEnd;
     this.laneQuit = cb.onQuit;
     this.cardBtns.forEach((btn, i) => btn.addEventListener('click', () => this.pick(i)));
+    for (const id of ['charge', 'rally'] as const) {
+      // pointerdown, not click: a thumb on the stick shouldn't have to let go first.
+      this.abilityBtns[id].addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.ability(id); });
+    }
     window.addEventListener('keydown', e => {
       if (!this.active || this.paused) return;
       const i = ['Digit1', 'Digit2', 'Digit3'].indexOf(e.code);
       if (i >= 0) { this.pick(i); e.preventDefault(); }
+      if (e.code === 'KeyQ') { this.ability('charge'); e.preventDefault(); }
+      if (e.code === 'KeyE') { this.ability('rally'); e.preventDefault(); }
     });
+  }
+
+  private ability(id: AbilityId): void {
+    const sim = this.lanes;
+    if (!sim || this.endTimer >= 0 || this.paused) return;
+    if (!sim.useAbility('blue', id)) {
+      const btn = this.abilityBtns[id];
+      btn.classList.remove('denied');
+      void btn.offsetWidth;
+      btn.classList.add('denied');
+    }
+    this.updateAbilities();
+  }
+
+  private updateAbilities(): void {
+    const sim = this.lanes;
+    if (!sim) return;
+    const total: Record<AbilityId, number> = { charge: L.CHARGE_COOLDOWN, rally: L.RALLY_COOLDOWN };
+    for (const id of ['charge', 'rally'] as const) {
+      const btn = this.abilityBtns[id];
+      const cd = sim.me.dead ? total[id] : sim.cooldown('blue', id);
+      btn.style.setProperty('--cd', String(cd / total[id]));
+      btn.classList.toggle('ready', cd <= 0 && !sim.me.dead);
+      btn.classList.toggle('on', id === 'charge' && sim.charging('blue'));
+      const t = btn.querySelector('.ln-cd');
+      if (t) t.textContent = cd > 0 && !sim.me.dead ? String(Math.ceil(cd)) : '';
+    }
+  }
+
+  /** A short teaching banner, at most once every `gap` seconds of play. */
+  private teach(key: string, text: string, gap: number): void {
+    const sim = this.lanes;
+    if (!sim) return;
+    if (sim.time - (this.hintAt[key] ?? -1e9) < gap) return;
+    this.hintAt[key] = sim.time;
+    this.banner(text, 2400, true);
   }
 
   private get lanes(): LaneSim | null {
@@ -75,7 +129,9 @@ export class LaneMode extends ChargeMode {
   }
 
   protected override createSim(seed: number): ChargeSim {
-    return new LaneSim({ seed });
+    for (const k of Object.keys(this.hintAt)) delete this.hintAt[k];
+    this.hackedOnce = false;
+    return new LaneSim({ seed, commander: this.commander });
   }
 
   protected override async createView(app: Application, theme: Theme): Promise<ChargeRenderer> {
@@ -85,6 +141,7 @@ export class LaneMode extends ChargeMode {
 
   protected override intro(): void {
     this.shownHand = '';
+    this.updateAbilities();
     this.cardsEl.classList.remove('active');
     this.respawnEl.classList.remove('active');
     this.banner('Break their keep!', 2600, true);
@@ -129,6 +186,16 @@ export class LaneMode extends ChargeMode {
         break;
       case 'under-attack':
         if (e.team === 'blue') this.banner(e.kind === 'keep' ? 'Our keep is under attack!' : 'A tower is under attack', 2000);
+        break;
+      case 'siege':
+        // Your riders at their walls (only commanders' riders raise these).
+        if (e.team !== 'red') break;
+        if (e.alone) this.teach('alone', 'Alone the walls shrug you off (¼ damage) — bring your foot', 7);
+        else if (!this.hackedOnce) this.banner('Hacking at the walls!', 1600, true);
+        this.hackedOnce = true;
+        break;
+      case 'ability':
+        if (e.team === 'red') this.banner(e.ability === 'charge' ? 'The rival sounds the charge!' : 'The rival rallies his foot!', 1600);
         break;
     }
   }
@@ -184,9 +251,12 @@ export class LaneMode extends ChargeMode {
     this.formEl.classList.toggle('loose', cohesion < 0.5);
     this.levelEl.textContent = `Level ${me.level}`;
     this.xpEl.style.width = me.level >= L.MAX_LEVEL ? '100%' : `${(me.xp / xpToNext(me.level)) * 100}%`;
+    const rk = COMMANDERS[rival.kind];
     this.rivalEl.textContent = rival.dead
-      ? `Rival: slain (${Math.ceil(rival.respawnAt - sim.time)})`
-      : `Rival Lv ${rival.level} · ♞ ${rival.sq.riders.length}`;
+      ? `${rk.icon} Rival slain (${Math.ceil(rival.respawnAt - sim.time)})`
+      : `${rk.icon} Rival ${rk.title} Lv ${rival.level} · ♞ ${rival.sq.riders.length}`;
+    this.updateAbilities();
+    this.wallHints(sim);
     const keepHp = (team: 'blue' | 'red') => {
       const k = sim.structures.find(s => s.kind === 'keep' && s.team === team)!;
       return Math.max(0, k.hp / k.maxHp);
@@ -200,6 +270,17 @@ export class LaneMode extends ChargeMode {
       this.respawnEl.classList.add('active');
     } else this.respawnEl.classList.remove('active');
     this.updateCards();
+  }
+
+  /** Riding at their walls: say why nothing happens, when nothing happens. */
+  private wallHints(sim: LaneSim): void {
+    const Ld = sim.leader;
+    if (!Ld) return;
+    for (const st of sim.structures) {
+      if (!st.alive || st.team !== 'red' || Math.hypot(Ld.x - st.x, Ld.y - st.y) > st.r + 70) continue;
+      if (!sim.vulnerable(st)) this.teach('shielded', st.kind === 'keep' ? 'The keep is shielded until an inner tower falls' : 'Shielded — break the outer tower in this lane first', 9);
+      else if (Ld.speed >= C.CHARGE_MIN_SPEED) this.teach('rein', 'Rein in at the walls to hack at them', 9);
+    }
   }
 
   protected override checkEnd(sim: ChargeSim, rawDt: number): void {
@@ -229,6 +310,8 @@ export class LaneMode extends ChargeMode {
       deaths: sim.me.deaths,
       towers: sim.towersDown.blue,
       cards: sim.me.picks.map(id => CARDS[id].title),
+      commander: COMMANDERS[sim.me.kind].title,
+      rivalCommander: COMMANDERS[sim.rival.kind].title,
     };
     this.cardsEl.classList.remove('active');
     this.respawnEl.classList.remove('active');
@@ -275,8 +358,15 @@ export class LaneMode extends ChargeMode {
       ctx.globalAlpha = 0.8;
       for (const s of sim.soldiers) {
         if (s.rider || s.team !== team || s.fleeing) continue;
+        if (team === 'red' && !sim.visible('blue', s.x, s.y)) continue;
         ctx.fillRect(s.x * sx - dot / 2, s.y * sy - dot / 2, dot, dot);
       }
+    }
+    // What you can't see is in shadow.
+    if (sim.fog) {
+      ctx.globalAlpha = 0.8;
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage((view as LaneView).fogCanvas, 0, 0, cv.width, cv.height);
     }
     // Towers and keeps.
     ctx.globalAlpha = 1;
@@ -297,9 +387,9 @@ export class LaneMode extends ChargeMode {
         ctx.globalAlpha = 1;
       }
     }
-    // The rival: a ringed red marker.
+    // The rival: a ringed red marker (when you can see him).
     const R = sim.rival.sq.riders[0];
-    if (R) {
+    if (R && sim.visible('blue', R.x, R.y)) {
       ctx.fillStyle = hex(theme.red);
       ctx.beginPath();
       ctx.arc(R.x * sx, R.y * sy, 3 * dpr, 0, Math.PI * 2);

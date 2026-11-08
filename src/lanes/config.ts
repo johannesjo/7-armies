@@ -89,6 +89,36 @@ export const LANES = {
   RESPAWN_BASE: 6,
   RESPAWN_PER_LEVEL: 1.6,
 
+  // --- Abilities ---
+  /** Charge!: the horn sounds — faster, harder-hitting and more terrifying for a few seconds. */
+  CHARGE_TIME: 5,
+  CHARGE_COOLDOWN: 26,
+  CHARGE_SPEED: 1.2,
+  CHARGE_IMPACT: 1.5,
+  CHARGE_SHOCK: 1.6,
+  /** Rally: our foot near the commander take heart (full morale) and fight harder for a while. */
+  RALLY_RADIUS: 320,
+  RALLY_TIME: 9,
+  RALLY_COOLDOWN: 40,
+  RALLY_MELEE: 1.6,
+
+  // --- Horse archers ---
+  HA_RANGE: 230,
+  /** Arrow damage multipliers against foot and against horsemen. */
+  HA_POWER_FOOT: 4,
+  HA_POWER_RIDER: 0.6,
+
+  // --- Fog of war ---
+  /** Vision is worked out on a grid of this cell size, this often (s). */
+  FOG_CELL: 40,
+  FOG_INTERVAL: 0.2,
+  SIGHT_FOOT: 300,
+  SIGHT_HERO: 400,
+  /** Beyond the range of their walls, towers and keeps see this much further. */
+  SIGHT_TOWER: 60,
+  /** Into the woods you see only this far: ambushes wait in the trees. */
+  SIGHT_WOODS: 150,
+
   // --- Experience ---
   /** Enemies who fall within this distance of your squadron give you experience. */
   XP_RANGE: 480,

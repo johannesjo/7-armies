@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { LaneSim } from './sim';
 import { LANES as L, xpToNext } from './config';
-import { CARDS, CARD_IDS, drawOffer, modsFromPicks } from './cards';
+import { CARDS, CARD_IDS, baseMods, drawOffer, modsFromPicks } from './cards';
 import { WOODS, inWoods, laneAt, navWaypoint, segmentHitsWoods } from './map';
 import { mulberry32, NO_INPUT } from '../charge/sim';
 
@@ -60,9 +60,9 @@ describe('lanes cards', () => {
   });
 
   it('builds a commander kit from the picks', () => {
-    const m = modsFromPicks(['riders', 'riders', 'barding', 'remounts', 'remounts']);
-    expect(m.maxRiders).toBe(L.HERO_START + 6);
-    expect(m.hp).toBeCloseTo(1.2);
+    const m = modsFromPicks(['riders', 'riders', 'barding', 'remounts', 'remounts'], 'hussars');
+    expect(m.maxRiders).toBe(baseMods('hussars').maxRiders + 6);
+    expect(m.hp).toBeCloseTo(baseMods('hussars').hp + 0.2);
     expect(m.remount).toBeCloseTo(14 * 0.7);
     for (const id of CARD_IDS) expect(CARDS[id].title.length).toBeGreaterThan(0);
   });
@@ -103,7 +103,7 @@ describe('lanes sim', () => {
     teleport(sim, 'blue', tower.x - tower.r - 20, tower.y);
     const hp0 = sim.riders.reduce((s, r) => s + r.hp, 0);
     for (let i = 0; i < 60 * 6; i++) sim.step(1 / 60, NO_INPUT);
-    const hp1 = sim.riders.reduce((s, r) => s + r.hp, 0) + (L.HERO_START - sim.riders.length) * 30;
+    const hp1 = sim.riders.reduce((s, r) => s + r.hp, 0);
     expect(hp1).toBeLessThan(hp0);
     // Alone at the walls: only the backdoor share of the damage.
     const lost = tower.maxHp - tower.hp;
@@ -138,18 +138,19 @@ describe('lanes sim', () => {
     offer[0] = 'riders';
     sim.chooseCard('blue', 0);
     expect(sim.me.offers.length).toBe(0);
-    expect(sim.me.mods.maxRiders).toBe(L.HERO_START + 3);
-    expect(sim.riders.length).toBe(L.HERO_START + 3);
+    expect(sim.me.mods.maxRiders).toBe(baseMods('knights').maxRiders + 3);
+    expect(sim.riders.length).toBe(baseMods('knights').maxRiders + 3);
   });
 
   it('riders at home heal and the squadron fills back up', () => {
     const sim = new LaneSim({ seed: 5 });
     bench(sim, 'red');
     for (const r of sim.riders) r.hp = 5;
+    const full = sim.me.mods.maxRiders;
     for (const r of sim.riders.slice(-4)) sim['damageRider'](r, 999, 0, false, 'front');
-    expect(sim.riders.length).toBe(L.HERO_START - 4);
+    expect(sim.riders.length).toBe(full - 4);
     for (let i = 0; i < 60 * 4; i++) sim.step(1 / 60, NO_INPUT);
-    expect(sim.riders.length).toBe(L.HERO_START);
+    expect(sim.riders.length).toBe(full);
     expect(sim.riders.every(r => r.hp > 20)).toBe(true);
   });
 
@@ -166,7 +167,7 @@ describe('lanes sim', () => {
     const sim = new LaneSim({ seed: 7 });
     const k = L.KEEP.red;
     let farthest = 0;
-    for (let i = 0; i < 60 * 90; i++) {
+    for (let i = 0; i < 60 * 120; i++) {
       sim.step(1 / 60, NO_INPUT);
       const R = sim.rival.sq.riders[0];
       if (R) farthest = Math.max(farthest, Math.hypot(R.x - k.x, R.y - k.y));
@@ -175,4 +176,83 @@ describe('lanes sim', () => {
     expect(sim.rival.level).toBeGreaterThanOrEqual(2);
     expect(sim.rival.picks.length).toBeGreaterThanOrEqual(1);
   }, 30000);
+});
+
+describe('lanes commanders, abilities and fog', () => {
+  it('each kind of horse plays differently', () => {
+    const k = baseMods('knights'), h = baseMods('hussars'), a = baseMods('archers');
+    expect(k.hp).toBeGreaterThan(h.hp);
+    expect(k.strike).toBeGreaterThan(h.strike);
+    expect(h.speed).toBeGreaterThan(k.speed);
+    expect(h.maxRiders).toBeGreaterThan(k.maxRiders);
+    expect(a.archery).toBeGreaterThan(0);
+    expect(k.archery).toBe(0);
+    const sim = new LaneSim({ seed: 1, commander: 'hussars', rivalCommander: 'knights' });
+    expect(sim.riders.length).toBe(h.maxRiders);
+    expect(sim.rival.sq.riders.length).toBe(k.maxRiders);
+    expect(sim.rival.sq.riders[0].maxHp).toBeCloseTo(30 * k.hp);
+  });
+
+  it('Charge! boosts the squadron for a few seconds, then cools down', () => {
+    const sim = new LaneSim({ seed: 2 });
+    const base = sim.mods(sim.player).speed;
+    expect(sim.useAbility('blue', 'charge')).toBe(true);
+    expect(sim.mods(sim.player).speed).toBeCloseTo(base * L.CHARGE_SPEED);
+    expect(sim.useAbility('blue', 'charge')).toBe(false);
+    for (let i = 0; i < 60 * (L.CHARGE_TIME + 0.2); i++) sim.step(1 / 60, NO_INPUT);
+    expect(sim.mods(sim.player).speed).toBeCloseTo(base);
+    expect(sim.cooldown('blue', 'charge')).toBeGreaterThan(0);
+  });
+
+  it('Rally puts heart into our foot nearby', () => {
+    const sim = new LaneSim({ seed: 3 });
+    for (let i = 0; i < 70; i++) sim.step(1 / 60, NO_INPUT);
+    const b = sim.battalions.find(x => x.team === 'blue' && sim.laneEvents !== null && Math.abs(x.y - L.LANE_Y[1]) < 50)!;
+    teleport(sim, 'blue', b.x - 40, b.y);
+    b.morale = 30;
+    expect(sim.useAbility('blue', 'rally')).toBe(true);
+    expect(b.morale).toBe(100);
+    expect(sim.isRallied(b)).toBe(true);
+    expect(sim.laneEvents.some(e => e.type === 'ability' && e.ability === 'rally' && e.count >= 1)).toBe(true);
+  });
+
+  it('horse archers shoot from the saddle', () => {
+    const sim = new LaneSim({ seed: 4, commander: 'archers' });
+    bench(sim, 'red');
+    for (let i = 0; i < 70; i++) sim.step(1 / 60, NO_INPUT);
+    const foe = sim.battalions.find(x => x.team === 'red')!;
+    teleport(sim, 'blue', foe.x - 150, foe.y);
+    let shots = 0;
+    for (let i = 0; i < 120; i++) {
+      sim.step(1 / 60, NO_INPUT);
+      shots = Math.max(shots, sim.arrows.filter(a => a.team === 'blue' && a.volley === -1).length);
+    }
+    expect(shots).toBeGreaterThan(0);
+  });
+
+  it('fog: you see round your own troops, not the far side of the field', () => {
+    const sim = new LaneSim({ seed: 5 });
+    sim.step(1 / 60);
+    expect(sim.visible('blue', L.KEEP.blue.x, L.KEEP.blue.y)).toBe(true);
+    expect(sim.visible('blue', L.KEEP.red.x - 300, L.KEEP.red.y)).toBe(false);
+    expect(sim.visible('red', L.KEEP.red.x - 300, L.KEEP.red.y)).toBe(true);
+    // The heart of a wood is hidden even right next to it.
+    const wood = WOODS[1];
+    expect(sim.visible('blue', wood.x + wood.w / 2, wood.y + wood.h / 2)).toBe(false);
+    const off = new LaneSim({ seed: 5, fog: false });
+    expect(off.visible('blue', L.KEEP.red.x, L.KEEP.red.y)).toBe(true);
+  });
+
+  it('riders hacking at a wall alone are told so', () => {
+    const sim = new LaneSim({ seed: 6 });
+    bench(sim, 'red');
+    const tower = sim.structures.find(s => s.team === 'red' && s.lane === 1 && s.tier === 2)!;
+    teleport(sim, 'blue', tower.x - tower.r - 15, tower.y);
+    let alone = false;
+    for (let i = 0; i < 60; i++) {
+      sim.step(1 / 60, NO_INPUT);
+      if (sim.laneEvents.some(e => e.type === 'siege' && e.team === 'red' && e.alone)) alone = true;
+    }
+    expect(alone).toBe(true);
+  });
 });

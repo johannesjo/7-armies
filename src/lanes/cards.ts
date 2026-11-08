@@ -17,13 +17,51 @@ export interface HeroMods extends RiderMods {
   banner: number;
   /** Respawn time multiplier. */
   respawn: number;
+  /** Rider weight multiplier (heavy horse barge harder and are harder to stop). */
+  mass: number;
+  /** Horse archers: arrows shot per rider per second (0 = they don't shoot). */
+  archery: number;
 }
 
-export function baseMods(): HeroMods {
-  return {
+/** What kind of horse a commander leads, chosen before the match. */
+export type CommanderKind = 'knights' | 'hussars' | 'archers';
+
+export interface Commander {
+  kind: CommanderKind;
+  title: string;
+  text: string;
+  icon: string;
+  /** Strengths and weaknesses on top of the plain kit. */
+  apply(m: HeroMods): void;
+}
+
+export const COMMANDERS: Record<CommanderKind, Commander> = {
+  knights: {
+    kind: 'knights', title: 'Knights', icon: '🛡',
+    text: 'Heavy horse: tough, hit hardest, win the joust. Fewer riders, a little slower.',
+    apply: m => { m.maxRiders = 8; m.hp = 1.35; m.mass = 1.15; m.strike = 1.25; m.impact = 1.15; m.speed = 0.94; m.turn = 0.9; },
+  },
+  hussars: {
+    kind: 'hussars', title: 'Hussars', icon: '⚔',
+    text: 'Light horse: fast and nimble, more riders. Lighter, so a frontal clash costs more.',
+    apply: m => { m.maxRiders = 12; m.hp = 0.85; m.mass = 0.9; m.speed = 1.08; m.turn = 1.18; m.impact = 0.95; },
+  },
+  archers: {
+    kind: 'archers', title: 'Horse Archers', icon: '🏹',
+    text: 'Shoot on the move at anything near. Weak in a charge — circle, don\'t crash.',
+    apply: m => { m.maxRiders = 10; m.hp = 0.8; m.impact = 0.55; m.strike = 0.7; m.archery = 0.42; },
+  },
+};
+
+export const COMMANDER_KINDS = Object.keys(COMMANDERS) as CommanderKind[];
+
+export function baseMods(kind: CommanderKind = 'knights'): HeroMods {
+  const m: HeroMods = {
     speed: 1, turn: 1, impact: 1, shock: 1, strike: 1, arrows: 1,
-    maxRiders: L.HERO_START, hp: 1, siege: 1, regen: 0, remount: Infinity, banner: 0, respawn: 1,
+    maxRiders: L.HERO_START, hp: 1, siege: 1, regen: 0, remount: Infinity, banner: 0, respawn: 1, mass: 1, archery: 0,
   };
+  COMMANDERS[kind].apply(m);
+  return m;
 }
 
 export type CardId =
@@ -100,8 +138,8 @@ export const CARDS: Record<CardId, Card> = {
 export const CARD_IDS = Object.keys(CARDS) as CardId[];
 
 /** A commander's kit from the cards picked so far. */
-export function modsFromPicks(picks: readonly CardId[]): HeroMods {
-  const m = baseMods();
+export function modsFromPicks(picks: readonly CardId[], kind: CommanderKind = 'knights'): HeroMods {
+  const m = baseMods(kind);
   for (const id of picks) CARDS[id].apply(m);
   return m;
 }

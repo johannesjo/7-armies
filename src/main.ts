@@ -1,6 +1,7 @@
 import { THEMES, Theme, ThemeName } from './theme';
 import { ChargeMode, ChargeResult } from './charge/mode';
 import { LaneMode, LaneResult } from './lanes/mode';
+import { CommanderKind } from './lanes/cards';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
@@ -107,7 +108,7 @@ function onLanesEnd(result: LaneResult): void {
   const mins = Math.floor(result.time / 60);
   const secs = String(Math.floor(result.time % 60)).padStart(2, '0');
   resultStatsEl.innerHTML = [
-    `<b style="font-size:1.4em">Level ${result.level}</b> · rival level ${result.rivalLevel}`,
+    `<b style="font-size:1.4em">Level ${result.level}</b> ${result.commander} · rival: level ${result.rivalLevel} ${result.rivalCommander}`,
     `Enemy towers destroyed: ${result.towers}`,
     `Rival commander slain: ${result.heroKills} · your squadron lost: ${result.deaths}`,
     `Enemies ridden down: ${result.kills}`,
@@ -118,6 +119,26 @@ function onLanesEnd(result: LaneResult): void {
   rematchBtn.focus();
 }
 
+/** Lanes: first choose your kind of horse. */
+function showCommanderPick(): void {
+  promptScreen.classList.add('picking');
+  (document.querySelector('#ln-pick .ln-cmd') as HTMLButtonElement | null)?.focus();
+}
+
+document.querySelectorAll<HTMLButtonElement>('#ln-pick .ln-cmd').forEach(btn => {
+  btn.addEventListener('click', () => {
+    promptScreen.classList.remove('picking');
+    laneKind = btn.dataset.kind as CommanderKind;
+    startLanes();
+  });
+});
+document.getElementById('ln-pick-back')!.addEventListener('click', () => {
+  promptScreen.classList.remove('picking');
+  lanesBtn.focus();
+});
+
+let laneKind: CommanderKind = 'knights';
+
 async function startLanes(): Promise<void> {
   if (gameFailed) return;
   lastMode = 'lanes';
@@ -125,6 +146,7 @@ async function startLanes(): Promise<void> {
   applyBodyTheme();
   showScreen('charge');
   laneMode ??= new LaneMode({ onEnd: onLanesEnd, onQuit: returnToMenu });
+  laneMode.commander = laneKind;
   await laneMode.start(currentTheme());
 }
 
@@ -150,7 +172,7 @@ window.addEventListener('error', showGameError);
 window.addEventListener('unhandledrejection', showGameError);
 reloadBtn.addEventListener('click', () => window.location.reload());
 chargeBtn.addEventListener('click', startCharge);
-lanesBtn.addEventListener('click', startLanes);
+lanesBtn.addEventListener('click', showCommanderPick);
 rematchBtn.addEventListener('click', () => (lastMode === 'lanes' ? startLanes() : startCharge()));
 newBattleBtn.addEventListener('click', returnToMenu);
 

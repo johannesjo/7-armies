@@ -1353,6 +1353,7 @@ export class ChargeView {
       if (!s.alive) continue;
       const u = this.gfxFor(s);
       u.stamp = stamp;
+      u.root.visible = !this.hiddenAt(s.team, s.x, s.y);
       u.root.position.set(s.x, s.y);
       // Men in the ranks don't all face exactly the same way.
       const quirk = ((s.id * 0.618034) % 1) - 0.5;
@@ -1817,7 +1818,7 @@ export class ChargeView {
     // Battalion standards: a waving team flag over every formed battalion, with a
     // slim morale bar under red flags near the action.
     for (const b of sim.battalions) {
-      if (b.routed) continue;
+      if (b.routed || this.hiddenAt(b.team, b.x, b.y)) continue;
       const color = b.team === 'blue' ? t.blue : t.red;
       const dark = b.team === 'blue' ? t.blueDark : t.redDark;
       const px = b.x - Math.cos(b.facing) * b.spacing * 0.6;
@@ -1859,7 +1860,7 @@ export class ChargeView {
     // Banners on other squadrons' leaders (allied troops also get a JOIN tag).
     for (const sq of sim.squadrons) {
       const SL = sq.riders[0];
-      if (sq === sim.player || !SL) continue;
+      if (sq === sim.player || !SL || this.hiddenAt(sq.team, SL.x, SL.y)) continue;
       const color = sq.team === 'blue' ? t.blue : t.red;
       const bx = SL.x - Math.cos(SL.facing) * 3, by = SL.y - Math.sin(SL.facing) * 3;
       const wave = Math.sin(sim.time * 9 + sq.id) * 1.2;
@@ -1918,6 +1919,11 @@ export class ChargeView {
     g.poly([bx, by - 14, bx + 9, by - 12 + wave, bx, by - 9]).fill(t.blue);
   }
 
+  /** Is something of `team` at this point hidden from you (fog of war)? Never in the battle. */
+  protected hiddenAt(_team: Team, _x: number, _y: number): boolean {
+    return false;
+  }
+
   /** Squadrons led by someone who matters (tall, gilt standard): the general. */
   protected chief(sq: Squadron): boolean {
     return sq.ai === 'general';
@@ -1968,9 +1974,9 @@ export class ChargeView {
       if (Math.abs(angleDiff(L.facing, Math.atan2(y - L.y, x - L.x))) > EXPOSE_CONE) return;
       best = o; bestD = d;
     };
-    for (const b of sim.battalions) if (b.team !== L.team && !b.routed) consider(b, b.x, b.y, EXPOSE_RANGE);
+    for (const b of sim.battalions) if (b.team !== L.team && !b.routed && !this.hiddenAt(b.team, b.x, b.y)) consider(b, b.x, b.y, EXPOSE_RANGE);
     for (const sq of sim.squadrons) {
-      if (sq.team === L.team || !sq.riders[0]) continue;
+      if (sq.team === L.team || !sq.riders[0] || this.hiddenAt(sq.team, sq.riders[0].x, sq.riders[0].y)) continue;
       const c = sim.squadCenter(sq);
       consider(sq, c.x, c.y, EXPOSE_RANGE_SQUAD);
     }

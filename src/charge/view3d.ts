@@ -8,7 +8,8 @@ import { CHARGE as C } from './config';
 import { Battalion, ChargeSim, SimEvent, Soldier, Squadron, angleDiff, attackSide } from './sim';
 import { PathPoint } from './path';
 import { DirectZones } from './direct';
-import { COATS, oakGeometry, pineGeometry, standardGeometry, tentGeometry, tuftGeometry, unitGeometry } from './models3d';
+import { COATS, oakGeometry, pineGeometry, standardGeometry, tentGeometry, unitGeometry } from './models3d';
+import { paintDirtTile, paintMeadowTile } from './ground3d';
 
 /** What the charge mode needs from a battlefield renderer (2D or 3D). */
 export interface ChargeRenderer {
@@ -373,43 +374,50 @@ export class ChargeView3D implements ChargeRenderer {
     const geo = new THREE.PlaneGeometry(W + pad * 2, H + pad * 2, Math.round((W + pad * 2) / 2), Math.round((H + pad * 2) / 2));
     geo.rotateX(-Math.PI / 2);
     geo.translate(W / 2, 0, H / 2);
-    const n1 = fbm(11, 4), n2 = fbm(23, 3), n3 = fbm(37, 3);
-    const pos = geo.attributes.position, col: number[] = [], uv = geo.attributes.uv;
-    const g0 = new THREE.Color(0x486a26), g1 = new THREE.Color(0x688634), g2 = new THREE.Color(0x8a8c46);
-    const d0 = new THREE.Color(0x80623e), d1 = new THREE.Color(0x624a2e), forest = new THREE.Color(0x2c3a1c);
-    const c = new THREE.Color();
+    const n1 = fbm(11, 4), n2 = fbm(23, 3), n3 = fbm(41, 2);
+    const pos = geo.attributes.position, uv = geo.attributes.uv;
+    const tint: number[] = [], dirt: number[] = [];
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i);
-      const a = n1(x * 0.035, z * 0.035), b = n2(x * 0.15, z * 0.15), m = n3(x * 0.5, z * 0.5);
-      c.copy(g0).lerp(g1, Math.min(1, Math.max(0, (a - 0.3) * 2.2)));
-      if (b > 0.55) c.lerp(g2, Math.min(1, (b - 0.55) * 2.6));
-      c.multiplyScalar(0.9 + m * 0.22); // fine mottling
-      const e = Math.min(1, this.earthAt(x, z) * (0.7 + b * 0.6) * 1.5);
-      if (e > 0) c.lerp(d0.clone().lerp(d1, b), e);
-      const out = Math.max(0, Math.max(-x, x - W, -z, z - H)) / 6;
-      if (out > 0) c.lerp(forest, Math.min(1, out));
-      col.push(c.r * 1.18, c.g * 1.18, c.b * 1.18); // the detail map averages ~0.85
-      uv.setXY(i, x / 6, z / 6);
+      const a = n1(x * 0.03, z * 0.03), b = n2(x * 0.12, z * 0.12), p = n3(x * 0.22, z * 0.22);
+      // Broad and patch-sized (a few metres) variation in tone and warmth: soft lighter
+      // and darker patches across the meadow, and the tiling never shows.
+      const k = (0.9 + a * 0.14) * (0.9 + p * 0.2);
+      let r = k * (0.98 + b * 0.06), g = k, bl = k * (0.96 + (1 - b) * 0.06);
+      // Darker forest floor beyond the field.
+      const out = Math.min(1, Math.max(0, Math.max(-x, x - W, -z, z - H)) / 6);
+      r *= 1 - out * 0.55; g *= 1 - out * 0.45; bl *= 1 - out * 0.55;
+      tint.push(r * 1.85, g * 1.74, bl * 2.15); // lifts the painted tile to a sunlit meadow (linear colour)
+      // Where the ground is worn, ragged at the edges.
+      dirt.push(Math.min(1, Math.max(0, (this.earthAt(x, z) * (0.6 + b * 0.8) - 0.12) * 1.8)));
+      uv.setXY(i, x / 13, z / 13);
     }
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    // Painted detail: short brush strokes of lighter and darker tone, tiled.
-    const cv = document.createElement('canvas');
-    cv.width = cv.height = 512;
-    const ctx = cv.getContext('2d')!;
-    ctx.fillStyle = '#d4d4d4';
-    ctx.fillRect(0, 0, 512, 512);
-    for (let i = 0; i < 11000; i++) {
-      const x = hash(i, 11) * 512, y = hash(i, 12) * 512, l = 3 + hash(i, 13) * 10, a = -Math.PI / 2 + (hash(i, 14) - 0.5) * 1.4;
-      const v = Math.floor(105 + hash(i, 15) * 150);
-      ctx.strokeStyle = `rgba(${v},${v},${v},${0.35 + hash(i, 16) * 0.4})`;
-      ctx.lineWidth = 1 + hash(i, 17) * 2;
-      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); ctx.stroke();
-    }
-    const tex = new THREE.CanvasTexture(cv);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    const ground = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, map: tex }));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(tint, 3));
+    geo.setAttribute('aDirt', new THREE.Float32BufferAttribute(dirt, 1));
+    const tile = (cv: HTMLCanvasElement) => {
+      const t = new THREE.CanvasTexture(cv);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = 4;
+      return t;
+    };
+    const grass = tile(paintMeadowTile()), earth = tile(paintDirtTile());
+    // Not tone-mapped: the tone curve's toe crushed the darker channels into acid green.
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: grass, toneMapped: false });
+    // Blend the meadow and the dirt per vertex.
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uDirt = { value: earth };
+      sh.vertexShader = 'attribute float aDirt;\nvarying float vDirt;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvDirt = aDirt;');
+      sh.fragmentShader = 'uniform sampler2D uDirt;\nvarying float vDirt;\n' + sh.fragmentShader.replace('#include <map_fragment>', `
+        #ifdef USE_MAP
+          // The meadow mixed with a rotated, rescaled copy of itself: no visible repeat.
+          vec2 uv2 = mat2(0.8, -0.6, 0.6, 0.8) * vMapUv * 0.43 + vec2(0.31, 0.17);
+          vec4 gC = mix(texture2D(map, vMapUv), texture2D(map, uv2), 0.45);
+          vec4 dC = texture2D(uDirt, vMapUv * 1.4);
+          diffuseColor *= mix(gC, dC, smoothstep(0.0, 1.0, vDirt));
+        #endif`);
+    };
+    const ground = new THREE.Mesh(geo, mat);
     ground.receiveShadow = true;
     this.scene.add(ground);
   }
@@ -458,15 +466,9 @@ export class ChargeView3D implements ChargeRenderer {
     }
     oaks.forEach((list, v) => this.scatter(this.unrig(oakGeometry(v)), list));
     this.scatter(this.unrig(pineGeometry()), pines);
-    // Grass tufts and stones in the open field.
-    const tufts: { x: number; z: number; s: number; r: number }[] = [], rocks: { x: number; z: number; s: number; r: number }[] = [];
-    for (let i = 0; i < 16000; i++) {
-      const x = rnd() * W, z = rnd() * H;
-      if (this.earthAt(x, z) > 0.2) continue;
-      tufts.push({ x, z, s: 0.7 + rnd() * 0.9, r: rnd() * 6.28 });
-    }
+    // Stones in the open field (the meadow itself is painted, no tufts).
+    const rocks: { x: number; z: number; s: number; r: number }[] = [];
     for (let i = 0; i < 160; i++) rocks.push({ x: rnd() * W, z: rnd() * H, s: 0.3 + rnd() * 0.5, r: rnd() * 6.28 });
-    this.scatter(tuftGeometry(), tufts, false, new THREE.MeshLambertMaterial({ color: 0x6a8a30, side: THREE.DoubleSide }));
     this.scatter(new THREE.IcosahedronGeometry(0.5, 0).scale(1.3, 0.6, 1), rocks, true, new THREE.MeshLambertMaterial({ color: 0x8a867a, flatShading: true }));
     // Camps: blue tents round each rally ring, red tents along the far edge.
     const blueTents: { x: number; z: number; s: number; r: number }[] = [], redTents: { x: number; z: number; s: number; r: number }[] = [];

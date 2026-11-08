@@ -244,19 +244,3 @@ export function tentGeometry(team: Team): THREE.BufferGeometry {
     P(box(0.6, 0.35, 0.02), teamColor(team), 0.3, 3.4, 0),
   ]);
 }
-
-/** A tuft of three grass blades as flat triangles (cheap enough to scatter by the thousand). */
-export function tuftGeometry(): THREE.BufferGeometry {
-  const pos: number[] = [];
-  for (let i = 0; i < 3; i++) {
-    const a = (i / 3) * Math.PI * 2, lx = Math.cos(a) * 0.06, lz = Math.sin(a) * 0.06;
-    const tx = Math.cos(a) * 0.14, tz = Math.sin(a) * 0.14;
-    pos.push(lx - lz * 0.4, 0, lz + lx * 0.4, lx + lz * 0.4, 0, lz - lx * 0.4, tx, 0.36 + i * 0.05, tz);
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  const n = new Float32Array(pos.length);
-  for (let i = 1; i < n.length; i += 3) n[i] = 1; // lit like the ground
-  g.setAttribute('normal', new THREE.BufferAttribute(n, 3));
-  return g;
-}

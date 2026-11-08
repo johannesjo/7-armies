@@ -126,7 +126,10 @@
       user-select: none;
       -webkit-user-select: none;
     }
-    #charge-canvas { position: absolute; inset: 0; }
+    /* The controls listen on this container: block browser gestures here (not just on the
+       canvas), or a held finger is taken for a scroll/zoom and cancelled — the 3D view hides
+       the Pixi canvas, so touches land on the container itself. */
+    #charge-canvas { position: absolute; inset: 0; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
     #charge-canvas canvas { display: block; touch-action: none; }
     #charge-hud {
       position: absolute;
@@ -558,6 +561,7 @@
           <option value="night">Night</option>
           <option value="mini">Miniatures (prototype)</option>
           <option value="ink">Ink &amp; watercolour (prototype)</option>
+          <option value="3d">3D (prototype)</option>
         </select>
       </label>
     </div>
@@ -625,6 +629,7 @@
       <button id="ch-resume-btn">Resume</button>
       <button id="ch-controls-btn">Controls: point &amp; ride</button>
       <button id="ch-text-btn" aria-pressed="false">Combat text: off</button>
+      <button id="ch-quality-btn">Graphics (3D): auto</button>
       <button id="ch-quit-btn">Quit to menu</button>
     </div>
   </div>

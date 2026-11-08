@@ -4,6 +4,8 @@ import { CHARGE as C } from './config';
 import { ChargeSim, SimEvent, NO_INPUT, ChargeInput } from './sim';
 import { createBattleSpecs, createSquadSpecs } from './scenario';
 import { ChargeView, mixColor } from './view';
+import type { ChargeRenderer } from './view3d';
+import { QualitySetting, readQuality, resolveQuality, writeQuality } from './quality3d';
 import { ChargeControls, Joystick, StrokeHandler } from './input';
 import { RiderPath, StrokePace } from './path';
 import { ChargeAudio } from './audio';
@@ -94,7 +96,7 @@ function hex(c: number): string {
 export class ChargeMode {
   protected app: Application | null = null;
   protected appReady: Promise<void> | null = null;
-  protected view: ChargeView | null = null;
+  protected view: ChargeRenderer | null = null;
   protected sim: ChargeSim | null = null;
   protected controls: ChargeControls;
   protected paused = false;
@@ -116,6 +118,7 @@ export class ChargeMode {
   protected readonly controlsBtn = $('ch-controls-btn');
   protected readonly joystick = new Joystick($('ch-joy-zone'), $('ch-joy'), $('ch-joy-knob'));
   protected readonly textBtn = $('ch-text-btn');
+  protected readonly qualityBtn = $('ch-quality-btn');
   /** Floating combat text, combo counter and banners — off by default for a cleaner screen. */
   protected combatText = readFlag(TEXT_KEY, false);
   protected readonly pace = new StrokePace(800);
@@ -175,6 +178,12 @@ export class ChargeMode {
       this.updateTextBtn();
     });
     this.updateTextBtn();
+    this.qualityBtn.addEventListener('click', () => {
+      const order: QualitySetting[] = ['auto', 'high', 'low'];
+      writeQuality(order[(order.indexOf(readQuality()) + 1) % order.length]);
+      this.updateQualityBtn();
+    });
+    this.updateQualityBtn();
     this.controls.onPause = () => this.togglePause();
     this.controls.handler = this.strokes;
     $('ch-pause-btn').addEventListener('click', () => this.togglePause());
@@ -198,7 +207,12 @@ export class ChargeMode {
     return new ChargeSim(createBattleSpecs(), { seed, squads: createSquadSpecs() });
   }
 
-  protected createView(app: Application, theme: Theme): ChargeView {
+  protected async createView(app: Application, theme: Theme): Promise<ChargeRenderer> {
+    if (theme.artStyle === '3d') {
+      // The 3D renderer (and three.js) only download when that style is picked.
+      const { ChargeView3D } = await import('./view3d');
+      return new ChargeView3D(app, theme, this.host);
+    }
     return new ChargeView(app, theme);
   }
 
@@ -251,7 +265,7 @@ export class ChargeMode {
     // Dev builds expose the sim for scripted screenshots and debugging.
     if (import.meta.env.DEV) Object.assign(window, { chargeSim: this.sim, chargeMode: this });
     this.audio.start();
-    this.view = this.createView(app, theme);
+    this.view = await this.createView(app, theme);
     this.view.setCombatText(this.combatText);
     app.resize();
     this.resize();
@@ -420,6 +434,12 @@ export class ChargeMode {
     return this.cachedZones ??= directZones(this.host.clientWidth, this.host.clientHeight);
   }
 
+  protected updateQualityBtn(): void {
+    const q = readQuality();
+    const now = q === 'auto' ? `auto (${resolveQuality(q)})` : q;
+    this.qualityBtn.textContent = `Graphics (3D): ${now} — next battle`;
+  }
+
   protected updateTextBtn(): void {
     this.textBtn.textContent = `Combat text: ${this.combatText ? 'on' : 'off'}`;
     this.textBtn.setAttribute('aria-pressed', String(this.combatText));
@@ -529,7 +549,7 @@ export class ChargeMode {
   }
 
   /** Draw the frame (the lanes mode adds its own events). */
-  protected renderFrame(sim: ChargeSim, view: ChargeView, dt: number): void {
+  protected renderFrame(sim: ChargeSim, view: ChargeRenderer, dt: number): void {
     view.render(sim, this.frameEvents, dt);
   }
 

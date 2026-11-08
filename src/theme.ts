@@ -1,5 +1,5 @@
 /** How the cavalry mode draws units, ground and effects (prototype styles besides classic). */
-export type ArtStyle = 'classic' | 'mini' | 'ink' | 'rts';
+export type ArtStyle = 'classic' | 'mini' | 'ink' | 'rts' | '3d';
 
 export interface Theme {
   /** Cavalry-mode art style (default classic). */
@@ -320,7 +320,10 @@ export const RTS_THEME: Theme = {
   grassDark: 0x98aa4e, grassLight: 0xc6ca72, grassDry: 0xd6c47e, dirt: 0xa88c5c,
 };
 
-export type ThemeName = 'field' | 'parchment' | 'night' | 'mini' | 'ink' | 'rts';
+/** Prototype: real-time 3D battlefield (the charge mode only; tactics uses the field look). */
+export const THREE_D_THEME: Theme = { ...FIELD_THEME, artStyle: '3d' };
+
+export type ThemeName = 'field' | 'parchment' | 'night' | 'mini' | 'ink' | 'rts' | '3d';
 
 export const THEMES: Record<ThemeName, Theme> = {
   field: FIELD_THEME,
@@ -329,4 +332,5 @@ export const THEMES: Record<ThemeName, Theme> = {
   mini: MINI_THEME,
   ink: INK_THEME,
   rts: RTS_THEME,
+  '3d': THREE_D_THEME,
 };

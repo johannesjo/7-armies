@@ -1,9 +1,9 @@
 import { Application } from 'pixi.js';
-import { Theme } from '../theme';
+import { FIELD_THEME, Theme } from '../theme';
 import { ChargeMode } from '../charge/mode';
 import { CHARGE as C } from '../charge/config';
 import { ChargeSim, SimEvent } from '../charge/sim';
-import { ChargeView } from '../charge/view';
+import type { ChargeRenderer } from '../charge/view3d';
 import { LANES as L, xpToNext } from './config';
 import { CARDS } from './cards';
 import { WOODS } from './map';
@@ -78,8 +78,9 @@ export class LaneMode extends ChargeMode {
     return new LaneSim({ seed });
   }
 
-  protected override createView(app: Application, theme: Theme): ChargeView {
-    return new LaneView(app, theme);
+  protected override async createView(app: Application, theme: Theme): Promise<ChargeRenderer> {
+    // The 3D renderer only knows the battle's field so far: lanes use the painted field look.
+    return new LaneView(app, theme.artStyle === '3d' ? FIELD_THEME : theme);
   }
 
   protected override intro(): void {
@@ -101,7 +102,7 @@ export class LaneMode extends ChargeMode {
     for (const e of (sim as LaneSim).laneEvents) this.frameLaneEvents.push(e);
   }
 
-  protected override renderFrame(sim: ChargeSim, view: ChargeView, dt: number): void {
+  protected override renderFrame(sim: ChargeSim, view: ChargeRenderer, dt: number): void {
     super.renderFrame(sim, view, dt);
     const ls = sim as LaneSim;
     (view as LaneView).laneEvents(ls, this.frameLaneEvents);

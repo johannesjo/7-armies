@@ -311,13 +311,13 @@ export const INK_THEME: Theme = {
   textOutline: 0xefe5ca,
 };
 
-/** Prototype: classic painted-RTS look — vivid, chunky, sunlit. */
+/** Prototype: classic pre-rendered RTS look — olive meadow, natural kit, strong team colours. */
 export const RTS_THEME: Theme = {
   ...FIELD_THEME,
   artStyle: 'rts',
-  blue: 0x1f55e0, blueDark: 0x0d2a80, red: 0xd8261c, redDark: 0x7a0f0b,
-  steel: 0xd8d8de, steelDark: 0x55555e, wood: 0x9a6a38, leather: 0x7a5030, trim: 0xfff2c4,
-  grassDark: 0x3d7a22, grassLight: 0x86b84a, grassDry: 0xc0b25e, dirt: 0xa07848,
+  blue: 0x2236e0, blueDark: 0x0e186e, red: 0xd01c14, redDark: 0x5c0a06,
+  steel: 0xb8bcc2, steelDark: 0x4a4e56, wood: 0x8a6038, leather: 0x6a4626, trim: 0xe8dcc0,
+  grassDark: 0x98aa4e, grassLight: 0xc6ca72, grassDry: 0xd6c47e, dirt: 0xa88c5c,
 };
 
 export type ThemeName = 'field' | 'parchment' | 'night' | 'mini' | 'ink' | 'rts';

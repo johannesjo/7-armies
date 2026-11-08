@@ -2,6 +2,9 @@ import { UnitType } from '../types';
 
 /** Tunables for the cavalry action mode. World units match the tactics map scale. */
 export const CHARGE = {
+  /** Phones (short side under 600 px): frame this many world units across the short side. */
+  PHONE_VIEW_SPAN: 310,
+
   WORLD_W: 2400,
   WORLD_H: 1500,
   FRONT_Y: 760,

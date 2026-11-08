@@ -437,8 +437,8 @@ export class ChargeView {
   protected baseZoom(): number {
     const long = Math.max(this.viewW, this.viewH), short = Math.min(this.viewW, this.viewH);
     let zoom = long / 740;
-    // Phones: frame ~260 world units across the short side so units aren't tiny.
-    if (short < 600) zoom = Math.max(zoom, short / 260);
+    // Phones: frame a fixed span of the field across the short side, so units aren't tiny.
+    if (short < 600) zoom = Math.max(zoom, short / C.PHONE_VIEW_SPAN);
     // Dev builds: window.chargeZoom scales the camera (for close-up recordings).
     const devZoom = import.meta.env.DEV ? (window as { chargeZoom?: number }).chargeZoom ?? 1 : 1;
     return Math.max(0.8, Math.min(3, zoom)) * devZoom;

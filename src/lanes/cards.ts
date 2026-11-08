@@ -34,6 +34,8 @@ export interface Ability {
   title: string;
   icon: string;
   text: string;
+  /** Short name for the round button. */
+  short: string;
   /** Seconds before it can be used again. */
   cooldown: number;
   /** Seconds it lasts (0 = instant). */
@@ -41,8 +43,8 @@ export interface Ability {
 }
 
 export const ABILITIES: Record<AbilityId, Ability> = {
-  thunder: { id: 'thunder', title: 'Thunder Charge', icon: '📯', text: '4 s: faster, trample twice as hard, terrify', cooldown: L.THUNDER_COOLDOWN, duration: L.THUNDER_TIME },
-  storm: { id: 'storm', title: 'Arrow Storm', icon: '🏹', text: `Every rider looses ${L.STORM_ARROWS} arrows at once`, cooldown: L.STORM_COOLDOWN, duration: 0 },
+  thunder: { id: 'thunder', title: 'Thunder Charge', short: 'Charge', icon: '📯', text: '4 s: faster, trample twice as hard, terrify', cooldown: L.THUNDER_COOLDOWN, duration: L.THUNDER_TIME },
+  storm: { id: 'storm', title: 'Arrow Storm', short: 'Storm', icon: '🏹', text: `Every rider looses ${L.STORM_ARROWS} arrows at once`, cooldown: L.STORM_COOLDOWN, duration: 0 },
 };
 
 export interface Commander {
@@ -69,7 +71,7 @@ export const COMMANDERS: Record<CommanderKind, Commander> = {
     text: 'Harass and kite: many fast, fragile riders who shoot on the move. Barely trample — circle, don\'t crash. Weak at walls.',
     apply: m => {
       m.maxRiders = 12; m.hp = 0.7; m.mass = 0.85; m.impact = 0.3; m.strike = 0.5;
-      m.speed = 1.1; m.turn = 1.2; m.siege = 0.6; m.archery = 0.6;
+      m.speed = 1.1; m.turn = 1.2; m.siege = 0.5; m.archery = 0.55;
     },
   },
 };

@@ -99,7 +99,7 @@ export class LaneMode extends ChargeMode {
   private setupAbility(): void {
     const a = ABILITIES[COMMANDERS[this.commander].ability];
     this.abilityBtn.querySelector('.ln-ab-icon')!.textContent = a.icon;
-    this.abilityBtn.querySelector('.ln-ab-name')!.textContent = a.title;
+    this.abilityBtn.querySelector('.ln-ab-name')!.textContent = a.short;
     this.abilityBtn.title = `${a.title} (Q) — ${a.text}`;
     this.abilityBtn.setAttribute('aria-label', `${a.title}: ${a.text}`);
   }

@@ -1784,7 +1784,7 @@ export class ChargeView {
       g.roundRect(x, y, w * m, h, 1.2).fill({ color: mc, alpha: 0.9 });
     }
 
-    this.drawCalls(g, sim);
+    this.drawCalls(sim);
 
     // Banners on other squadrons' leaders (allied troops also get a JOIN tag).
     for (const sq of sim.squadrons) {
@@ -1849,10 +1849,10 @@ export class ChargeView {
   }
 
   /**
-   * Calls for help: a small marker over the enemy battalion to break (no ring round
-   * it); off screen, an arrow at the screen's edge points the way (red when time is short).
+   * Calls for help: nothing is drawn on the enemy battalion itself (the banner says
+   * where); off screen, an arrow at the screen's edge points the way (red when time is short).
    */
-  private drawCalls(g: Graphics, sim: ChargeSim): void {
+  private drawCalls(sim: ChargeSim): void {
     const t = this.theme;
     const sg = this.callG;
     sg.clear();
@@ -1863,10 +1863,6 @@ export class ChargeView {
       const pulse = 0.55 + 0.45 * Math.sin(sim.time * 6 + c.id);
       const urgent = left < 0.3;
       const color = urgent ? t.labelWarn : t.hpMid;
-      // A small marker bobbing over the battalion's standard, pointing down at it.
-      const bob = Math.sin(sim.time * 5 + c.id) * 2;
-      const mx = b.x - Math.cos(b.facing) * b.spacing * 0.6, my = b.y - Math.sin(b.facing) * b.spacing * 0.6 - 36 + bob;
-      g.poly([mx - 5, my - 6, mx + 5, my - 6, mx, my + 2]).fill({ color, alpha: 0.75 + 0.25 * pulse }).stroke({ width: 1, color: 0x1a140a, alpha: 0.6 });
 
       // Off screen: an arrow at the edge, pointing at it.
       const p = this.worldToScreen(b);

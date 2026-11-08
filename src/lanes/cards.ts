@@ -183,7 +183,9 @@ export function modsFromPicks(picks: readonly CardId[], kind: CommanderKind = 'k
 /** Three different cards (fewer if the pool runs dry), weighted, none already maxed. */
 export function drawOffer(picks: readonly CardId[], rand: () => number, kind: CommanderKind = 'knights', size = 3): CardId[] {
   const taken = (id: CardId) => picks.filter(p => p === id).length;
-  const pool = CARD_IDS.filter(id => taken(id) < CARDS[id].max && (!CARDS[id].only || CARDS[id].only!.includes(kind)));
+  const full = modsFromPicks(picks, kind).maxRiders >= L.HERO_MAX; // a full wedge: no more riders to add
+  const pool = CARD_IDS.filter(id => taken(id) < CARDS[id].max && (!CARDS[id].only || CARDS[id].only!.includes(kind))
+    && !(id === 'riders' && full));
   const out: CardId[] = [];
   while (out.length < size && pool.length > 0) {
     const total = pool.reduce((s, id) => s + CARDS[id].weight, 0);

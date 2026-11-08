@@ -135,7 +135,6 @@ describe('lanes sim', () => {
     sim.step(1 / 60);
     expect(sim.me.dead).toBe(true);
     expect(sim.laneEvents.some(e => e.type === 'hero-down' && e.team === 'blue')).toBe(true);
-    expect(sim.rival.level).toBeGreaterThanOrEqual(2); // the kill is worth a level
     const wait = sim.me.respawnAt - sim.time;
     expect(wait).toBeGreaterThan(L.RESPAWN_BASE);
     for (let i = 0; i < Math.ceil(wait * 60) + 2; i++) sim.step(1 / 60);
@@ -234,8 +233,9 @@ describe('lanes commanders, abilities and fog', () => {
     expect(sim.useAbility('blue')).toBe(false); // nobody in range at the keep
     for (let i = 0; i < 70; i++) sim.step(1 / 60, NO_INPUT);
     const foe = sim.battalions.find(x => x.team === 'red')!;
-    teleport(sim, 'blue', foe.x - 200, foe.y);
-    sim.step(1 / 60, NO_INPUT);
+    // Ride up and let the vision catch up (it is worked out five times a second).
+    for (let i = 0; i < 20; i++) { teleport(sim, 'blue', foe.x - 200, foe.y); sim.step(1 / 60, NO_INPUT); }
+    sim.arrows.length = 0;
     const before = sim.arrows.filter(a => a.team === 'blue').length;
     expect(sim.useAbility('blue')).toBe(true);
     const after = sim.arrows.filter(a => a.team === 'blue').length;
@@ -321,6 +321,40 @@ describe('lanes commanders, abilities and fog', () => {
       low = b.routed ? 0 : Math.min(low, b.morale);
     }
     expect(100 - low).toBeGreaterThan(30);
+  });
+
+  it('nobody shoots blind into the fog: a commander hidden in the woods is left alone', () => {
+    const sim = new LaneSim({ seed: 9, commander: 'archers', rivalCommander: 'knights' });
+    const wood = WOODS[1];
+    const hide = { x: wood.x + wood.w / 2, y: wood.y + wood.h / 2 };
+    let hits = 0;
+    for (let i = 0; i < 120; i++) {
+      // Rival parked in the heart of the wood; our archers just outside it, in bowshot.
+      sim.rival.sq.riders.forEach((r, k) => { r.x = hide.x + (k % 3) * 8; r.y = hide.y + Math.floor(k / 3) * 8; r.vx = r.vy = r.speed = 0; });
+      teleport(sim, 'blue', hide.x, wood.y + wood.h + 60);
+      sim.step(1 / 60, NO_INPUT);
+      for (const e of sim.events) if (e.type === 'rider-hit' && !e.mine) hits++;
+    }
+    expect(sim.visible('blue', hide.x, hide.y)).toBe(false);
+    expect(hits).toBe(0);
+  });
+
+  it('a commander lost far from the enemy commander is no kill of his', () => {
+    const sim = new LaneSim({ seed: 10 });
+    // The rival is at his keep; our squadron dies by the far side of the field.
+    for (const r of sim.riders) sim['damageRider'](r, 999, 0, false, 'front');
+    sim.step(1 / 60, NO_INPUT);
+    const down = sim.laneEvents.find(e => e.type === 'hero-down' && e.team === 'blue');
+    expect(down && down.type === 'hero-down' && down.slain).toBe(false);
+    expect(sim.rival.kills).toBe(0);
+    expect(sim.rival.level).toBe(1);
+  });
+
+  it('Fresh Riders stops turning up once the wedge is full', () => {
+    const rand = mulberry32(4);
+    const picks = Array(11).fill('riders'); // archers: 12 + 33 = 45, the cap
+    expect(modsFromPicks(picks, 'archers').maxRiders).toBe(L.HERO_MAX);
+    for (let i = 0; i < 200; i++) expect(drawOffer(picks, rand, 'archers')).not.toContain('riders');
   });
 
   it('fog: you see round your own troops, not the far side of the field', () => {

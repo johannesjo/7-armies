@@ -1,7 +1,7 @@
 import { Application, Container, Graphics, Sprite, Texture } from 'pixi.js';
 import { Theme } from '../theme';
 import { ChargeView, FieldLayout, mixColor } from '../charge/view';
-import { ChargeSim, SimEvent, Soldier, Squadron, mulberry32 } from '../charge/sim';
+import { ChargeSim, SimEvent, Soldier, Squadron } from '../charge/sim';
 import { RiderGear } from '../charge/figure-art';
 import { CHARGE as C } from '../charge/config';
 import { HORSE_VARIANTS } from '../unit-art';
@@ -198,7 +198,6 @@ export class LaneView extends ChargeView {
         this.burstDust(e.x, e.y, e.angle, 1);
       } else if (e.type === 'ability') {
         if (e.team !== 'blue' && this.hiddenAt(e.team, e.x, e.y)) continue;
-        const color = e.team === 'blue' ? t.blue : t.red;
         const a = ABILITIES[e.ability];
         const mine = e.team === 'blue';
         this.burstDust(e.x, e.y, 0, e.ability === 'storm' ? 3 : 8);
@@ -214,7 +213,7 @@ export class LaneView extends ChargeView {
         if (Ld) this.popup(Ld.x, Ld.y - 30, `LEVEL ${e.level}!`, t.hpMid, 20, 1.6);
       } else if (e.type === 'hero-down') {
         this.burstDust(e.x, e.y, 0, 10);
-        this.popup(e.x, e.y - 24, e.team === 'blue' ? 'Your squadron is lost' : 'Rival commander slain!', e.team === 'blue' ? t.labelWarn : t.elevationBonus, 20, 2);
+        this.popup(e.x, e.y - 24, e.team === 'blue' ? 'Your squadron is lost' : e.slain ? 'Rival commander slain!' : 'Rival commander fallen', e.team === 'blue' ? t.labelWarn : t.elevationBonus, 20, 2);
       }
     }
   }

@@ -318,6 +318,7 @@
       right: max(12px, env(safe-area-inset-right, 0px));
       display: flex;
       gap: 8px;
+      z-index: 4;
     }
     #ch-buttons button {
       padding: 4px 12px;
@@ -334,11 +335,13 @@
       inset: 0;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
+      justify-content: safe center;
       gap: 16px;
+      padding: 16px 0;
+      overflow-y: auto;
       background: rgba(0,0,0,0.6);
       color: #eee;
-      z-index: 2;
+      z-index: 5;
     }
     #ch-pause.active { display: flex; }
     #ch-pause h2 { font-size: 40px; letter-spacing: 4px; text-transform: uppercase; }
@@ -548,9 +551,9 @@
       }
       #charge-screen[data-mode="lanes"][data-controls="joystick"] #ln-cards .ln-text { display: none; }
     }
-    /* Never let a card swallow a thumb meant for the stick. */
-    #ch-joy-zone { z-index: 3; }
-    /* Abilities: two round buttons above the minimap (left thumb), keys Q and E. */
+    /* Lanes: never let a card swallow a thumb meant for the stick (buttons and pause stay on top). */
+    #charge-screen[data-mode="lanes"] #ch-joy-zone { z-index: 3; }
+    /* The ability: one round button above the minimap (left thumb), key Q. */
     #ln-abilities {
       position: absolute;
       left: max(12px, env(safe-area-inset-left, 0px));
@@ -719,8 +722,8 @@
     </div>
     <div id="ch-pause" role="dialog" aria-modal="true" aria-label="Paused">
       <h2>Paused</h2>
-      <p class="ch-help ln-only">Lanes: one commander a side. Waves of foot march down all three lanes every 30 seconds. Charge enemy battalions in the flank (×2) or rear (×3) to break them, and help your own foot pull down the enemy towers — outer, then inner, then the keep. Towers shoot your foot first, but they turn on you if you ride in alone or attack their commander under the walls: dodge the red circles. Ride home into the ring round your keep to heal and to fill your squadron back up. Every enemy that falls near you gives experience; each level, choose one of three cards (keys 1–3). Knights break foot by charging its flank or rear; horse archers by circling at bowshot — their arrows shake morale, but their charge barely dents a battalion. Each kind of horse has one ability (Q or the round button): Knights' Thunder Charge (4 s faster, trampling twice as hard), Horse Archers' Arrow Storm (every rider looses three arrows at once). You only see what your foot, your squadron and your towers see — and only a little way into the woods. Lose all your riders and you're out until you can ride again. Break their keep to win.</p>
-      <p class="ch-help"><span class="ctl-joystick">Steer with the stick at the bottom right — push further to ride faster, into the outer ring to gallop.</span><span class="ctl-direct">Hold your finger or the mouse button where you want to ride — the further from your squadron, the faster it goes, and far out it gallops.</span><span class="ctl-route">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it.</span> Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Wheel wide: on a sharp turn the riders on the outside of your wedge fall behind, and a loose wedge loses to a tight one. Hit enemy horsemen in the flank or rear to scatter them — or lead pursuing knights onto our pikes and archers. Pikes facing you will stop a charge, and enemy knights will hunt you. Keep moving — riders that stall in the crowd get pulled down. Ride into allied cavalry troops to take them under your command (up to 45 riders, a full wedge); the two blue camps behind our wings are pit stops — ride through one and its waiting riders fall in behind you, and your wounded are healed at once. The longer you stay away, the more riders gather there. A full gallop hits hardest but turns wide; slow down to turn tight.</p>
+      <p class="ch-help ln-only">Lanes: one commander a side. Waves of foot march down all three lanes every 25 seconds. Charge enemy battalions in the flank (×2) or rear (×3) to break them, and help your own foot pull down the enemy towers — outer, then inner, then the keep. Towers shoot your foot first, but they turn on you if you ride in alone or attack their commander under the walls: dodge the red circles. Ride home into the ring round your keep to heal and to fill your squadron back up. Every enemy that falls near you gives experience; each level, choose one of three cards (keys 1–3). Knights break foot by charging its flank or rear; horse archers by circling at bowshot — their arrows shake morale, but their charge barely dents a battalion. Each kind of horse has one ability (Q or the round button): Knights' Thunder Charge (4 s faster, trampling twice as hard), Horse Archers' Arrow Storm (every rider looses three arrows at once). You only see what your foot, your squadron and your towers see — and only a little way into the woods. Lose all your riders and you're out until you can ride again. Break their keep to win.</p>
+      <p class="ch-help ch-only"><span class="ctl-joystick">Steer with the stick at the bottom right — push further to ride faster, into the outer ring to gallop.</span><span class="ctl-direct">Hold your finger or the mouse button where you want to ride — the further from your squadron, the faster it goes, and far out it gallops.</span><span class="ctl-route">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it.</span> Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Wheel wide: on a sharp turn the riders on the outside of your wedge fall behind, and a loose wedge loses to a tight one. Hit enemy horsemen in the flank or rear to scatter them — or lead pursuing knights onto our pikes and archers. Pikes facing you will stop a charge, and enemy knights will hunt you. Keep moving — riders that stall in the crowd get pulled down. Ride into allied cavalry troops to take them under your command (up to 45 riders, a full wedge); the two blue camps behind our wings are pit stops — ride through one and its waiting riders fall in behind you, and your wounded are healed at once. The longer you stay away, the more riders gather there. A full gallop hits hardest but turns wide; slow down to turn tight.</p>
       <button id="ch-resume-btn">Resume</button>
       <button id="ch-controls-btn">Controls: point &amp; ride</button>
       <button id="ch-text-btn" aria-pressed="false">Combat text: off</button>

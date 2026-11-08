@@ -78,7 +78,8 @@ export type LaneEvent =
   | { type: 'level'; team: Team; level: number }
   | { type: 'card'; team: Team; card: CardId }
   | { type: 'tower-down'; team: Team; kind: 'tower' | 'keep'; lane: number; x: number; y: number }
-  | { type: 'hero-down'; team: Team; x: number; y: number; respawn: number }
+  /** A commander's last rider fell; `slain` when the enemy commander was there to claim it. */
+  | { type: 'hero-down'; team: Team; x: number; y: number; respawn: number; slain: boolean }
   | { type: 'hero-up'; team: Team; x: number; y: number }
   | { type: 'lane-wave'; index: number }
   /** The siege engines have arrived: walls crumble faster from now on. */
@@ -353,7 +354,8 @@ export class LaneSim extends ChargeSim {
     let best: Soldier | null = null;
     let bestD = range;
     for (const o of near) {
-      if (!o.alive || o.team === h.team || o.fleeing) continue;
+      // Only at what our side can see: no shooting blind into the trees (and giving them away).
+      if (!o.alive || o.team === h.team || o.fleeing || !this.visible(h.team, o.x, o.y)) continue;
       const d = Math.hypot(o.x - r.x, o.y - r.y);
       if (d < bestD) { bestD = d; best = o; }
     }
@@ -613,7 +615,7 @@ export class LaneSim extends ChargeSim {
       const eh = this.heroes[enemy];
       const EL = eh.sq.riders[0];
       const ours = this.heroes[st.team].sq.riders[0];
-      const heroIn = !!EL && Math.hypot(EL.x - st.x, EL.y - st.y) < st.range;
+      const heroIn = !!EL && Math.hypot(EL.x - st.x, EL.y - st.y) < st.range && this.visible(st.team, EL.x, EL.y);
       let squad: Squadron | null = null;
       let bat: Battalion | null = null;
       if (heroIn && ours && Math.hypot(EL.x - ours.x, EL.y - ours.y) < 220) squad = eh.sq;
@@ -644,11 +646,13 @@ export class LaneSim extends ChargeSim {
       }
       const count = keep ? L.KEEP_ARROWS : L.TOWER_ARROWS;
       const power = squad ? (keep ? L.KEEP_POWER : L.TOWER_POWER_RIDER) : L.TOWER_POWER_FOOT;
-      this.loose(st, aim, spread, count, power, squad !== null && squad === this.player);
+      // A volley at foot still only hits horsemen in the circle at the horsemen's rate.
+      const riderPower = squad ? power : L.TOWER_POWER_RIDER;
+      this.loose(st, aim, spread, count, power, riderPower, squad !== null && squad === this.player);
     }
   }
 
-  private loose(st: Structure, aim: Vec2, spread: number, count: number, power: number, atPlayer: boolean): void {
+  private loose(st: Structure, aim: Vec2, spread: number, count: number, power: number, riderPower: number, atPlayer: boolean): void {
     const dist = Math.hypot(aim.x - st.x, aim.y - st.y);
     const flight = Math.max(C.ARROW_MIN_FLIGHT, Math.min(C.ARROW_MAX_FLIGHT, dist / C.ARROW_SPEED));
     const id = this.nextVolley++;
@@ -660,7 +664,7 @@ export class LaneSim extends ChargeSim {
       this.arrows.push({
         sx: st.x + Math.cos(sa) * st.r * 0.5, sy: st.y + Math.sin(sa) * st.r * 0.5,
         tx: aim.x + Math.cos(ang) * rr, ty: aim.y + Math.sin(ang) * rr,
-        t: -this.rand() * 0.12, flight, team: st.team, volley: id, power,
+        t: -this.rand() * 0.12, flight, team: st.team, volley: id, power, riderPower,
       });
     }
     this.events.push({ type: 'volley', id, team: st.team, x: aim.x, y: aim.y, radius: spread + 10, flight, atPlayer });
@@ -759,10 +763,16 @@ export class LaneSim extends ChargeSim {
         const wait = Math.min(L.RESPAWN_MAX, L.RESPAWN_BASE + L.RESPAWN_PER_LEVEL * h.level) * h.mods.respawn;
         h.respawnAt = this.time + wait;
         const foe = this.heroes[enemyOf(team)];
-        foe.kills++;
-        this.gainXp(foe, L.XP_HERO_KILL);
         const last = sq.trail[sq.trail.length - 1];
-        this.emit({ type: 'hero-down', team, x: last?.x ?? keep.x, y: last?.y ?? keep.y, respawn: wait });
+        const x = last?.x ?? keep.x, y = last?.y ?? keep.y;
+        // The kill (and its bounty) is the enemy commander's only if he was in the fight.
+        const FL = foe.sq.riders[0];
+        const slain = !!FL && Math.hypot(FL.x - x, FL.y - y) < L.XP_RANGE;
+        if (slain) {
+          foe.kills++;
+          this.gainXp(foe, L.XP_HERO_KILL);
+        }
+        this.emit({ type: 'hero-down', team, x, y, respawn: wait, slain });
         if (h.ai) h.ai.mode = 'lane';
       }
       if (h.dead) {
@@ -1031,7 +1041,7 @@ export class LaneSim extends ChargeSim {
       // Loose the storm once a good number of enemies are in bowshot.
       let inRange = 0;
       for (const o of this.grid.query(Ld.x, Ld.y, L.STORM_RANGE * 0.8, this.near)) {
-        if (o.alive && o.team !== h.team && !o.fleeing && Math.hypot(o.x - Ld.x, o.y - Ld.y) < L.STORM_RANGE * 0.8) inRange++;
+        if (o.alive && o.team !== h.team && !o.fleeing && this.visible(h.team, o.x, o.y) && Math.hypot(o.x - Ld.x, o.y - Ld.y) < L.STORM_RANGE * 0.8) inRange++;
       }
       if (inRange >= 10 || (F && dF < L.STORM_RANGE * 0.8)) this.useAbility(h.team);
     }

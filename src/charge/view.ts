@@ -1416,7 +1416,6 @@ export class ChargeView {
     u.speed += (speed - u.speed) * Math.min(1, dt * 10);
     // Upright figures stride further per cycle: a full gallop stride is about a horse length and a half.
     u.phase += Math.min(dist, 12) * (this.upright ? (s.type === 'cavalry' ? 0.2 : 0.55) : s.rider ? 0.32 : 0.75);
-    const moving = speed > 6 && !down;
     if (this.style === 'ink') {
       // Line boil: every few frames each figure is "redrawn" a hair differently.
       const k = Math.floor(time * 8);

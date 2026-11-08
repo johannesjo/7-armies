@@ -26,12 +26,6 @@ function horse(style: FlatStyle, variant: number): [number, number] {
   return list[((variant % HORSE_VARIANTS) + HORSE_VARIANTS) % HORSE_VARIANTS % list.length];
 }
 
-function darken(c: number, k: number): number {
-  const r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
-  const f = (v: number) => Math.round(v * (1 - k));
-  return (f(r) << 16) | (f(g) << 8) | f(b);
-}
-
 /** Draw a unit in the given style. Local +X is the facing, +Y the unit's right. */
 export function drawStyledUnit(style: ArtStyle, shape: Canvas, weapon: Canvas, type: UnitType, team: Team, r: number, theme: Theme, variant = 0, gear: 'lance' | 'bow' = 'lance'): void {
   if (style === 'ink') drawInk(shape, weapon, type, team, r, theme, variant, gear);

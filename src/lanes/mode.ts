@@ -61,6 +61,8 @@ export class LaneMode extends ChargeMode {
   /** Sim time each teaching hint last showed (so they don't nag). */
   private readonly hintAt: Record<string, number> = {};
   private hackedOnce = false;
+  /** Hints scheduled at the start of a run (cleared when the run ends). */
+  private introTimers: ReturnType<typeof setTimeout>[] = [];
   /** The hand of cards on show (so the buttons are only rebuilt when it changes). */
   private shownHand = '';
 
@@ -74,7 +76,7 @@ export class LaneMode extends ChargeMode {
     // Enter / Space and assistive tech send a click with no pointer behind it.
     this.abilityBtn.addEventListener('click', e => { if (e.detail === 0) this.ability(); });
     window.addEventListener('keydown', e => {
-      if (!this.active || this.paused) return;
+      if (!this.active || this.paused || e.repeat || this.lanes?.outcome !== 'playing') return;
       const i = ['Digit1', 'Digit2', 'Digit3'].indexOf(e.code);
       if (i >= 0) { this.pick(i); e.preventDefault(); }
       if (e.code === 'KeyQ' || e.code === 'KeyE') { this.ability(); e.preventDefault(); }
@@ -130,6 +132,12 @@ export class LaneMode extends ChargeMode {
     return this.sim as LaneSim | null;
   }
 
+  protected override teardownRun(): void {
+    for (const t of this.introTimers) clearTimeout(t);
+    this.introTimers.length = 0;
+    super.teardownRun();
+  }
+
   protected override quit(): void {
     this.laneQuit();
   }
@@ -140,19 +148,25 @@ export class LaneMode extends ChargeMode {
     return new LaneSim({ seed, commander: this.commander });
   }
 
+  /** The 3D renderer only knows the battle's field so far: lanes use the Classic RTS look (field and HUD alike). */
+  protected override resolveTheme(theme: Theme): Theme {
+    if (theme.artStyle !== '3d') return theme;
+    document.body.classList.add('style-rts');
+    return RTS_THEME;
+  }
+
   protected override async createView(app: Application, theme: Theme): Promise<ChargeRenderer> {
-    // The 3D renderer only knows the battle's field so far: lanes use the Classic RTS look.
-    return new LaneView(app, theme.artStyle === '3d' ? RTS_THEME : theme);
+    return new LaneView(app, theme);
   }
 
   protected override intro(): void {
     this.shownHand = '';
     this.setupAbility();
     const a = ABILITIES[COMMANDERS[this.commander].ability];
-    setTimeout(() => { if (this.lanes && this.lanes.time < 20) this.teach('ability', `${a.icon} Q: ${a.title}`, 999); }, 3200);
+    this.introTimers.push(setTimeout(() => { if (this.lanes && this.lanes.time < 20) this.teach('ability', `${a.icon} Q: ${a.title}`, 999); }, 3200));
     // Horse archers win by circling at bowshot, not by charging: say so once foot is near.
     if (this.commander === 'archers') {
-      setTimeout(() => { if (this.lanes && this.lanes.time < 60) this.teach('kite', '🏹 Circle their foot at bowshot — your arrows break it. Don\'t charge.', 999); }, 6500);
+      this.introTimers.push(setTimeout(() => { if (this.lanes && this.lanes.time < 60) this.teach('kite', '🏹 Circle their foot at bowshot — your arrows break it. Don\'t charge.', 999); }, 6500));
     }
     this.updateAbilities();
     this.cardsEl.classList.remove('active');
@@ -191,8 +205,10 @@ export class LaneMode extends ChargeMode {
         this.triggerHitStop(0.3, 0.4);
         break;
       case 'hero-down':
-        if (e.team === 'red') { this.banner('You slew the rival commander!', 2600, true); this.triggerHitStop(0.5, 0.3); }
-        else this.banner('Your squadron has fallen', 2200, true);
+        if (e.team === 'red') {
+          this.banner(e.slain ? 'You slew the rival commander!' : 'The rival commander has fallen', 2600, true);
+          if (e.slain) this.triggerHitStop(0.5, 0.3);
+        } else this.banner('Your squadron has fallen', 2200, true);
         break;
       case 'late-game':
         this.banner('Siege engines arrive — the walls crumble faster', 3000, true);
@@ -332,6 +348,8 @@ export class LaneMode extends ChargeMode {
     };
     this.cardsEl.classList.remove('active');
     this.respawnEl.classList.remove('active');
+    for (const t of this.introTimers) clearTimeout(t);
+    this.introTimers.length = 0;
     this.audio.hush();
     this.app?.ticker.remove(this.tick, this);
     this.app?.stop();

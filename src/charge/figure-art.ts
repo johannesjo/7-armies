@@ -408,10 +408,10 @@ function footman(m: Model, type: UnitType, r: number, p: Palette, frame: number,
   }
 }
 
-/** The weapon a fallen footman dropped, lying on the ground beside him. */
 /** What a horseman carries: a couched lance (knights) or a bow (horse archers). */
 export type RiderGear = 'lance' | 'bow';
 
+/** The weapon a fallen man dropped, lying on the ground beside him. */
 function droppedWeapon(m: Model, type: UnitType, r: number, p: Palette, gear: RiderGear = 'lance'): void {
   if (type === 'cavalry' && gear === 'bow') {
     m.cap([0.6 * r, 1.0 * r, 0.05 * r], [1.3 * r, 1.5 * r, 0.05 * r], 0.045 * r, p.wood);

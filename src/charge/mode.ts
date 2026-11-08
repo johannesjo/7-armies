@@ -243,7 +243,13 @@ export class ChargeMode {
     return this.appReady;
   }
 
+  /** The theme this mode actually draws with (a mode can't always draw every style). */
+  protected resolveTheme(theme: Theme): Theme {
+    return theme;
+  }
+
   async start(theme: Theme): Promise<void> {
+    theme = this.resolveTheme(theme);
     this.screen.classList.add('active');
     await this.ensureApp();
     const app = this.app!;

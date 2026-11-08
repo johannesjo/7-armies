@@ -326,8 +326,8 @@ export class ChargeView {
   }
 
   /**
-   * Point-and-ride feedback while the pointer is held: rings around the leader
-   * where canter and gallop begin, and a line to the pointer coloured by pace.
+   * Point-and-ride feedback while the pointer is held: just a small marker where
+   * you point, turning amber when it is far enough away to gallop.
    */
   drawAim(leader: Soldier | null, aim: Vec2 | null, zones: DirectZones): void {
     const g = this.aimG;
@@ -335,24 +335,19 @@ export class ChargeView {
     if (!leader || !aim) return;
     const t = this.theme;
     const z = this.zoom;
-    const canterR = zones.canter / z, gallopR = zones.gallop / z;
     const dx = aim.x - leader.x, dy = aim.y - leader.y;
     const d = Math.hypot(dx, dy);
+    // Pointing past the gallop distance turns the marker amber; nothing else marks the zones.
     const galloping = d * z >= zones.gallop;
-    const color = galloping ? t.hpMid : t.blue;
-
-    g.circle(leader.x, leader.y, canterR).stroke({ width: 1, color: t.blue, alpha: 0.22 });
-    g.circle(leader.x, leader.y, gallopR).stroke({ width: galloping ? 2 : 1, color: t.hpMid, alpha: galloping ? 0.55 : 0.3 });
+    const color = galloping ? t.hpMid : t.trim;
+    // Line widths in screen pixels, so the pointer stays thin at any zoom.
+    const px = 1 / z;
     if (d * z < zones.dead) {
-      g.circle(aim.x, aim.y, 4).stroke({ width: 1.5, color: t.blue, alpha: 0.6 });
+      g.circle(aim.x, aim.y, 6 * px).stroke({ width: 1.2 * px, color, alpha: 0.4 });
       return;
     }
-    const nx = dx / d, ny = dy / d;
-    const start = 13;
-    g.moveTo(leader.x + nx * start, leader.y + ny * start).lineTo(aim.x, aim.y)
-      .stroke({ width: galloping ? 2.5 : 1.5, color, alpha: 0.6, cap: 'round' });
-    g.circle(aim.x, aim.y, galloping ? 7 : 5).stroke({ width: 1.8, color, alpha: 0.85 });
-    g.circle(aim.x, aim.y, 1.8).fill({ color, alpha: 0.85 });
+    g.circle(aim.x, aim.y, 5 * px).stroke({ width: 1.3 * px, color, alpha: 0.5 });
+    g.circle(aim.x, aim.y, 1.4 * px).fill({ color, alpha: 0.6 });
   }
 
   /** Visible world rectangle (for the minimap). */
@@ -1437,15 +1432,14 @@ export class ChargeView {
 
     if (!L) return;
     this.drawExposed(g, sim, L);
-    // Leader marker: ring + heading chevron.
-    g.circle(L.x, L.y, 11).stroke({ width: 1.4, color: t.blue, alpha: 0.75 });
-    const cx = L.x + Math.cos(L.facing) * 19, cy = L.y + Math.sin(L.facing) * 19;
+    // Leader marker: a small, faint heading chevron ahead of him.
+    const cx = L.x + Math.cos(L.facing) * 17, cy = L.y + Math.sin(L.facing) * 17;
     const px = -Math.sin(L.facing), py = Math.cos(L.facing);
     g.poly([
-      cx + Math.cos(L.facing) * 4, cy + Math.sin(L.facing) * 4,
-      cx + px * 3.5, cy + py * 3.5,
-      cx - px * 3.5, cy - py * 3.5,
-    ]).fill({ color: t.blue, alpha: 0.8 });
+      cx + Math.cos(L.facing) * 3, cy + Math.sin(L.facing) * 3,
+      cx + px * 2.4, cy + py * 2.4,
+      cx - px * 2.4, cy - py * 2.4,
+    ]).fill({ color: t.trim, alpha: 0.45 });
     // Banner on the leader.
     const bx = L.x - Math.cos(L.facing) * 3, by = L.y - Math.sin(L.facing) * 3;
     const wave = Math.sin(sim.time * 10) * 1.5;

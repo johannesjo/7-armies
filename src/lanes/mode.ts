@@ -149,7 +149,7 @@ export class LaneMode extends ChargeMode {
     this.shownHand = '';
     this.setupAbility();
     const a = ABILITIES[COMMANDERS[this.commander].ability];
-    setTimeout(() => { if (this.lanes && this.lanes.time < 20) this.teach('ability', `${a.icon} ${a.title} (Q / button): ${a.text}`, 999); }, 3200);
+    setTimeout(() => { if (this.lanes && this.lanes.time < 20) this.teach('ability', `${a.icon} Q: ${a.title}`, 999); }, 3200);
     this.updateAbilities();
     this.cardsEl.classList.remove('active');
     this.respawnEl.classList.remove('active');

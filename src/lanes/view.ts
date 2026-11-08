@@ -9,6 +9,7 @@ import { Team } from '../types';
 import { LANES as L } from './config';
 import { WOODS } from './map';
 import { LaneEvent, LaneSim, Structure } from './sim';
+import { CastleLook, keepTop, keepUpright, rubble, towerTop, towerUpright } from './castle-art';
 import { ABILITIES } from './cards';
 
 export const LANE_FIELD: FieldLayout = { w: L.WORLD_W, h: L.WORLD_H, woods: [...WOODS], battle: false, key: 'lanes' };
@@ -250,104 +251,24 @@ export class LaneView extends ChargeView {
     return st.team === 'blue' ? this.theme.blue : this.theme.red;
   }
 
+  /** How a structure is painted: its team's colours, ink or paint, and a seed for the stonework. */
+  private look(st: Structure): CastleLook {
+    const t = this.theme;
+    return { team: this.teamColor(st), teamDark: st.team === 'blue' ? t.blueDark : t.redDark, trim: t.trim, ink: this.style === 'ink', seed: st.id };
+  }
+
   private drawTower(g: Graphics, st: Structure, hurt: number): void {
-    const color = this.teamColor(st);
-    const r = st.r;
-    const dark = mixColor(STONE, 0x000000, 0.35), lite = mixColor(STONE, 0xffffff, 0.25);
-    if (!this.upright) {
-      // From above: a round stone tower, crenellated, the team's colours on the roof.
-      g.circle(3, 4, r + 3).fill({ color: 0x000000, alpha: 0.28 });
-      g.circle(0, 0, r).fill(STONE).stroke({ width: 1.5, color: dark });
-      for (let i = 0; i < 10; i++) {
-        const a = (i / 10) * Math.PI * 2;
-        g.rect(Math.cos(a) * (r - 3) - 2.2, Math.sin(a) * (r - 3) - 2.2, 4.4, 4.4).fill(lite).stroke({ width: 0.6, color: dark });
-      }
-      g.circle(0, 0, r * 0.55).fill(color).stroke({ width: 1, color: mixColor(color, 0x000000, 0.4) });
-      this.cracks(g, hurt, r, 0);
-      return;
-    }
-    const w = r * 0.85, h = 62;
-    g.ellipse(r * 0.6, 2, r * 1.5, r * 0.5).fill({ color: 0x000000, alpha: 0.3 });
-    g.rect(-w, -h, w * 2, h).fill(STONE);
-    g.rect(w * 0.25, -h, w * 0.75, h).fill({ color: 0x000000, alpha: 0.18 });
-    g.ellipse(0, 0, w, w * 0.35).fill(STONE);
-    // Courses of stone.
-    for (let y = -h + 8; y < -2; y += 9) g.moveTo(-w, y).lineTo(w, y).stroke({ width: 0.6, color: dark, alpha: 0.5 });
-    // Arrow slits.
-    g.rect(-2, -h * 0.62, 2.4, 7).fill(0x1a140c);
-    g.rect(-w * 0.6, -h * 0.35, 2.2, 6).fill(0x1a140c);
-    // Parapet with merlons.
-    g.rect(-w - 3, -h - 5, (w + 3) * 2, 7).fill(lite).stroke({ width: 0.8, color: dark });
-    for (let i = 0; i < 5; i++) g.rect(-w - 3 + i * ((w + 3) * 2 - 5) / 4, -h - 11, 5, 6).fill(lite).stroke({ width: 0.6, color: dark });
-    // Banner.
-    g.moveTo(0, -h - 5).lineTo(0, -h - 34).stroke({ width: 1.4, color: 0x3a2a1a });
-    g.poly([0, -h - 34, 16, -h - 30, 13, -h - 26, 16, -h - 22, 0, -h - 22]).fill(color).stroke({ width: 0.7, color: mixColor(color, 0x000000, 0.4) });
-    this.cracks(g, hurt, w, -h);
+    if (this.upright) towerUpright(g, this.look(st), st.r, hurt);
+    else towerTop(g, this.look(st), st.r, hurt);
   }
 
   private drawKeep(g: Graphics, st: Structure, hurt: number): void {
-    const color = this.teamColor(st);
-    const R = st.r;
-    const dark = mixColor(STONE, 0x000000, 0.35), lite = mixColor(STONE, 0xffffff, 0.25);
-    if (!this.upright) {
-      g.rect(-R + 4, -R + 5, R * 2, R * 2).fill({ color: 0x000000, alpha: 0.28 });
-      g.rect(-R, -R, R * 2, R * 2).fill(STONE).stroke({ width: 2, color: dark });
-      g.rect(-R * 0.55, -R * 0.55, R * 1.1, R * 1.1).fill(color).stroke({ width: 1.5, color: mixColor(color, 0x000000, 0.4) });
-      for (const [cx, cy] of [[-R, -R], [R, -R], [-R, R], [R, R]]) {
-        g.circle(cx, cy, R * 0.32).fill(lite).stroke({ width: 1.2, color: dark });
-      }
-      this.cracks(g, hurt, R, 0);
-      return;
-    }
-    const w = R * 1.25, h = 46;
-    g.ellipse(R * 0.4, 4, w * 1.35, R * 0.55).fill({ color: 0x000000, alpha: 0.3 });
-    // Curtain wall with a gate.
-    g.rect(-w, -h, w * 2, h).fill(STONE);
-    g.rect(w * 0.3, -h, w * 0.7, h).fill({ color: 0x000000, alpha: 0.15 });
-    for (let y = -h + 8; y < -2; y += 9) g.moveTo(-w, y).lineTo(w, y).stroke({ width: 0.6, color: dark, alpha: 0.5 });
-    g.moveTo(-10, 0).lineTo(-10, -18).arc(0, -18, 10, Math.PI, 0).lineTo(10, 0).closePath().fill(0x2a1e12);
-    for (let i = 0; i < 9; i++) g.rect(-w + i * (w * 2 - 6) / 8, -h - 6, 6, 6).fill(lite).stroke({ width: 0.6, color: dark });
-    // Corner towers and the great tower behind.
-    const tower = (x: number, th: number, tw: number) => {
-      g.rect(x - tw, -th, tw * 2, th).fill(STONE).stroke({ width: 0.8, color: dark });
-      g.rect(x + tw * 0.2, -th, tw * 0.8, th).fill({ color: 0x000000, alpha: 0.16 });
-      g.rect(x - tw - 2, -th - 5, tw * 2 + 4, 6).fill(lite).stroke({ width: 0.7, color: dark });
-      g.rect(x - 1.2, -th * 0.6, 2.4, 6).fill(0x1a140c);
-    };
-    tower(0, h + 34, 15);
-    g.moveTo(0, -h - 39).lineTo(0, -h - 72).stroke({ width: 1.6, color: 0x3a2a1a });
-    g.poly([0, -h - 72, 24, -h - 66, 19, -h - 60, 24, -h - 54, 0, -h - 54]).fill(color).stroke({ width: 0.8, color: mixColor(color, 0x000000, 0.4) });
-    tower(-w, h + 14, 11);
-    tower(w, h + 14, 11);
-    this.cracks(g, hurt, w, -h);
-  }
-
-  /** Cracks spread as a tower is worn down. */
-  private cracks(g: Graphics, hurt: number, w: number, top: number): void {
-    if (hurt <= 0) return;
-    const r = mulberry32(hurt * 17 + Math.round(w));
-    for (let i = 0; i < hurt * 3; i++) {
-      let x = (r() - 0.5) * w * 1.4, y = top * (0.2 + r() * 0.7) + (top === 0 ? (r() - 0.5) * w : 0);
-      g.moveTo(x, y);
-      for (let k = 0; k < 3; k++) {
-        x += (r() - 0.5) * 7; y += 3 + r() * 4;
-        g.lineTo(x, y);
-      }
-      g.stroke({ width: 1, color: 0x1a140c, alpha: 0.7 });
-    }
+    if (this.upright) keepUpright(g, this.look(st), st.r, hurt);
+    else keepTop(g, this.look(st), st.r, hurt, st.team === 'blue' ? 1 : -1);
   }
 
   private drawRubble(g: Graphics, st: Structure): void {
-    const r = mulberry32(st.id);
-    const R = st.r * 1.5;
-    g.ellipse(0, 0, R * 1.2, R * 0.7).fill({ color: 0x000000, alpha: 0.18 });
-    for (let i = 0; i < 26; i++) {
-      const a = r() * Math.PI * 2, d = Math.sqrt(r()) * R;
-      const s = 2 + r() * 4;
-      g.ellipse(Math.cos(a) * d, Math.sin(a) * d * 0.6, s * 1.3, s).fill(mixColor(STONE, 0x000000, r() * 0.4));
-    }
-    g.moveTo(-4, -2).lineTo(-4, -16).stroke({ width: 1.2, color: 0x3a2a1a });
-    g.poly([-4, -16, 6, -12, -4, -9]).fill({ color: this.teamColor(st), alpha: 0.7 });
+    rubble(g, this.look(st), st.kind === 'keep' ? st.r * 0.8 : st.r, this.upright);
   }
 
   /** Health bars on towers, the reach of enemy towers near you, and where the rival is. */
@@ -385,7 +306,7 @@ export class LaneView extends ChargeView {
       }
       const vuln = sim.vulnerable(st);
       const w = st.kind === 'keep' ? 64 : 40, h = 4;
-      const top = st.kind === 'keep' ? (this.upright ? 140 : st.r + 16) : (this.upright ? 108 : st.r + 12);
+      const top = st.kind === 'keep' ? (this.upright ? 172 : st.r + 16) : (this.upright ? 140 : st.r + 12);
       const x = st.x - w / 2, y = st.y - top;
       const k = Math.max(0, st.hp / st.maxHp);
       const color = st.team === 'blue' ? t.blue : t.red;

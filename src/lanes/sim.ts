@@ -364,6 +364,7 @@ export class LaneSim extends ChargeSim {
     this.arrows.push({
       sx: r.x, sy: r.y, tx, ty, t: delay, flight, team: h.team, volley: -1,
       power: L.HA_POWER_FOOT, riderPower: L.HA_POWER_RIDER, byPlayer: h.sq === this.player,
+      shock: L.HA_SHOCK * h.mods.volleyShock,
     });
     return true;
   }

@@ -233,6 +233,8 @@ export interface Arrow {
   riderPower?: number;
   /** Shot by your own squadron (its kills count as yours). */
   byPlayer?: boolean;
+  /** Morale each hit knocks off the victim's battalion (horse archers' harassing fire). */
+  shock?: number;
 }
 
 export interface Volley {
@@ -2210,6 +2212,10 @@ export class ChargeSim {
         if (victim.rider) this.damageRider(victim, C.ARROW_DAMAGE_RIDER * (a.riderPower ?? power) * this.mods(victim.squad).arrows, angle, mine, 'front');
         else {
           if (mine && victim.bat) victim.bat.lastPlayerHit = this.time;
+          if (a.shock && victim.bat && !victim.bat.routed) {
+            victim.bat.morale -= a.shock;
+            victim.bat.sinceShock = 0;
+          }
           this.damageSoldier(victim, C.ARROW_DAMAGE_INFANTRY * power, angle, mine, 'front');
         }
       }

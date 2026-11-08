@@ -288,6 +288,41 @@ describe('lanes commanders, abilities and fog', () => {
     expect(shots).toBeGreaterThan(0);
   });
 
+  it('knights break foot by charging it; horse archers by shooting it', () => {
+    /** Ride from behind a red battalion straight through it at the gallop; morale and men it cost. */
+    const rearCharge = (kind: 'knights' | 'archers') => {
+      const sim = new LaneSim({ seed: 8, commander: kind, fog: false });
+      bench(sim, 'red');
+      for (let i = 0; i < 70; i++) sim.step(1 / 60, NO_INPUT);
+      const b = sim.battalions.find(x => x.team === 'red' && Math.abs(x.y - L.LANE_Y[1]) < 50 && x.type === 'swordsman')!;
+      const fx = Math.cos(b.facing), fy = Math.sin(b.facing);
+      teleport(sim, 'blue', b.x - fx * 260, b.y - fy * 260);
+      for (const r of sim.riders) { r.facing = b.facing; r.speed = 200; r.vx = fx * 200; r.vy = fy * 200; }
+      sim['resetTrail'](sim.player!, sim.leader!.x, sim.leader!.y, b.facing);
+      const men0 = sim.members(b).length;
+      let low = 100;
+      for (let i = 0; i < 60 * 2.5; i++) {
+        sim.step(1 / 60, { dirX: fx, dirY: fy, gallop: true });
+        if (!b.routed) low = Math.min(low, b.morale); else low = 0;
+      }
+      return { moraleLost: 100 - low, menLost: men0 - sim.members(b).length };
+    };
+    const k = rearCharge('knights'), a = rearCharge('archers');
+    expect(k.moraleLost).toBeGreaterThan(a.moraleLost * 2);
+    // ...but archers wear foot down from a distance, without touching them.
+    const sim = new LaneSim({ seed: 8, commander: 'archers', fog: false });
+    bench(sim, 'red');
+    for (let i = 0; i < 70; i++) sim.step(1 / 60, NO_INPUT);
+    const b = sim.battalions.find(x => x.team === 'red' && Math.abs(x.y - L.LANE_Y[1]) < 50 && x.type === 'swordsman')!;
+    let low = 100;
+    for (let i = 0; i < 60 * 8; i++) {
+      teleport(sim, 'blue', b.x - 200, b.y - 120);
+      sim.step(1 / 60, NO_INPUT);
+      low = b.routed ? 0 : Math.min(low, b.morale);
+    }
+    expect(100 - low).toBeGreaterThan(30);
+  });
+
   it('fog: you see round your own troops, not the far side of the field', () => {
     const sim = new LaneSim({ seed: 5 });
     sim.step(1 / 60);

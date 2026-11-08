@@ -21,6 +21,8 @@ export interface HeroMods extends RiderMods {
   mass: number;
   /** Horse archers: arrows shot per rider per second (0 = they don't shoot). */
   archery: number;
+  /** Horse archers: how hard each arrow hit shakes a battalion's morale (multiplier). */
+  volleyShock: number;
 }
 
 /** What kind of horse a commander leads, chosen before the match. */
@@ -68,9 +70,10 @@ export const COMMANDERS: Record<CommanderKind, Commander> = {
   },
   archers: {
     kind: 'archers', title: 'Horse Archers', icon: '🏹', ability: 'storm',
-    text: 'Harass and kite: many fast, fragile riders who shoot on the move. Barely trample — circle, don\'t crash. Weak at walls.',
+    text: 'Harass and kite: many fast, fragile riders. Their arrows wear down foot and shake its morale from a distance; a charge from them does little. Weak at walls.',
     apply: m => {
-      m.maxRiders = 12; m.hp = 0.7; m.mass = 0.85; m.impact = 0.3; m.strike = 0.5;
+      // A charge from them barely dents a battalion: light horses, little trample, little terror.
+      m.maxRiders = 12; m.hp = 0.7; m.mass = 0.7; m.impact = 0.15; m.strike = 0.4; m.shock = 0.2;
       m.speed = 1.1; m.turn = 1.2; m.siege = 0.5; m.archery = 0.55;
     },
   },
@@ -81,7 +84,7 @@ export const COMMANDER_KINDS = Object.keys(COMMANDERS) as CommanderKind[];
 export function baseMods(kind: CommanderKind = 'knights'): HeroMods {
   const m: HeroMods = {
     speed: 1, turn: 1, impact: 1, shock: 1, strike: 1, arrows: 1,
-    maxRiders: L.HERO_START, hp: 1, siege: 1, regen: 0, remount: Infinity, banner: 0, respawn: 1, mass: 1, archery: 0,
+    maxRiders: L.HERO_START, hp: 1, siege: 1, regen: 0, remount: Infinity, banner: 0, respawn: 1, mass: 1, archery: 0, volleyShock: 1,
   };
   COMMANDERS[kind].apply(m);
   return m;
@@ -89,7 +92,7 @@ export function baseMods(kind: CommanderKind = 'knights'): HeroMods {
 
 export type CardId =
   | 'riders' | 'barding' | 'lances' | 'joust' | 'steeds' | 'drill' | 'terror'
-  | 'hooks' | 'surgeon' | 'remounts' | 'banner' | 'shields' | 'muster' | 'bows';
+  | 'hooks' | 'surgeon' | 'remounts' | 'banner' | 'shields' | 'muster' | 'bows' | 'barbed';
 
 export interface Card {
   id: CardId;
@@ -136,7 +139,11 @@ export const CARDS: Record<CardId, Card> = {
   },
   terror: {
     id: 'terror', title: 'Terror', text: 'Your charges shake morale 40% harder', icon: '☠',
-    weight: 1.3, max: 3, apply: m => { m.shock += 0.4; },
+    weight: 1.3, max: 3, only: ['knights'], apply: m => { m.shock += 0.4; },
+  },
+  barbed: {
+    id: 'barbed', title: 'Barbed Arrows', text: 'Your arrows shake morale 40% harder', icon: '➹',
+    weight: 1.8, max: 3, only: ['archers'], apply: m => { m.volleyShock += 0.4; },
   },
   hooks: {
     id: 'hooks', title: 'Siege Hooks', text: '+60% damage to towers and keeps', icon: '🏰',
@@ -195,7 +202,7 @@ export function drawOffer(picks: readonly CardId[], rand: () => number, kind: Co
 /** How much the AI commander likes each card (it still varies its picks). */
 const AI_TASTE: Record<CardId, number> = {
   riders: 3, barding: 2, lances: 2, joust: 1.6, steeds: 1.2, drill: 0.8, terror: 1.3,
-  hooks: 1.1, surgeon: 1, remounts: 1.3, banner: 0.8, shields: 1.2, muster: 0.6, bows: 2.4,
+  hooks: 1.1, surgeon: 1, remounts: 1.3, banner: 0.8, shields: 1.2, muster: 0.6, bows: 2.4, barbed: 1.8,
 };
 
 export function aiPick(offer: readonly CardId[], rand: () => number): number {

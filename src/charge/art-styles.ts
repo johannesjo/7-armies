@@ -15,13 +15,13 @@ type Canvas = Graphics | GraphicsContext;
  */
 export type { ArtStyle };
 
-const HORSES: Record<Exclude<ArtStyle, 'classic'>, [number, number][]> = {
+const HORSES: Record<Exclude<ArtStyle, 'classic' | '3d'>, [number, number][]> = {
   mini: [[0x6a4a32, 0x2a1c12], [0x9a7a54, 0x4a3828], [0xb8b2a6, 0x6a645c], [0x3a302a, 0x161210]],
   ink: [[0x8a6a4a, 0x3a2a1a], [0xa08868, 0x4a3a2a], [0xb0a898, 0x5a5448], [0x5a4a3a, 0x2a2018]],
   rts: [[0x8a4a22, 0x3a1a08], [0xb07838, 0x5a3410], [0xd8d0c0, 0x7a7060], [0x3a2a20, 0x120a06]],
 };
 
-function horse(style: Exclude<ArtStyle, 'classic'>, variant: number): [number, number] {
+function horse(style: Exclude<ArtStyle, 'classic' | '3d'>, variant: number): [number, number] {
   const list = HORSES[style];
   return list[((variant % HORSE_VARIANTS) + HORSE_VARIANTS) % HORSE_VARIANTS % list.length];
 }

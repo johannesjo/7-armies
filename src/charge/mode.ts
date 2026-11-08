@@ -4,6 +4,7 @@ import { CHARGE as C } from './config';
 import { ChargeSim, SimEvent, NO_INPUT, ChargeInput } from './sim';
 import { createBattleSpecs, createSquadSpecs } from './scenario';
 import { ChargeView, mixColor } from './view';
+import type { ChargeRenderer } from './view3d';
 import { ChargeControls, Joystick, StrokeHandler } from './input';
 import { RiderPath, StrokePace } from './path';
 import { ChargeAudio } from './audio';
@@ -94,7 +95,7 @@ function hex(c: number): string {
 export class ChargeMode {
   private app: Application | null = null;
   private appReady: Promise<void> | null = null;
-  private view: ChargeView | null = null;
+  private view: ChargeRenderer | null = null;
   private sim: ChargeSim | null = null;
   private controls: ChargeControls;
   private paused = false;
@@ -215,7 +216,13 @@ export class ChargeMode {
     // Dev builds expose the sim for scripted screenshots and debugging.
     if (import.meta.env.DEV) Object.assign(window, { chargeSim: this.sim, chargeMode: this });
     this.audio.start();
-    this.view = new ChargeView(app, theme);
+    if (theme.artStyle === '3d') {
+      // The 3D renderer (and three.js) only download when that style is picked.
+      const { ChargeView3D } = await import('./view3d');
+      this.view = new ChargeView3D(app, theme, this.host);
+    } else {
+      this.view = new ChargeView(app, theme);
+    }
     this.view.setCombatText(this.combatText);
     app.resize();
     this.resize();

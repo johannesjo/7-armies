@@ -360,6 +360,8 @@
     #ch-form.loose { background: var(--ch-warn, #d8402e); }
     #ch-red { background: var(--ch-red); }
     #ch-blue { background: var(--ch-blue); }
+    #ch-red.wavering, #ch-blue.wavering { animation: ch-waver 0.8s ease-in-out infinite alternate; }
+    @keyframes ch-waver { from { opacity: 1; } to { opacity: 0.35; } }
     .ch-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.7; }
     .ch-center { text-align: center; }
     #ch-score { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
@@ -661,9 +663,9 @@
         <div id="ch-time">0:00</div>
       </div>
       <div class="ch-col right">
-        <span class="ch-label">Enemy army</span>
+        <span class="ch-label">Enemy morale</span>
         <div class="ch-bar"><div id="ch-red"></div></div>
-        <span class="ch-label">Our line</span>
+        <span class="ch-label">Our morale</span>
         <div class="ch-bar"><div id="ch-blue"></div></div>
       </div>
     </div>
@@ -674,7 +676,8 @@
       <span class="ctl-direct"><b>Point where to ride</b> — keep <span class="touch-only">your finger</span><span class="mouse-only">the mouse button held</span> on the field and your squadron rides toward it. Closer = slower, further = faster, far out = <b>gallop</b>.<br></span>
       <span class="ctl-route"><b>Draw your route</b> — <span class="mouse-only">drag with the mouse</span><span class="touch-only">drag your finger</span> and your squadron rides it.<br>
       <span class="legend canter"></span> draw slowly to canter · <span class="legend gallop"></span> flick quickly to gallop<br></span>
-      Hit flanks <b>×2</b> and rears <b>×3</b> · dodge the red circles · ride into <b>allied troops</b> to take command of them
+      Hit flanks <b>×2</b> and rears <b>×3</b> — <b>glowing edges</b> show an open side · dodge the red circles · ride into <b>allied troops</b> to take command of them<br>
+      Break the enemy's <b>morale</b> and their whole army flees · cut down their <b>general</b> (gold on the map) to shake it
       <span class="mouse-only"><br>Keyboard reins: <kbd>W</kbd> ride on · <kbd>A</kbd>/<kbd>D</kbd> turn · <kbd>S</kbd> rein in · <kbd>Space</kbd> gallop</span>
     </div>
     <div id="ch-joy-zone" aria-label="Steering stick"><div id="ch-joy"><div id="ch-joy-knob"></div></div></div>

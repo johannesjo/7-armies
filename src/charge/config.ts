@@ -144,7 +144,7 @@ export const CHARGE = {
   VS_RIDER_HIT_CHANCE: 0.5,
   VS_RIDER_DAMAGE_MULT: 1.4,
   /** Team-wide melee multipliers: the blue line is slowly losing without help. */
-  TEAM_MELEE_MULT: { blue: 0.85, red: 1 },
+  TEAM_MELEE_MULT: { blue: 0.78, red: 1 },
   FLEE_SPEED: 58,
   ADVANCE_SPEED: 14,
   /** Soldiers point their weapons at enemies within this distance. */
@@ -205,6 +205,25 @@ export const CHARGE = {
   ROUT_STRENGTH: 0.2,
   ROUT_CASCADE_RADIUS: 220,
   ROUT_CASCADE: 10,
+
+  // --- Army morale ---
+  /**
+   * An army breaks and flees, all of it, once this share of its foot is dead or fled.
+   * Blue holds out a little longer so the battle lasts a few minutes without you.
+   */
+  ARMY_BREAK: { blue: 0.8, red: 0.6 },
+  /** Army morale (0..1) below which it is announced as wavering. */
+  ARMY_WAVER: 0.3,
+
+  // --- The red general ---
+  GENERAL_HP: 45,
+  GENERAL_SCORE: 1000,
+  /** His fall counts toward the red army breaking as if this share of it had fled... */
+  GENERAL_ARMY_SHOCK: 0.15,
+  /** ...and shakes every red battalion by this much morale. */
+  GENERAL_MORALE_SHOCK: 25,
+  /** He rides away from enemy horsemen that come this close. */
+  GENERAL_FLEE_RADIUS: 240,
 
   // --- Rally camp (bottom-left, behind the blue line) ---
   CAMP_X: 330,

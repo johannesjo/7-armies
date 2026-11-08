@@ -57,8 +57,9 @@ export function createBattleSpecs(): BattalionSpec[] {
 
 /**
  * Cavalry on the field from the start: an allied troop already raiding on the far
- * flank (ride into it to take command), red knights guarding both rear flanks, and
- * a hunting party that waits behind the red army before riding for your banner.
+ * flank (ride into it to take command), red knights guarding both rear flanks, the
+ * red general with his bodyguard far behind their lines — cut him down and the whole
+ * army's heart sinks — and a hunting party that waits before riding for your banner.
  */
 export function createSquadSpecs(): SquadSpec[] {
   const cx = C.WORLD_W / 2;
@@ -66,6 +67,9 @@ export function createSquadSpecs(): SquadSpec[] {
     { team: 'blue', ai: 'raider', x: cx + 860, y: C.FRONT_Y + 360, facing: UP, count: 8 },
     { team: 'red', ai: 'guard', x: cx + 640, y: C.FRONT_Y - 430, facing: DOWN, count: 8 },
     { team: 'red', ai: 'guard', x: cx - 640, y: C.FRONT_Y - 430, facing: DOWN, count: 8 },
-    { team: 'red', ai: 'hunter', x: cx, y: C.FRONT_Y - 600, facing: DOWN, count: 10, muster: 70 },
+    { team: 'red', ai: 'general', x: cx, y: C.FRONT_Y - 650, facing: DOWN, count: 1 },
+    // His bodyguard stays close: it rides only at horsemen who come near him.
+    { team: 'red', ai: 'guard', x: cx, y: C.FRONT_Y - 620, facing: DOWN, count: 6, guardRadius: 170 },
+    { team: 'red', ai: 'hunter', x: cx + 300, y: C.FRONT_Y - 600, facing: DOWN, count: 10, muster: 70 },
   ];
 }

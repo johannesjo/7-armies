@@ -373,3 +373,80 @@ describe('field edges', () => {
     for (const r of sim.riders) expect(Math.min(r.x, r.y)).toBeGreaterThan(40);
   });
 });
+
+describe('army morale', () => {
+  it('the whole red army flees once enough of it has broken — and that wins the battle', () => {
+    const reds = [0, 1, 2, 3, 4].map(i => block({ x: 300 + i * 150 }));
+    const sim = new ChargeSim([...reds, block({ team: 'blue', y: 900, facing: UP })], { seed: 1, squad: null });
+    expect(sim.armyMorale('red')).toBe(1);
+    // Rout two of five battalions (40%): wavering, but still fighting.
+    sim.battalions[0].morale = -1;
+    sim.battalions[1].morale = -1;
+    sim.step(1 / 60);
+    expect(sim.outcome).toBe('playing');
+    expect(sim.armyMorale('red')).toBeCloseTo(1 - 0.4 / C.ARMY_BREAK.red, 1);
+    // A third (60%) breaks the army: everyone left runs and the day is won.
+    sim.battalions[2].morale = -1;
+    sim.step(1 / 60);
+    expect(sim.armyBroken.red).toBe(true);
+    expect(sim.battalions.filter(b => b.team === 'red').every(b => b.routed)).toBe(true);
+    expect(sim.outcome).toBe('victory');
+  });
+
+  it('our army breaking is a defeat', () => {
+    const blues = [0, 1, 2, 3, 4].map(i => block({ team: 'blue', x: 300 + i * 150, y: 900, facing: UP }));
+    const sim = new ChargeSim([block(), ...blues], { seed: 1, squad: null });
+    // Four of five battalions (80%) gone: the last one gives up too.
+    for (const b of sim.battalions.filter(b => b.team === 'blue').slice(0, 4)) b.morale = -1;
+    let broke = false;
+    sim.step(1 / 60);
+    for (const e of sim.events) if (e.type === 'army-break' && e.team === 'blue') broke = true;
+    expect(broke).toBe(true);
+    expect(sim.outcome).toBe('defeat');
+  });
+});
+
+describe('the red general', () => {
+  const general = (x: number, y: number) => ({ team: 'red' as const, ai: 'general' as const, x, y, facing: DOWN, count: 1 });
+
+  it('cutting him down shakes every red battalion and the army', () => {
+    const sim = new ChargeSim([block(), block({ x: 900 }), block({ team: 'blue', y: 900, facing: UP })], {
+      seed: 1, squad: null, squads: [general(600, 200)],
+    });
+    const G = sim.general!;
+    expect(G.hp).toBe(C.GENERAL_HP);
+    const before = sim.battalions.map(b => b.morale);
+    const lossBefore = sim.armyLoss.red;
+    (sim as unknown as { damageRider: (r: unknown, d: number, a: number, p: boolean, s: string) => void })
+      .damageRider(G, 999, 0, true, 'rear');
+    sim.step(1 / 60);
+    expect(sim.general).toBeNull();
+    expect(sim.generalFallen).toBe(true);
+    expect(sim.score).toBeGreaterThanOrEqual(C.GENERAL_SCORE);
+    expect(sim.battalions[0].morale).toBeLessThanOrEqual(before[0] - C.GENERAL_MORALE_SHOCK + 1);
+    expect(sim.armyLoss.red).toBeCloseTo(lossBefore + C.GENERAL_ARMY_SHOCK, 2);
+  });
+
+  it('rides away from enemy horsemen, but a galloping squadron can run him down', () => {
+    const sim = new ChargeSim([block({ y: 900 })], {
+      seed: 1, squad: { x: 600, y: 500, facing: UP, count: 1 }, muster: false, squads: [general(600, 330)],
+    });
+    for (let t = 0; t < 1.5; t += 1 / 60) sim.step(1 / 60, { dirX: 0, dirY: 0, gallop: false });
+    const G = sim.general!;
+    // He has started riding off, away from the squadron.
+    expect(G.y).toBeLessThan(330);
+    expect(G.speed).toBeGreaterThan(40);
+    expect(G.speed).toBeLessThan(C.GALLOP_SPEED * 0.8);
+  });
+
+  it('his bodyguard only rides out at horsemen close to him', () => {
+    const sim = new ChargeSim([block({ y: 900 })], {
+      seed: 1, squad: { x: 600, y: 600, facing: 0, count: 1 }, muster: false,
+      squads: [{ team: 'red', ai: 'guard', x: 600, y: 300, facing: DOWN, count: 4, guardRadius: 170 }],
+    });
+    const guard = sim.squadrons.find(sq => sq.ai === 'guard')!;
+    for (let t = 0; t < 2; t += 1 / 60) sim.step(1 / 60, { dirX: 0, dirY: 0, gallop: false });
+    // 300 away: outside his radius, so the guard stays at its post.
+    expect(Math.hypot(guard.riders[0].x - 600, guard.riders[0].y - 300)).toBeLessThan(30);
+  });
+});

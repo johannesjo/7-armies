@@ -343,6 +343,7 @@ function onChargeEnd(result: ChargeResult): void {
     `<b style="font-size:1.4em">Score ${result.score.toLocaleString()}</b>`,
     `Enemies ridden down: ${result.kills}`,
     `Battalions routed by your charges: ${result.routs}`,
+    ...(result.general ? ['You cut down the enemy general'] : []),
     `Best trample combo: ${result.bestCombo}`,
     `Riders recruited: ${result.joined} · lost: ${result.ridersLost}`,
     `Time: ${mins}:${secs}`,

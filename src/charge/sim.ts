@@ -57,7 +57,7 @@ export interface Soldier {
 }
 
 /** Who controls a squadron: the player, or one of the AI behaviours. */
-export type SquadAI = 'player' | 'raider' | 'guard' | 'hunter';
+export type SquadAI = 'player' | 'raider' | 'guard' | 'hunter' | 'general';
 export type SquadPhase = 'muster' | 'approach' | 'charge' | 'retreat' | 'idle' | 'broken';
 
 export interface Squadron {
@@ -81,6 +81,8 @@ export interface Squadron {
   shock: number;
   /** Where a broken squadron flees from. */
   fleeFrom: Vec2 | null;
+  /** Guards: how far from their post they ride out at intruders. */
+  guardRadius: number;
   /** The leader's recent path; followers ride along it, offset into their lane. */
   trail: TrailPoint[];
   /** Distance the leader has ridden (the arc position of the newest trail point). */
@@ -115,6 +117,8 @@ export interface SquadSpec {
   count: number;
   /** Seconds to wait (mustering) before riding out. */
   muster?: number;
+  /** Guards: how far from their post they ride out at intruders (default GUARD_RADIUS). */
+  guardRadius?: number;
 }
 
 export interface Battalion {
@@ -179,6 +183,11 @@ export type SimEvent =
   | { type: 'rout'; x: number; y: number; team: Team; byPlayer: boolean; type2: UnitType }
   | { type: 'combo'; count: number }
   | { type: 'wave'; index: number; battalions: number; x: number; y: number }
+  /** An army has lost heart (morale under ARMY_WAVER) — or broken and fled outright. */
+  | { type: 'army-waver'; team: Team }
+  | { type: 'army-break'; team: Team; x: number; y: number }
+  /** The red general has been cut down. */
+  | { type: 'general-down'; x: number; y: number; byPlayer: boolean; points: number }
   /** Hunting knights leave their muster and ride for the player's banner. */
   | { type: 'hunt'; x: number; y: number; count: number };
 
@@ -283,6 +292,12 @@ export class ChargeSim {
 
   /** Reinforcement waves not yet on the field. */
   pendingWaves: Wave[] = [];
+  /** Share of each army's foot dead or fled (plus the general's fall, for red). */
+  readonly armyLoss: Record<Team, number> = { blue: 0, red: 0 };
+  readonly armyBroken: Record<Team, boolean> = { blue: false, red: false };
+  private readonly armyWavered: Record<Team, boolean> = { blue: false, red: false };
+  generalFallen = false;
+  generalKilledByPlayer = false;
   wavesArrived = 0;
   private comboTimer = 0;
   private rallyTimer = 0;
@@ -345,6 +360,17 @@ export class ChargeSim {
   }
 
   /** Red soldiers still standing in formation (not routed), plus those yet to arrive. */
+  /** An army's heart, 1 = fresh, 0 = it breaks and flees. */
+  armyMorale(team: Team): number {
+    return clamp01(1 - this.armyLoss[team] / C.ARMY_BREAK[team]);
+  }
+
+  /** The red general on the field, or null once he has fallen (or there is none). */
+  get general(): Soldier | null {
+    for (const sq of this.squadrons) if (sq.ai === 'general' && sq.riders[0]) return sq.riders[0];
+    return null;
+  }
+
   get redStanding(): number {
     let n = this.pendingRed;
     for (const b of this.battalions) if (b.team === 'red' && !b.routed) n += this.members(b).length;
@@ -455,6 +481,7 @@ export class ChargeSim {
       cohesion: 1,
       shock: 0,
       fleeFrom: null,
+      guardRadius: spec.guardRadius ?? C.GUARD_RADIUS,
       trail: [],
       trailS: 0,
     };
@@ -464,6 +491,7 @@ export class ChargeSim {
       const p = rotate(slot, spec.facing);
       this.addRider(sq, spec.x + p.x, spec.y + p.y, spec.facing);
     }
+    if (spec.ai === 'general') for (const r of sq.riders) r.hp = r.maxHp = C.GENERAL_HP;
     if (spec.team === 'red') this.redSquadsSpawned += spec.count;
     this.squadrons.push(sq);
     return sq;
@@ -787,6 +815,32 @@ export class ChargeSim {
     return { dirX: (dx / d) * mag, dirY: (dy / d) * mag, gallop };
   }
 
+  /**
+   * The general keeps to his post behind the red army and rides off from any enemy
+   * horseman that comes close — at a canter, so a galloping squadron can run him down.
+   */
+  private generalInput(sq: Squadron, L: Soldier): ChargeInput {
+    if (this.armyBroken.red || this.battalions.every(b => b.team !== 'red' || b.routed)) {
+      if (L.y < 20) for (const r of sq.riders) r.alive = false;
+      return this.rideTo(L, { x: L.x, y: -100 }, true);
+    }
+    let tx = 0, ty = 0, n = 0;
+    for (const o of this.squadrons) {
+      if (o.team === sq.team) continue;
+      for (const r of o.riders) {
+        const d = Math.hypot(r.x - L.x, r.y - L.y);
+        if (d < C.GENERAL_FLEE_RADIUS) { tx += r.x; ty += r.y; n++; }
+      }
+    }
+    if (n === 0) return this.rideTo(L, sq.home, false);
+    const dx = L.x - tx / n, dy = L.y - ty / n;
+    const d = Math.hypot(dx, dy) || 1;
+    const m = 80;
+    const fx = Math.max(m, Math.min(C.WORLD_W - m, L.x + (dx / d) * 150));
+    const fy = Math.max(m, Math.min(C.FRONT_Y - 220, L.y + (dy / d) * 150));
+    return this.rideTo(L, { x: fx, y: fy }, false);
+  }
+
   private pickTarget(sq: Squadron): void {
     const L = sq.riders[0];
     sq.targetBat = null;
@@ -806,7 +860,7 @@ export class ChargeSim {
     }
     if (sq.ai === 'guard') {
       let intruder: Squadron | null = null;
-      let best: number = C.GUARD_RADIUS;
+      let best: number = sq.guardRadius;
       for (const o of this.squadrons) {
         const OL = o.riders[0];
         if (o.team === sq.team || !OL) continue;
@@ -833,13 +887,14 @@ export class ChargeSim {
   private aiInput(sq: Squadron, dt: number): ChargeInput {
     const L = sq.riders[0];
     sq.phaseTimer -= dt;
+    if (sq.ai === 'general') return this.generalInput(sq, L);
 
     if (sq.riders.length <= C.AI_RETREAT_AT && sq.phase !== 'retreat' && sq.phase !== 'idle' && sq.phase !== 'muster') {
       sq.phase = 'retreat';
     }
     // Once the red infantry has broken and no help is coming, its knights quit the field too.
-    if (sq.team === 'red' && sq.phase !== 'retreat' && this.pendingWaves.length === 0
-      && this.battalions.every(b => b.team !== 'red' || b.routed)) {
+    if (sq.team === 'red' && sq.phase !== 'retreat' && (this.armyBroken.red || (this.pendingWaves.length === 0
+      && this.battalions.every(b => b.team !== 'red' || b.routed)))) {
       sq.phase = 'retreat';
     }
 
@@ -883,7 +938,7 @@ export class ChargeSim {
     // Guards return to their post when nothing threatens it.
     if (sq.ai === 'guard') {
       const t = sq.targetSquad?.riders[0];
-      if (!t || Math.hypot(L.x - sq.home.x, L.y - sq.home.y) > C.GUARD_LEASH) {
+      if (!t || Math.hypot(L.x - sq.home.x, L.y - sq.home.y) > sq.guardRadius + C.GUARD_LEASH - C.GUARD_RADIUS) {
         sq.targetSquad = null;
         return this.rideTo(L, sq.home, false);
       }
@@ -1436,7 +1491,22 @@ export class ChargeSim {
       this.lured++;
     }
     if (!mine && sq.riders.length > 0) this.shockSquad(sq, C.LOSS_SHOCK, r, byPlayer);
+    if (sq.ai === 'general') this.generalDown(r, byPlayer);
     this.events.push({ type: 'rider-down', x: r.x, y: r.y, angle, id: r.id, wasLeader, team: r.team, mine, byPlayer, points, lured });
+  }
+
+  /** The general falls: every red battalion is shaken and the whole army's heart sinks. */
+  private generalDown(r: Soldier, byPlayer: boolean): void {
+    this.generalFallen = true;
+    this.generalKilledByPlayer = byPlayer;
+    const points = byPlayer ? C.GENERAL_SCORE : 0;
+    this.score += points;
+    for (const b of this.battalions) {
+      if (b.team !== r.team || b.routed) continue;
+      b.morale -= C.GENERAL_MORALE_SHOCK;
+      b.sinceShock = 0;
+    }
+    this.events.push({ type: 'general-down', x: r.x, y: r.y, byPlayer, points });
   }
 
   /**
@@ -1694,16 +1764,61 @@ export class ChargeSim {
   }
 
   private updateMorale(dt: number): void {
+    const lost = { blue: 0, red: 0 }, total = { blue: 0, red: 0 };
     for (const b of this.battalions) {
-      if (b.routed) continue;
+      total[b.team] += b.initial;
+      if (b.routed) { lost[b.team] += b.initial; continue; }
       const alive = this.members(b).length;
+      lost[b.team] += b.initial - alive;
       if (alive === 0) { b.routed = true; continue; }
       if (b.sinceShock > C.MORALE_RECOVERY_DELAY) {
         const cap = C.MORALE_CAP_BASE + (100 - C.MORALE_CAP_BASE) * (alive / b.initial);
         if (b.morale < cap) b.morale = Math.min(cap, b.morale + C.MORALE_RECOVERY * dt);
       }
-      if (b.morale <= 0 || alive < b.initial * C.ROUT_STRENGTH) this.rout(b);
+      if (b.morale <= 0 || alive < b.initial * C.ROUT_STRENGTH) {
+        this.rout(b);
+        lost[b.team] += alive; // the men still standing now run too
+      }
     }
+    this.updateArmies(lost, total);
+  }
+
+  /**
+   * Each army's heart follows how much of it is dead or fled. Past ARMY_BREAK the
+   * rest gives up and runs: one giant battle, and when it's won it's won.
+   */
+  private updateArmies(lost: Record<Team, number>, total: Record<Team, number>): void {
+    if (this.outcome !== 'playing') return;
+    for (const team of ['red', 'blue'] as const) {
+      if (this.armyBroken[team] || total[team] === 0) continue;
+      let loss = lost[team] / total[team];
+      if (team === 'red' && this.generalFallen) loss += C.GENERAL_ARMY_SHOCK;
+      this.armyLoss[team] = loss;
+      // Reinforcements still on the way keep an army in the fight.
+      if (team === 'red' && this.pendingWaves.length > 0) continue;
+      if (!this.armyWavered[team] && this.armyMorale(team) < C.ARMY_WAVER) {
+        this.armyWavered[team] = true;
+        this.events.push({ type: 'army-waver', team });
+      }
+      if (loss >= C.ARMY_BREAK[team]) this.breakArmy(team);
+    }
+  }
+
+  private breakArmy(team: Team): void {
+    this.armyBroken[team] = true;
+    let x = 0, y = 0, n = 0;
+    for (const b of this.battalions) {
+      if (b.team !== team || b.routed) continue;
+      b.routed = true;
+      b.morale = 0;
+      x += b.x; y += b.y; n++;
+      for (const s of this.members(b)) {
+        s.fleeing = true;
+        s.fleeDrift = (this.rand() - 0.5) * 0.9;
+      }
+    }
+    if (n === 0) { x = C.WORLD_W / 2; y = C.FRONT_Y; n = 1; }
+    this.events.push({ type: 'army-break', team, x: x / n, y: y / n });
   }
 
   private rout(b: Battalion): void {
@@ -1742,7 +1857,13 @@ export class ChargeSim {
 
   private checkOutcome(): void {
     if (this.outcome !== 'playing') return;
-    if (this.pendingWaves.length === 0 && this.battalions.every(b => b.team !== 'red' || b.routed)
+    if (this.armyBroken.red) {
+      this.outcome = 'victory';
+      this.outcomeReason = this.generalFallen ? 'Their general is dead and the enemy army flees!' : 'The enemy army breaks and flees!';
+    } else if (this.armyBroken.blue) {
+      this.outcome = 'defeat';
+      this.outcomeReason = 'Our army has lost heart and flees.';
+    } else if (this.pendingWaves.length === 0 && this.battalions.every(b => b.team !== 'red' || b.routed)
       && this.squadrons.every(sq => sq.team !== 'red' || sq.riders.length === 0)) {
       this.outcome = 'victory';
       this.outcomeReason = 'The enemy army has broken!';

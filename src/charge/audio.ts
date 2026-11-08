@@ -160,6 +160,9 @@ export class ChargeAudio {
       case 'call-failed':
         this.horn([294, 220], 0.4);
         break;
+      case 'tip':
+        this.chime([660, 880]);
+        break;
       case 'rally':
         if (e.team === 'blue') this.horn([330, 392], 0.3);
         break;

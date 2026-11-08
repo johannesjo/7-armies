@@ -1644,7 +1644,7 @@ export class ChargeView {
 
     this.drawCalls(g, sim);
 
-    // Banners on other squadrons' leaders; allied troops show they can be collected.
+    // Banners on other squadrons' leaders (allied troops also get a JOIN tag).
     for (const sq of sim.squadrons) {
       const SL = sq.riders[0];
       if (sq === sim.player || !SL) continue;
@@ -1655,11 +1655,6 @@ export class ChargeView {
         // Standards over riding squadrons: the general's tall and gilt.
         const general = sq.ai === 'general';
         paintStandard(g, bx, by, general ? 30 : 22, color, general ? 0xd8b050 : mixColor(color, t.trim, 0.75), sim.time * 9 + sq.id, general ? 1.15 : 0.8, general);
-        if (sq.team === 'blue') {
-          const c = sim.squadCenter(sq);
-          const pulse = 0.35 + 0.2 * Math.sin(sim.time * 4 + sq.id);
-          g.ellipse(c.x, c.y, 14 + sq.riders.length * 1.3, (14 + sq.riders.length * 1.3) * 0.6).stroke({ width: 1, color, alpha: pulse });
-        }
         continue;
       }
       if (sq.ai === 'general') {
@@ -1673,11 +1668,7 @@ export class ChargeView {
       }
       g.moveTo(bx, by).lineTo(bx, by - 12).stroke({ width: 1, color: t.obstacleBorder });
       g.poly([bx, by - 12, bx + 7, by - 10 + wave, bx, by - 7]).fill(color);
-      if (sq.team === 'blue') {
-        const c = sim.squadCenter(sq);
-        const pulse = 0.5 + 0.3 * Math.sin(sim.time * 4 + sq.id);
-        g.circle(c.x, c.y, 16 + sq.riders.length * 1.5).stroke({ width: 1.2, color, alpha: pulse });
-      }
+
     }
     this.updateJoinTags(sim);
 
@@ -1717,7 +1708,7 @@ export class ChargeView {
 
   /**
    * Calls for help: a small marker over the enemy battalion to break (no ring round
-   * it); off screen, an arrow at the screen's edge points the way, with the time left.
+   * it); off screen, an arrow at the screen's edge points the way (red when time is short).
    */
   private drawCalls(g: Graphics, sim: ChargeSim): void {
     const t = this.theme;
@@ -1746,10 +1737,6 @@ export class ChargeView {
       const s = 1 + 0.15 * pulse;
       const pts = [[13, 0], [-7, -9], [-3, 0], [-7, 9]].map(([u, v]) => [ex + (u * Math.cos(a) - v * Math.sin(a)) * s, ey + (u * Math.sin(a) + v * Math.cos(a)) * s]).flat();
       sg.poly(pts).fill({ color, alpha: 0.85 }).stroke({ width: 1.5, color: 0x1a140a, alpha: 0.6 });
-      sg.circle(ex - Math.cos(a) * 16, ey - Math.sin(a) * 16, 5).stroke({ width: 2, color, alpha: 0.8 });
-      // The countdown on the dot.
-      sg.moveTo(ex - Math.cos(a) * 16, ey - Math.sin(a) * 16 - 5).arc(ex - Math.cos(a) * 16, ey - Math.sin(a) * 16, 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left)
-        .stroke({ width: 2, color: 0xffffff, alpha: 0.7 });
     }
   }
 

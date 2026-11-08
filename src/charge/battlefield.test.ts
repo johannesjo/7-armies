@@ -220,3 +220,20 @@ describe('calls for help', () => {
     expect(c.side).toBe(expected);
   });
 });
+
+describe('the archer tip', () => {
+  it('is a one-off tip, not a call for help', () => {
+    const sim = new ChargeSim([
+      block({ type: 'archer', role: 'archer', x: 1200, y: 400, count: 20, cols: 10 }),
+      block({ team: 'blue', facing: UP, x: 300, y: 1200 }),
+      block({ x: 2100, y: 200 }),
+    ], { seed: 1, squad: { x: 1200, y: 1300, facing: UP, count: 6 }, muster: false });
+    let tips = 0;
+    for (let t = 0; t < C.ARCHER_TIP_AFTER + 60; t += 1 / 15) {
+      sim.step(1 / 15);
+      tips += sim.events.filter(e => e.type === 'tip').length;
+      expect(sim.calls.length).toBe(0);
+    }
+    expect(tips).toBe(1);
+  });
+});

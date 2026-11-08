@@ -219,16 +219,15 @@ export const CHARGE = {
   CALL_FIRST: 20,
   CALL_GAP: 14,
   CALL_MAX: 2,
-  CALL_TIME: { buckling: 40, breakthrough: 50, archers: 60 },
+  CALL_TIME: { buckling: 40, breakthrough: 50 },
   CALL_SCORE: 300,
   CALL_MORALE: 12,
   /** A front battalion this low on morale, locked in melee, is buckling. */
   CALL_BUCKLE_MORALE: 40,
   /** An enemy battalion this far past the front line (into your side) is breaking through. */
   CALL_BREAKTHROUGH_DEPTH: 140,
-  /** Calls about the enemy archers wait until this far into the battle, and recur at most this often (s). */
-  CALL_ARCHERS_AFTER: 45,
-  CALL_ARCHERS_EVERY: 90,
+  /** The one-off tip to ride down their archers comes this far into the battle (s). */
+  ARCHER_TIP_AFTER: 45,
 
   // --- Archers ---
   ARCHER_RANGE: 480,

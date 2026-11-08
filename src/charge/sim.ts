@@ -179,7 +179,7 @@ export interface Battalion {
   rallied: boolean;
 }
 
-export type CallKind = 'buckling' | 'breakthrough' | 'archers';
+export type CallKind = 'buckling' | 'breakthrough';
 
 /** Your army calls for the squadron: break `target` before the call runs out. */
 export interface HelpCall {
@@ -232,6 +232,8 @@ export type SimEvent =
   | { type: 'call'; x: number; y: number; kind: CallKind; side: HelpCall['side'] }
   | { type: 'call-done'; x: number; y: number; kind: CallKind; side: HelpCall['side']; points: number }
   | { type: 'call-failed'; x: number; y: number; kind: CallKind; side: HelpCall['side'] }
+  /** A one-off tip: their archers are worth riding down (not an objective). */
+  | { type: 'tip'; x: number; y: number; tip: 'archers' }
   | { type: 'hit'; x: number; y: number; angle: number; team: Team; damage: number; id: number }
   | { type: 'kill'; x: number; y: number; angle: number; team: Team; id: number; byPlayer: boolean; side: AttackSide; points: number }
   | { type: 'volley'; id: number; team: Team; x: number; y: number; radius: number; flight: number; atPlayer: boolean }
@@ -351,7 +353,7 @@ export class ChargeSim {
   calls: HelpCall[] = [];
   callsAnswered = 0;
   private callCooldown: number = C.CALL_FIRST;
-  private lastArcherCall = -Infinity;
+  private archerTipGiven = false;
   private nextCallId = 1;
   /** Enemy horsemen on your tail right now: behind your leader, riding at him. */
   onTail: Soldier[] = [];
@@ -1353,8 +1355,8 @@ export class ChargeSim {
 
   /**
    * Your army calls for the squadron where the battle is turning against it: a line
-   * buckling, an enemy battalion breaking through, their archers thinning our ranks.
-   * Break the battalion named in time and the call is answered.
+   * buckling, or an enemy battalion breaking through. Break the battalion named in
+   * time and the call is answered. (Their archers only get a one-off tip.)
    */
   private updateCalls(dt: number): void {
     const P = this.player;
@@ -1397,14 +1399,13 @@ export class ChargeSim {
         if ((b.y - C.FRONT_Y) * ours > C.CALL_BREAKTHROUGH_DEPTH) { pick = { kind: 'breakthrough', target: b, ally: null }; break; }
       }
     }
-    if (!pick && this.time > C.CALL_ARCHERS_AFTER && this.time - this.lastArcherCall > C.CALL_ARCHERS_EVERY) {
-      let best: Battalion | null = null, most = 0;
-      for (const b of this.battalions) {
-        if (b.team !== enemy || b.routed || b.role !== 'archer' || named(b)) continue;
-        const n = this.members(b).length;
-        if (n > most) { most = n; best = b; }
+    if (!pick && !this.archerTipGiven && this.time > C.ARCHER_TIP_AFTER) {
+      // Not an objective, just a tip, once: their archers are soft targets.
+      const archers = this.battalions.find(b => b.team === enemy && !b.routed && b.role === 'archer');
+      if (archers) {
+        this.archerTipGiven = true;
+        this.events.push({ type: 'tip', x: archers.x, y: archers.y, tip: 'archers' });
       }
-      if (best) { pick = { kind: 'archers', target: best, ally: null }; this.lastArcherCall = this.time; }
     }
     if (!pick) return;
     const call: HelpCall = {

@@ -604,16 +604,15 @@ export class ChargeMode {
       if (e.type === 'call') {
         // Short, so it fits a phone: where, and what's wrong.
         const where = e.side === 'centre' ? 'centre' : `${e.side} flank`;
-        this.banner(e.kind === 'buckling' ? `Our ${where} is buckling!`
-          : e.kind === 'breakthrough' ? `Enemy breaking through — ${e.side === 'centre' ? 'centre' : e.side}!`
-          : 'Ride down their archers!', 3000, true);
+        this.banner(e.kind === 'buckling' ? `Our ${where} is buckling!` : `Enemy breaking through — ${e.side}!`, 3000, true);
       }
       if (e.type === 'call-done') {
-        this.banner(e.kind === 'buckling' ? `The ${e.side} holds! +${e.points}` : e.kind === 'breakthrough' ? `Breakthrough stopped! +${e.points}` : `Archers silenced! +${e.points}`, 2000);
+        this.banner(e.kind === 'buckling' ? `The ${e.side} holds! +${e.points}` : `Breakthrough stopped! +${e.points}`, 2000);
       }
       if (e.type === 'call-failed') {
-        this.banner(e.kind === 'buckling' ? `Too late — the ${e.side} gives way` : e.kind === 'breakthrough' ? 'Too late — they broke through' : 'Their archers keep shooting', 2000);
+        this.banner(e.kind === 'buckling' ? `Too late — the ${e.side} gives way` : 'Too late — they broke through', 2000);
       }
+      if (e.type === 'tip') this.banner('Tip: ride down their archers', 2400);
       if (e.type === 'squad-break' && e.byPlayer) this.triggerHitStop(0.35, 0.35);
       if (e.type === 'hunt') this.banner('Enemy knights ride for your banner!', 2400, true);
       if (e.type === 'muster') this.banner('Fresh riders at camp — ride in!', 2600);

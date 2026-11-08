@@ -14,10 +14,10 @@ import { Battalion, ChargeSim, SimEvent, Soldier, Squadron, angleDiff, attackSid
 import { PathPoint } from './path';
 import { DirectZones } from './direct';
 import {
-  COATS, fenceGeometry, haystackGeometry, houseGeometry, oakGeometry, pennantGeometry, pineGeometry,
+  COATS, bushGeometry, fenceGeometry, haystackGeometry, houseGeometry, oakGeometry, pennantGeometry, pineGeometry,
   setModelDetail, standardGeometry, tentGeometry, unitGeometry,
 } from './models3d';
-import { paintDirtTile, paintMeadowTile } from './ground3d';
+import { paintDirtTile, paintMeadowTile, paintScorch } from './ground3d';
 import { Quality, resolveQuality } from './quality3d';
 
 /** What the charge mode needs from a battlefield renderer (2D or 3D). */
@@ -46,7 +46,7 @@ const FIELD_W = C.WORLD_W * S, FIELD_H = C.WORLD_H * S;
 /** The trampled-grass map: one texel per metre over the field. */
 const TRAMPLE_W = Math.round(FIELD_W), TRAMPLE_H = Math.round(FIELD_H);
 /** Lifts the painted meadow to a sunlit tone under this lighting (linear colour). */
-const GROUND_GAIN = new THREE.Color().setRGB(2.05, 1.95, 2.3, THREE.LinearSRGBColorSpace);
+const GROUND_GAIN = new THREE.Color().setRGB(1.45, 1.76, 2.9, THREE.LinearSRGBColorSpace);
 
 /** Gentle, visual-only rolling ground (metres). The simulation stays flat. */
 export function heightAt(x: number, z: number): number {
@@ -59,7 +59,7 @@ const CLOUD_GLSL = /* glsl */`
   uniform float uTime;
   varying vec2 vCloudXZ;
   float cloudShade(vec2 p) {
-    p = p * 0.018 + vec2(uTime * 0.011, uTime * 0.006);
+    p = p * 0.008 + vec2(uTime * 0.006, uTime * 0.0035);
     float n = sin(p.x * 2.1 + sin(p.y * 1.7)) * 0.5 + sin(p.y * 2.7 + sin(p.x * 1.3 + 1.7)) * 0.5 + sin((p.x + p.y) * 4.3) * 0.25;
     return smoothstep(0.3, 0.95, n);
   }
@@ -155,6 +155,9 @@ export class ChargeView3D implements ChargeRenderer {
   private readonly decals: THREE.InstancedMesh;
   private decalNext = 0;
   private decalCount = 0;
+  private readonly scorches: THREE.InstancedMesh;
+  private scorchNext = 0;
+  private scorchCount = 0;
   private readonly arrows: THREE.InstancedMesh;
   private readonly streaks: THREE.InstancedMesh;
   private readonly blobs: THREE.InstancedMesh | null = null;
@@ -177,8 +180,6 @@ export class ChargeView3D implements ChargeRenderer {
   private readonly trampleTex: THREE.DataTexture;
   private trampleDirty = false;
   private trampleTimer = 0;
-  private grass: THREE.Mesh | null = null;
-  private readonly uCam = { value: new THREE.Vector3() };
   private readonly fpsEl: HTMLDivElement;
   private readonly vignette: HTMLDivElement;
   private readonly prevPixiDisplay: string;
@@ -264,7 +265,6 @@ export class ChargeView3D implements ChargeRenderer {
     this.buildGround();
     this.buildScenery();
     this.buildUnits();
-    this.buildGrass();
     this.standardGeo = { blue: standardGeometry('blue'), red: standardGeometry('red') };
     this.pennantGeo = { blue: pennantGeometry('blue'), red: pennantGeometry('red') };
 
@@ -275,6 +275,14 @@ export class ChargeView3D implements ChargeRenderer {
     this.decals.count = 0;
     this.decals.frustumCulled = false;
     this.scene.add(this.decals);
+
+    const scorchTex = new THREE.CanvasTexture(paintScorch());
+    scorchTex.colorSpace = THREE.SRGBColorSpace;
+    this.scorches = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ map: scorchTex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, toneMapped: false }), 600);
+    this.scorches.count = 0;
+    this.scorches.frustumCulled = false;
+    this.scene.add(this.scorches);
 
     this.arrows = new THREE.InstancedMesh(new THREE.BoxGeometry(0.8, 0.035, 0.035), new THREE.MeshLambertMaterial({ color: 0xe8e0cc }), 900);
     this.streaks = new THREE.InstancedMesh(new THREE.BoxGeometry(1.8, 0.02, 0.02).translate(-1.2, 0, 0),
@@ -472,7 +480,6 @@ export class ChargeView3D implements ChargeRenderer {
     const dist = (visW / 2) / Math.tan(hfov / 2);
     this.camera.position.set(this.target.x, this.target.y + Math.cos(TILT) * dist, this.target.z + Math.sin(TILT) * dist);
     this.camera.lookAt(this.target);
-    this.uCam.value.copy(this.target);
     // The sun's shadow box follows the action; snapped to shadow texels so edges don't crawl.
     const box = Math.min(90, visW * 0.9);
     const texel = (box * 2) / this.sun.shadow.mapSize.x;
@@ -617,8 +624,6 @@ export class ChargeView3D implements ChargeRenderer {
     return t;
   }
 
-  private meadowTex: THREE.CanvasTexture | null = null;
-  private dirtMaskTex: THREE.DataTexture | null = null;
 
   private buildGround(): void {
     const W = FIELD_W, H = FIELD_H, pad = 40;
@@ -640,16 +645,16 @@ export class ChargeView3D implements ChargeRenderer {
       r *= 1 - out * 0.55; g *= 1 - out * 0.45; bl *= 1 - out * 0.55;
       tint.push(r, g, bl);
       dirt.push(Math.min(1, Math.max(0, (this.earthAt(x, z) * (0.6 + b * 0.8) - 0.12) * 1.8)));
-      uv.setXY(i, x / 13, z / 13);
+      uv.setXY(i, x / 8, z / 8);
     }
     geo.computeVertexNormals();
     geo.setAttribute('color', new THREE.Float32BufferAttribute(tint, 3));
     geo.setAttribute('aDirt', new THREE.Float32BufferAttribute(dirt, 1));
-    this.meadowTex = this.tile(paintMeadowTile());
+    const meadow = this.tile(paintMeadowTile());
     const earth = this.tile(paintDirtTile());
     // Not tone-mapped: the colours were matched by hand to a sunlit meadow.
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: this.meadowTex, toneMapped: false, color: GROUND_GAIN });
-    const clouds = this.quality === 'high';
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: meadow, toneMapped: false, color: GROUND_GAIN });
+    const clouds = true; // cheap, and they carry much of the field's depth
     mat.onBeforeCompile = (sh) => {
       sh.uniforms.uDirt = { value: earth };
       sh.uniforms.uTrample = { value: this.trampleTex };
@@ -669,109 +674,11 @@ export class ChargeView3D implements ChargeRenderer {
             float worn = smoothstep(0.0, 1.0, max(vDirt, tr * 0.9));
             diffuseColor *= mix(gC, dC * vec4(0.95, 0.9, 0.85, 1.0), worn);
           #endif
-        `) .replace('#include <color_fragment>', '#include <color_fragment>\n' + (clouds ? 'diffuseColor.rgb *= 1.0 - 0.2 * cloudShade(vCloudXZ);\n' : ''));
+        `) .replace('#include <color_fragment>', '#include <color_fragment>\n' + (clouds ? 'diffuseColor.rgb *= 1.0 - 0.26 * cloudShade(vCloudXZ);\n' : ''));
     };
     const ground = new THREE.Mesh(geo, mat);
     ground.receiveShadow = this.quality === 'high';
     this.scene.add(ground);
-    // Static worn-ground mask for the grass blades.
-    const mask = new Uint8Array(TRAMPLE_W * TRAMPLE_H);
-    for (let j = 0; j < TRAMPLE_H; j++) for (let i = 0; i < TRAMPLE_W; i++) mask[j * TRAMPLE_W + i] = Math.round(Math.min(1, this.earthAt(i + 0.5, j + 0.5) * 1.6) * 255);
-    this.dirtMaskTex = new THREE.DataTexture(mask, TRAMPLE_W, TRAMPLE_H, THREE.RedFormat, THREE.UnsignedByteType);
-    this.dirtMaskTex.magFilter = THREE.LinearFilter;
-    this.dirtMaskTex.needsUpdate = true;
-  }
-
-  /**
-   * Grass round the camera: tufts that wrap round the view, grow taller in patches, run
-   * from dark roots to sunlit tips, lean in the wind and lie flat where the field is worn
-   * or trampled — plus wildflowers in their own patches. Fewer of both on Low.
-   */
-  private buildGrass(): void {
-    const high = this.quality === 'high';
-    this.addClutter('grass', high ? 40000 : 10000, high ? 90 : 64);
-    this.addClutter('flowers', high ? 7000 : 2200, high ? 90 : 64);
-  }
-
-  private addClutter(kind: 'grass' | 'flowers', N: number, span: number): void {
-    const pos: number[] = [], base: number[] = [], tip: number[] = [], col: number[] = [], uvs: number[] = [];
-    const flowerColors = [[1.25, 1.22, 1.1], [1.3, 1.1, 0.25], [0.85, 0.55, 1.1], [0.55, 0.65, 1.3], [1.25, 0.75, 0.85]];
-    for (let i = 0; i < N; i++) {
-      const bx = (hash(i, 1) - 0.5) * span, bz = (hash(i, 2) - 0.5) * span;
-      if (kind === 'grass') {
-        for (let b = 0; b < 3; b++) {
-          const a = hash(i, 3 + b) * Math.PI * 2, lean = (hash(i, 6 + b) - 0.5) * 0.25;
-          const ox = Math.cos(a) * 0.08, oz = Math.sin(a) * 0.08, w = 0.032, h = 0.3 + hash(i, 9 + b) * 0.3;
-          const px = -Math.sin(a) * w, pz = Math.cos(a) * w;
-          pos.push(ox + px, 0, oz + pz, ox - px, 0, oz - pz, ox * 1.8 + lean, h, oz * 1.8);
-          tip.push(0, 0, 1);
-          const r = 0.55 + hash(i, 12 + b) * 0.12, t = 1.25 + hash(i, 15 + b) * 0.2;
-          col.push(r, r * 1.04, r * 0.9, r, r * 1.04, r * 0.9, t, t * 1.02, t * 0.82);
-          for (let k = 0; k < 3; k++) { base.push(bx, bz); uvs.push(0, 0); }
-        }
-      } else {
-        // A flower head: a small horizontal cross of petals just above the grass.
-        const h = 0.22 + hash(i, 4) * 0.25, s = 0.05 + hash(i, 5) * 0.04, a = hash(i, 6) * Math.PI;
-        const c = flowerColors[Math.floor(hash(i, 7) * flowerColors.length)];
-        const ca = Math.cos(a) * s, sa = Math.sin(a) * s;
-        pos.push(-ca, h, -sa, sa, h, -ca, ca, h, sa, -ca, h, -sa, ca, h, sa, -sa, h, ca);
-        for (let k = 0; k < 6; k++) { tip.push(1); col.push(c[0], c[1], c[2]); base.push(bx, bz); uvs.push(0, 0); }
-      }
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute('aBase', new THREE.Float32BufferAttribute(base, 2));
-    geo.setAttribute('aTip', new THREE.Float32BufferAttribute(tip, 1));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    const nrm = new Float32Array(pos.length);
-    for (let i = 1; i < nrm.length; i += 3) nrm[i] = 1; // lit like the ground
-    geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
-    const mat = kind === 'grass'
-      ? new THREE.MeshLambertMaterial({ map: this.meadowTex!, vertexColors: true, side: THREE.DoubleSide, toneMapped: false, color: GROUND_GAIN })
-      : new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, toneMapped: false });
-    mat.onBeforeCompile = (sh) => {
-      Object.assign(sh.uniforms, {
-        uCam: this.uCam, uTime: this.uTime, uSpan: { value: span }, uWorld: { value: new THREE.Vector2(FIELD_W, FIELD_H) },
-        uTrample: { value: this.trampleTex }, uMask: { value: this.dirtMaskTex },
-      });
-      const head = `attribute vec2 aBase; attribute float aTip;
-        uniform vec3 uCam; uniform float uTime; uniform float uSpan; uniform vec2 uWorld;
-        uniform sampler2D uTrample; uniform sampler2D uMask;
-        ${HEIGHT_GLSL}
-        vec2 grassBase() { return uCam.xz + mod(aBase - uCam.xz + uSpan * 0.5, uSpan) - uSpan * 0.5; }
-        float patchiness(vec2 p, float f) {
-          return 0.5 + 0.25 * sin(p.x * 0.11 * f + sin(p.y * 0.07 * f) * 2.0) + 0.25 * sin(p.y * 0.13 * f + sin(p.x * 0.09 * f) * 2.0);
-        }
-      `;
-      // Seen from both sides but always lit like the ground (no back-face flip).
-      sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>',
-        'float faceDirection = 1.0;\nvec3 normal = normalize(vNormal);\nvec3 nonPerturbedNormal = normal;');
-      const grow = kind === 'grass'
-        ? 'float grow = mix(0.45, 1.35, smoothstep(0.35, 0.8, patchiness(bp, 1.0)));'
-        : 'float grow = step(0.66, patchiness(bp + 37.0, 1.7));'; // flowers only in their patches
-      sh.vertexShader = head + sh.vertexShader
-        .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\nvMapUv = grassBase() / 13.0;\n#endif')
-        .replace('#include <begin_vertex>', `
-          vec2 bp = grassBase();
-          vec2 muv = bp / uWorld;
-          float inField = step(0.0, muv.x) * step(muv.x, 1.0) * step(0.0, muv.y) * step(muv.y, 1.0);
-          float flatten = max(texture2D(uMask, muv).r, texture2D(uTrample, muv).r);
-          ${grow}
-          float hgt = (1.0 - flatten) * inField * grow;
-          vec3 transformed = vec3(position.x * min(1.0, hgt * 4.0), position.y * hgt, position.z * min(1.0, hgt * 4.0));
-          float w = sin(uTime * 1.8 + bp.x * 0.35 + bp.y * 0.25) * 0.5 + sin(uTime * 3.1 + bp.x * 0.9) * 0.2;
-          transformed.x += w * aTip * 0.12 * hgt;
-          transformed.xz += bp;
-          transformed.y += heightAt(bp) + 0.01;
-        `);
-    };
-    mat.customProgramCacheKey = () => kind;
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.frustumCulled = false;
-    mesh.receiveShadow = this.quality === 'high';
-    this.scene.add(mesh);
-    if (kind === 'grass') this.grass = mesh;
   }
 
   private scatter(geo: THREE.BufferGeometry, items: { x: number; z: number; s: number; r: number }[], mat: THREE.Material, shadow = true): void {
@@ -816,6 +723,14 @@ export class ChargeView3D implements ChargeRenderer {
     const trees = this.unitMaterial({ wind: true, clouds: this.quality === 'high' });
     oaks.forEach((list, v) => this.scatter(oakGeometry(v), list, trees));
     this.scatter(pineGeometry(), pines, trees);
+    // Low dark shrubs dotted about the open field (the fighting rolls over them).
+    const bushes: It[][] = [[], [], []];
+    for (let i = 0; i < 170; i++) {
+      const x = 4 + rnd() * (W - 8), z = 4 + rnd() * (H - 8);
+      if (this.earthAt(x, z) > 0.05) continue;
+      bushes[Math.floor(rnd() * 3)].push({ x, z, s: 0.45 + rnd() * 0.5, r: rnd() * 6.28 });
+    }
+    bushes.forEach((list, v) => this.scatter(bushGeometry(v), list, trees));
     // Stones in the open field.
     const rocks: It[] = [];
     for (let i = 0; i < 160; i++) rocks.push({ x: rnd() * W, z: rnd() * H, s: 0.3 + rnd() * 0.5, r: rnd() * 6.28 });
@@ -1013,6 +928,7 @@ export class ChargeView3D implements ChargeRenderer {
         }
         case 'impact':
           this.burst(e.x * S, e.y * S, e.angle, e.side === 'rear' ? 9 : e.side === 'flank' ? 6 : 4, e.pike);
+          if (Math.random() < 0.45) this.scorch(e.x * S, e.y * S);
           break;
         case 'hit':
           if (Math.random() < 0.5) this.blood(e.x * S, e.y * S, e.angle, 2);
@@ -1055,6 +971,19 @@ export class ChargeView3D implements ChargeRenderer {
       k.dead.count = n;
       k.dead.instanceMatrix.needsUpdate = true;
     }
+  }
+
+  /** A spiky patch of churned earth where a charge struck; they build up over the battle. */
+  private scorch(x: number, z: number): void {
+    const i = this.scorchNext;
+    this.scorchNext = (this.scorchNext + 1) % 600;
+    this.scorchCount = Math.min(600, this.scorchCount + 1);
+    const s = 1.6 + Math.random() * 1.6;
+    this.tmpQ.setFromAxisAngle(this.up, Math.random() * 6.28);
+    this.scorches.setMatrixAt(i, this.tmpM.compose(this.tmpP.set(x, heightAt(x, z) + 0.025, z), this.tmpQ, this.tmpS.set(s, 1, s)));
+    this.tmpS.set(1, 1, 1);
+    this.scorches.count = this.scorchCount;
+    this.scorches.instanceMatrix.needsUpdate = true;
   }
 
   private decal(x: number, z: number): void {

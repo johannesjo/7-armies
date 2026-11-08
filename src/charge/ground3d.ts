@@ -58,6 +58,10 @@ interface Painter {
    * soft shadow to the lower right — the look of a hand-painted meadow seen from above.
    */
   clumps?: { count: number; r0: number; r1: number; roots: string[]; tips: string[]; shadow: string }[];
+  /** Long, thin, slightly curved grass blades lying every which way (seen from above). */
+  blades?: { colors: string[]; count: number; l0: number; l1: number; w0: number; w1: number; a0: number; a1: number; bend: number }[];
+  /** Wind-swept swathes: blades lean along this direction field where `flow(u, v).k` is high. */
+  flow?: (u: number, v: number) => { angle: number; k: number };
 }
 
 function paint(size: number, seed: number, p: Painter): HTMLCanvasElement {
@@ -98,6 +102,30 @@ function paint(size: number, seed: number, p: Painter): HTMLCanvasElement {
       wrapped(size, x, y, l, (px, py) => { ctx.beginPath(); ctx.moveTo(px - dx, py - dy); ctx.lineTo(px + dx, py + dy); ctx.stroke(); });
     }
   }
+  for (const layer of p.blades ?? []) {
+    ctx.lineCap = 'round';
+    for (let i = 0; i < layer.count; i++, k++) {
+      const x = hashI(k, 1, seed) * size, y = hashI(k, 2, seed) * size;
+      const l = layer.l0 + hashI(k, 3, seed) * (layer.l1 - layer.l0);
+      let a = hashI(k, 6, seed) * Math.PI * 2;
+      if (p.flow) {
+        // In a swathe the blades lie the same way (give or take); elsewhere every which way.
+        const f = p.flow(x / size, y / size);
+        if (hashI(k, 9, seed) < f.k) a = f.angle + (hashI(k, 10, seed) - 0.5) * 0.9;
+      }
+      const bend = (hashI(k, 8, seed) - 0.5) * 2 * layer.bend * l;
+      ctx.globalAlpha = layer.a0 + hashI(k, 4, seed) * (layer.a1 - layer.a0);
+      ctx.strokeStyle = layer.colors[Math.floor(hashI(k, 5, seed) * layer.colors.length)];
+      ctx.lineWidth = layer.w0 + hashI(k, 7, seed) * (layer.w1 - layer.w0);
+      const dx = Math.cos(a) * l, dy = Math.sin(a) * l, nx = -Math.sin(a) * bend, ny = Math.cos(a) * bend;
+      wrapped(size, x, y, l, (px, py) => {
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.quadraticCurveTo(px + dx * 0.5 + nx, py + dy * 0.5 + ny, px + dx, py + dy);
+        ctx.stroke();
+      });
+    }
+  }
   for (const layer of p.clumps ?? []) {
     ctx.lineCap = 'round';
     for (let i = 0; i < layer.count; i++, k++) {
@@ -134,31 +162,34 @@ let grassCanvas: HTMLCanvasElement | null = null;
 let dirtCanvas: HTMLCanvasElement | null = null;
 
 /**
- * Lush painted meadow: rich greens from deep shade to sunlit yellow-green, broad soft
- * patches, and thousands of painted grass clumps with dark roots and bright tips.
+ * Sunlit grassland: a warm, low-contrast yellow-green with soil showing through in soft
+ * brownish patches, covered in long, thin, slightly curved blades lying every which way,
+ * and a few darker tufts. Calm enough that the armies stand out on it.
  */
 export function paintMeadowTile(size = 1024): HTMLCanvasElement {
   if (grassCanvas) return grassCanvas;
-  const deep = hex(0x3a5c24), mid = hex(0x537a2e), warm = hex(0x6e9436), sun = hex(0x96ae4e);
-  const broad = tileFbm(3, 3, 11), dapple = tileFbm(9, 3, 23), grain = tileFbm(40, 2, 37);
+  const deep = hex(0x5e6c30), mid = hex(0x6e7c38), warm = hex(0x7e8a3e), soil = hex(0x7a6634);
+  const broad = tileFbm(3, 3, 11), soilN = tileFbm(7, 3, 29), grain = tileFbm(40, 2, 37);
+  const flowA = tileFbm(2, 2, 71), flowK = tileFbm(4, 2, 83);
   grassCanvas = paint(size, 5, {
+    flow: (u, v) => ({ angle: flowA(u, v) * Math.PI * 4, k: clamp01((flowK(u, v) - 0.35) * 2.2) }),
     base: (u, v) => {
-      const b = broad(u, v), d = dapple(u, v), g = grain(u, v);
-      let c = mix(deep, mid, clamp01((b - 0.2) * 1.8));
-      c = mix(c, warm, clamp01((d - 0.48) * 2.2));
-      c = mix(c, sun, clamp01((d - 0.72) * 2.6) * 0.45);
-      const k = 0.92 + g * 0.16;
+      const b = broad(u, v), sN = soilN(u, v), g = grain(u, v);
+      let c = mix(deep, mid, clamp01((b - 0.25) * 1.6));
+      c = mix(c, warm, clamp01((b - 0.55) * 1.8));
+      c = mix(c, soil, clamp01((sN - 0.6) * 2.2) * 0.55); // earth showing between the grass
+      const k = 0.95 + g * 0.1;
       return [c[0] * k, c[1] * k, c[2] * k];
     },
     dabs: [
-      { colors: ['#3c5e26', '#466a2a', '#50762e', '#5c8232', '#6a8e38', '#789a3e', '#32521e'], count: 22000, r0: 2.5, r1: 6, a0: 0.3, a1: 0.65 },
-      { colors: ['#203a14', '#264218', '#1c3412'], count: 6000, r0: 1.8, r1: 3.6, a0: 0.4, a1: 0.75 },
+      // A few darker tufts.
+      { colors: ['#4a5a26', '#52622a', '#44542a'], count: 2500, r0: 3, r1: 7, a0: 0.25, a1: 0.45 },
     ],
-    clumps: [
-      // Shadowed tufts first, then sunlit ones on top, then a few bright yellow-green crowns.
-      { count: 2600, r0: 6, r1: 11, roots: ['#223e16', '#28461a', '#1e3814'], tips: ['#4e7a2a', '#58842e', '#608c32'], shadow: '#162a0e' },
-      { count: 3400, r0: 5, r1: 10, roots: ['#2e501a', '#36581e', '#2c4c1a'], tips: ['#7ea43e', '#8aae44', '#94b44c', '#a0bc54'], shadow: '#1a3010' },
-      { count: 900, r0: 4, r1: 8, roots: ['#3e6422', '#466e26'], tips: ['#b4c862', '#c0d06a', '#c8ce72'], shadow: '#1e3612' },
+    blades: [
+      // Shaded blades underneath, then the sunlit ones on top.
+      { colors: ['#44542a', '#4c5c2c', '#56662e', '#3e4e24'], count: 18000, l0: 16, l1: 34, w0: 2.2, w1: 3.6, a0: 0.6, a1: 0.95, bend: 0.22 },
+      { colors: ['#86923e', '#909a44', '#9aa24a', '#a4aa52', '#aeb05a'], count: 19000, l0: 14, l1: 30, w0: 2, w1: 3.2, a0: 0.5, a1: 0.9, bend: 0.22 },
+      { colors: ['#c0be6c', '#c8c474', '#bab866'], count: 4000, l0: 10, l1: 20, w0: 1.6, w1: 2.6, a0: 0.5, a1: 0.9, bend: 0.25 },
     ],
   });
   return grassCanvas;
@@ -184,4 +215,32 @@ export function paintDirtTile(size = 512): HTMLCanvasElement {
     ],
   });
   return dirtCanvas;
+}
+
+let scorchCanvas: HTMLCanvasElement | null = null;
+
+/** A star of churned earth and flattened grass, where a charge struck (transparent around it). */
+export function paintScorch(size = 128): HTMLCanvasElement {
+  if (scorchCanvas) return scorchCanvas;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const ctx = cv.getContext('2d')!;
+  const c = size / 2;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 70; i++) {
+    const a = hashI(i, 1, 3) * Math.PI * 2, l = size * (0.12 + hashI(i, 2, 3) * 0.36);
+    ctx.globalAlpha = 0.35 + hashI(i, 3, 3) * 0.45;
+    ctx.strokeStyle = ['#5a3c22', '#6e4c2c', '#4a3020', '#7a5a36'][Math.floor(hashI(i, 4, 3) * 4)];
+    ctx.lineWidth = 1.5 + hashI(i, 5, 3) * 4;
+    ctx.beginPath();
+    ctx.moveTo(c + Math.cos(a) * size * 0.05, c + Math.sin(a) * size * 0.05);
+    ctx.lineTo(c + Math.cos(a) * l, c + Math.sin(a) * l);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = '#4e3420';
+  ctx.beginPath(); ctx.ellipse(c, c, size * 0.14, size * 0.11, 0.4, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
+  scorchCanvas = cv;
+  return cv;
 }

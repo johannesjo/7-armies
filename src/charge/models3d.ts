@@ -350,3 +350,15 @@ export function fenceGeometry(): THREE.BufferGeometry {
     P(box(4.1, 0.08, 0.07), 0x7a5a36, 0, 0.75, 0, 0, 0, 0.02, { mat: WOOD }), P(box(4.1, 0.08, 0.07), 0x7a5a36, 0, 0.4, 0, 0, 0, -0.02, { mat: WOOD }),
   ]);
 }
+
+/** A low, dark shrub dotted about the open field. */
+export function bushGeometry(v: number): THREE.BufferGeometry {
+  const greens = [0x2e4a1a, 0x36521e, 0x2a4418, 0x3e5a22];
+  const parts: THREE.BufferGeometry[] = [];
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * Math.PI * 2 + v, r = 0.35 + (k % 2) * 0.12;
+    parts.push(speckle(P(new THREE.IcosahedronGeometry(0.42 + (k % 3) * 0.08, 1), greens[(k + v) % 4], Math.cos(a) * r, 0.32, Math.sin(a) * r), k + v * 7));
+  }
+  parts.push(speckle(P(new THREE.IcosahedronGeometry(0.5, 1), greens[(v + 2) % 4], 0, 0.5, 0), v + 30));
+  return mergeGeometries(parts);
+}

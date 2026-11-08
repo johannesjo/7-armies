@@ -19,6 +19,13 @@ import {
 } from './models3d';
 import { paintDirtTile, paintMeadowTile, paintScorch } from './ground3d';
 import { Quality, resolveQuality } from './quality3d';
+import { HorseKit, clipRows, loadHorseKit } from './horse3d';
+
+let horseKit: HorseKit | null = null;
+/** Load the 3D assets before a battle (cached for the session). */
+export async function preloadView3D(): Promise<void> {
+  horseKit = await loadHorseKit();
+}
 
 /** What the charge mode needs from a battlefield renderer (2D or 3D). */
 export interface ChargeRenderer {
@@ -65,7 +72,7 @@ const CLOUD_GLSL = /* glsl */`
   }
 `;
 
-interface Fx { rig?: boolean; tint?: boolean; matAttr?: boolean; rim?: boolean; clouds?: boolean; wind?: boolean }
+interface Fx { rig?: boolean; tint?: boolean; matAttr?: boolean; rim?: boolean; clouds?: boolean; wind?: boolean; skin?: boolean }
 
 interface Kind {
   mesh: THREE.InstancedMesh;
@@ -78,6 +85,8 @@ interface Kind {
   deadNext: number;
   deadCount: number;
   cavalry: boolean;
+  /** Animated horse: per-instance bake rows (rowA, rowB, blend). */
+  bakeRows: THREE.InstancedBufferAttribute | null;
 }
 
 interface Dying {
@@ -150,7 +159,7 @@ export class ChargeView3D implements ChargeRenderer {
   private readonly kinds: Kind[] = [];
   private readonly kindIndex = new Map<string, number>();
   private readonly soldierKind = new Map<number, number>();
-  private readonly anim = new Map<number, { phase: number; px: number; py: number }>();
+  private readonly anim = new Map<number, { phase: number; px: number; py: number; clipT: number }>();
   private readonly dying: Dying[] = [];
   private readonly decals: THREE.InstancedMesh;
   private decalNext = 0;
@@ -541,6 +550,21 @@ export class ChargeView3D implements ChargeRenderer {
           else if (rk == 6) transformed.xy = rot2(transformed.xy, aRig.xy, sin(ph * 2.0) * 0.16 * aAnim.y);
         `;
       }
+      if (fx.skin) {
+        vHead += `attribute vec4 skinIndex; attribute vec4 skinWeight; attribute vec3 aBake; uniform sampler2D uBake;
+          mat4 bakeBone(float j, float row) {
+            ivec2 c = ivec2(int(j + 0.5) * 3, int(row + 0.5));
+            vec4 a = texelFetch(uBake, c, 0), b = texelFetch(uBake, c + ivec2(1, 0), 0), d = texelFetch(uBake, c + ivec2(2, 0), 0);
+            return mat4(a.x, b.x, d.x, 0.0, a.y, b.y, d.y, 0.0, a.z, b.z, d.z, 0.0, a.w, b.w, d.w, 1.0);
+          }
+          mat4 bakeAt(float row) {
+            return skinWeight.x * bakeBone(skinIndex.x, row) + skinWeight.y * bakeBone(skinIndex.y, row)
+              + skinWeight.z * bakeBone(skinIndex.z, row) + skinWeight.w * bakeBone(skinIndex.w, row);
+          }
+          mat4 bakeSkin() { return bakeAt(aBake.x) * (1.0 - aBake.z) + bakeAt(aBake.y) * aBake.z; }
+        `;
+        begin += 'transformed = (bakeSkin() * vec4(transformed, 1.0)).xyz;\n';
+      }
       if (fx.tint) {
         vHead += 'varying float vTint;\nvarying float vTeam;\n';
         fHead += 'varying float vTint;\nvarying float vTeam;\n';
@@ -575,7 +599,10 @@ export class ChargeView3D implements ChargeRenderer {
           vCloudXZ = (modelMatrix * cw).xz;
         `;
       }
-      sh.vertexShader = vHead + sh.vertexShader.replace('#include <begin_vertex>', begin);
+      if (fx.skin) sh.uniforms.uBake = { value: horseKit?.bake ?? null };
+      let vs = sh.vertexShader.replace('#include <begin_vertex>', begin);
+      if (fx.skin) vs = vs.replace('#include <beginnormal_vertex>', 'vec3 objectNormal = mat3(bakeSkin()) * vec3(normal);');
+      sh.vertexShader = vHead + vs;
       let frag = fHead + sh.fragmentShader;
       let after = '';
       if (fx.tint) after += 'diffuseColor.rgb *= vTint;\n';
@@ -811,36 +838,54 @@ export class ChargeView3D implements ChargeRenderer {
     const mat = this.unitMaterial({ rig: true, tint: true, rim: true, clouds: high });
     const deadMat = this.unitMaterial({ rig: true, tint: true }, 0.72);
     const depth = high ? this.customize(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }), { rig: true }) : undefined;
+    const skinMat = this.unitMaterial({ rig: true, tint: true, rim: true, clouds: high, skin: true });
+    const skinDeadMat = this.unitMaterial({ rig: true, tint: true, skin: true }, 0.72);
+    const skinDepth = high ? this.customize(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }), { rig: true, skin: true }) : undefined;
+    const kit = horseKit;
     const add = (key: string, geo: THREE.BufferGeometry, cap: number, cavalry: boolean) => {
+      const skinned = cavalry && !!kit;
       const anim = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
       anim.setUsage(THREE.DynamicDrawUsage);
       geo.setAttribute('aAnim', anim);
-      const mesh = new THREE.InstancedMesh(geo, mat, cap);
+      let bakeRows: THREE.InstancedBufferAttribute | null = null;
+      if (skinned) {
+        bakeRows = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
+        bakeRows.setUsage(THREE.DynamicDrawUsage);
+        geo.setAttribute('aBake', bakeRows);
+      }
+      const mesh = new THREE.InstancedMesh(geo, skinned ? skinMat : mat, cap);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.count = 0;
       mesh.castShadow = high;
       mesh.receiveShadow = high;
       mesh.frustumCulled = false;
-      if (depth) mesh.customDepthMaterial = depth;
+      const dDepth = skinned ? skinDepth : depth;
+      if (dDepth) mesh.customDepthMaterial = dDepth;
       const deadGeo = geo.clone();
       const still = new Float32Array(MAX_DEAD * 4);
       for (let i = 0; i < MAX_DEAD; i++) still[i * 4 + 3] = 0.5;
       deadGeo.setAttribute('aAnim', new THREE.InstancedBufferAttribute(still, 4));
-      const dead = new THREE.InstancedMesh(deadGeo, deadMat, MAX_DEAD);
+      if (skinned) {
+        // Fallen horses lie in the last pose of the death clip.
+        const last = kit!.clips.Death.start + kit!.clips.Death.frames - 1, rows = new Float32Array(MAX_DEAD * 3);
+        for (let i = 0; i < MAX_DEAD; i++) rows.set([last, last, 0], i * 3);
+        deadGeo.setAttribute('aBake', new THREE.InstancedBufferAttribute(rows, 3));
+      }
+      const dead = new THREE.InstancedMesh(deadGeo, skinned ? skinDeadMat : deadMat, MAX_DEAD);
       dead.count = 0;
       dead.receiveShadow = high;
       dead.castShadow = high;
       dead.frustumCulled = false;
-      if (depth) dead.customDepthMaterial = depth;
+      if (dDepth) dead.customDepthMaterial = dDepth;
       this.scene.add(mesh, dead);
       this.kindIndex.set(key, this.kinds.length);
-      this.kinds.push({ mesh, anim, cap, count: 0, dead, deadMats: new Float32Array(MAX_DEAD * 16), deadNext: 0, deadCount: 0, cavalry });
+      this.kinds.push({ mesh, anim, cap, count: 0, dead, deadMats: new Float32Array(MAX_DEAD * 16), deadNext: 0, deadCount: 0, cavalry, bakeRows });
     };
     for (const team of ['blue', 'red'] as const) {
       add(`swordsman:${team}`, unitGeometry('swordsman', team), 420, false);
       add(`pikeman:${team}`, unitGeometry('pikeman', team), 320, false);
       add(`archer:${team}`, unitGeometry('archer', team), 220, false);
-      for (let v = 0; v < COATS; v++) add(`cavalry:${team}:${v}`, unitGeometry('cavalry', team, v), 90, true);
+      for (let v = 0; v < COATS; v++) add(`cavalry:${team}:${v}`, kit ? kit.geometry(team, v) : unitGeometry('cavalry', team, v), 90, true);
     }
   }
 
@@ -852,7 +897,7 @@ export class ChargeView3D implements ChargeRenderer {
       if (!s.alive) continue;
       const ki = this.kindOf(s);
       let st = this.anim.get(s.id);
-      if (!st) { st = { phase: hash(s.id, 3) * 6.28, px: s.x, py: s.y }; this.anim.set(s.id, st); }
+      if (!st) { st = { phase: hash(s.id, 3) * 6.28, px: s.x, py: s.y, clipT: hash(s.id, 5) * 3 }; this.anim.set(s.id, st); }
       const dist = Math.hypot(s.x - st.px, s.y - st.py);
       st.px = s.x; st.py = s.y;
       const x = s.x * S, z = s.y * S;
@@ -865,7 +910,7 @@ export class ChargeView3D implements ChargeRenderer {
         const kk = Math.min(1, s.speed / C.GALLOP_SPEED);
         st.phase += dt * (4 + 9 * kk);
         amp = s.speed > 15 ? 0.25 + 0.45 * kk : 0;
-        bob = Math.abs(Math.sin(st.phase)) * 0.1 * kk;
+        bob = horseKit ? 0 : Math.abs(Math.sin(st.phase)) * 0.1 * kk;
       } else {
         const speed = dt > 0 ? dist / dt : 0;
         st.phase += Math.min(dist, 10) * 0.55;
@@ -884,6 +929,15 @@ export class ChargeView3D implements ChargeRenderer {
       this.tmpP.set(x, gy + (down ? 0.25 : bob), z);
       k.mesh.setMatrixAt(k.count, this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS));
       k.anim.setXYZW(k.count, st.phase, amp, attack, hash(s.id, 7));
+      if (k.bakeRows && horseKit) {
+        // Gallop, walk or stand by speed, with the clip played at a matching rate.
+        const c = horseKit.clips, sp = s.speed;
+        const clip = sp > 95 ? c.Gallop : sp > 12 ? c.Walk : c.Idle;
+        const rate = sp > 95 ? sp / 175 : sp > 12 ? sp / 55 : 1;
+        st.clipT += dt * rate;
+        const [ra, rb, bl] = clipRows(clip, st.clipT);
+        k.bakeRows.setXYZ(k.count, ra, rb, bl);
+      }
       k.count++;
       if (blobMesh && blobs < 1400) {
         this.tmpQ.setFromAxisAngle(this.up, -s.facing);
@@ -896,6 +950,7 @@ export class ChargeView3D implements ChargeRenderer {
       k.mesh.count = k.count;
       k.mesh.instanceMatrix.needsUpdate = true;
       k.anim.needsUpdate = true;
+      if (k.bakeRows) k.bakeRows.needsUpdate = true;
     }
     if (blobMesh) {
       blobMesh.count = blobs;
@@ -957,8 +1012,10 @@ export class ChargeView3D implements ChargeRenderer {
         this.burstDust(d.x, d.z, 3, 1);
       }
       const k = this.kinds[d.kind];
-      this.tmpQ.setFromAxisAngle(this.up, d.yaw).multiply(this.tmpQ2.setFromAxisAngle(this.fwd, d.roll * (d.slot % 2 ? 1 : -1)));
-      this.tmpP.set(d.x, Math.max(ground, d.y) + 0.24 * (d.roll / (Math.PI / 2)), d.z);
+      // Animated horses already lie on their side in the death pose: no extra roll.
+      const roll = k.bakeRows ? 0 : d.roll;
+      this.tmpQ.setFromAxisAngle(this.up, d.yaw).multiply(this.tmpQ2.setFromAxisAngle(this.fwd, roll * (d.slot % 2 ? 1 : -1)));
+      this.tmpP.set(d.x, Math.max(ground, d.y) + 0.24 * (roll / (Math.PI / 2)), d.z);
       this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS).toArray(k.deadMats, d.slot * 16);
       if (landed) this.dying.splice(i, 1);
     }

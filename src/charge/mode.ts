@@ -228,7 +228,8 @@ export class ChargeMode {
     this.audio.start();
     if (theme.artStyle === '3d') {
       // The 3D renderer (and three.js) only download when that style is picked.
-      const { ChargeView3D } = await import('./view3d');
+      const { ChargeView3D, preloadView3D } = await import('./view3d');
+      await preloadView3D();
       this.view = new ChargeView3D(app, theme, this.host);
     } else {
       this.view = new ChargeView(app, theme);

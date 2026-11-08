@@ -269,6 +269,48 @@ function knight(team: Team, coat: number) {
   return mergeGeometries(g);
 }
 
+/**
+ * A knight in the saddle (with saddle, saddle cloth, shield and couched lance) for the
+ * animated horse: the parts carry no rig of their own (the horse's back moves them),
+ * and the seat is moved by (dx, dy) from where the procedural horse had it.
+ */
+export function riderGeometry(team: Team, dx: number, dy: number): THREE.BufferGeometry {
+  const C = teamColor(team), trim = teamTrim(team);
+  const g: THREE.BufferGeometry[] = [];
+  // Saddle cloth draped over the back and down the flanks, trimmed, with a stripe.
+  g.push(P(box(1.05, 0.46, 0.7), C, -0.12, 1.5, 0, 0, 0, 0, { tint: true }));
+  g.push(P(box(1.07, 0.07, 0.72), trim, -0.12, 1.28, 0, 0, 0, 0, { tint: true }));
+  g.push(P(box(0.12, 0.48, 0.715), trim, 0.12, 1.5, 0, 0, 0, 0, { tint: true }));
+  g.push(P(box(0.58, 0.13, 0.62), PAL.leather, -0.1, 1.74, 0, 0, 0, 0, { mat: LEATHER }));
+  // Rider.
+  const bob: PartOpts = { kind: RIG_KIND.bob, mat: MAIL };
+  g.push(limb(0.62, 0.08, 0.065, PAL.mail, -0.05, 1.74, -0.31, 0.35, 0.15, undefined, bob), limb(0.62, 0.08, 0.065, PAL.mail, -0.05, 1.74, 0.31, 0.35, -0.15, undefined, bob));
+  g.push(P(cyl(0.23, 0.27, 0.62), PAL.mail, -0.1, 2.06, 0, 0, 0, 0, bob));
+  g.push(P(box(0.52, 0.64, 0.37), C, -0.1, 2.01, 0, 0, 0, 0, { ...bob, mat: CLOTH, tint: true }), P(box(0.535, 0.58, 0.085), trim, -0.1, 2.03, 0, 0, 0, 0, { ...bob, mat: CLOTH, tint: true }));
+  const hl = { x: 0, y: 0, z: 0 }, hr = { x: 0, y: 0, z: 0 };
+  const lance: PartOpts = { kind: RIG_KIND.attack, pivot: [-0.1, 2.3], mat: MAIL };
+  g.push(P(sph(0.12), PAL.mail, -0.1, 2.3, -0.28, 0, 0, 0, bob), P(sph(0.12), PAL.mail, -0.1, 2.3, 0.28, 0, 0, 0, bob));
+  g.push(limb(0.56, 0.07, 0.055, PAL.mail, -0.1, 2.32, -0.3, 0.9, -0.2, hl, bob), limb(0.56, 0.07, 0.055, PAL.mail, -0.1, 2.32, 0.3, 1.3, 0.25, hr, lance));
+  g.push(P(cyl(0.17, 0.17, 0.33, 10), PAL.steel, -0.08, 2.6, 0, 0, 0, 0, { ...bob, mat: STEEL })); // great helm
+  g.push(P(box(0.02, 0.035, 0.22), 0x111111, 0.09, 2.63, 0, 0, 0, 0, bob));
+  g.push(P(cone(0.13, 0.45, 7), C, -0.14, 2.95, 0, 0, 0, 0.5, { ...bob, mat: CLOTH }));
+  for (const z of [-0.28, 0.28]) g.push(P(halfSph(0.17), C, -0.1, 2.33, z, 0, 0, 0, { ...bob, mat: CLOTH, tint: true }));
+  // Kite shield with a chevron; couched lance with a pennant.
+  const kx = hl.x + 0.06, ky = hl.y + 0.05, kz = hl.z - 0.09;
+  g.push(P(box(0.05, 0.7, 0.48), C, kx, ky, kz, 0, 0, 0.15, { ...bob, mat: CLOTH, tint: true }));
+  g.push(P(box(0.055, 0.42, 0.08), trim, kx, ky, kz - 0.1, 0.6, 0, 0.15, { ...bob, mat: CLOTH }));
+  g.push(P(box(0.055, 0.42, 0.08), trim, kx, ky, kz + 0.1, -0.6, 0, 0.15, { ...bob, mat: CLOTH }));
+  g.push(P(cyl(0.035, 0.035, 4.0, 6), PAL.wood, hr.x + 1.25, hr.y + 0.05, hr.z, 0, 0, Math.PI / 2 - 0.06, { ...lance, mat: WOOD }));
+  g.push(P(cone(0.06, 0.3, 6), PAL.steel, hr.x + 3.3, hr.y + 0.17, hr.z, 0, 0, -Math.PI / 2 - 0.06, { ...lance, mat: STEEL }));
+  g.push(P(box(0.5, 0.22, 0.012), C, hr.x + 2.65, hr.y + 0.05, hr.z, 0, 0, 0, { ...lance, mat: CLOTH }));
+  const merged = mergeGeometries(g);
+  merged.translate(dx, dy, 0);
+  // No part rigs: the whole rider rides on the horse's back bone.
+  const rig = merged.attributes.aRig as THREE.BufferAttribute;
+  for (let i = 0; i < rig.count; i++) rig.setW(i, 0);
+  return merged;
+}
+
 /** Geometry for a unit kind. `variant` picks the horse's coat. */
 export function unitGeometry(type: UnitType, team: Team, variant = 0): THREE.BufferGeometry {
   switch (type) {

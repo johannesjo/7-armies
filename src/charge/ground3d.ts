@@ -53,6 +53,11 @@ interface Painter {
   dabs: { colors: string[]; count: number; r0: number; r1: number; a0: number; a1: number }[];
   /** Short brush strokes: length, width, mostly at `angle` (rad) give or take `spread`. */
   strokes?: { colors: string[]; count: number; l0: number; l1: number; w0: number; w1: number; a0: number; a1: number; angle: number; spread: number }[];
+  /**
+   * Painted grass clumps: a fan of blades, dark at the root and sunlit at the tip, over a
+   * soft shadow to the lower right — the look of a hand-painted meadow seen from above.
+   */
+  clumps?: { count: number; r0: number; r1: number; roots: string[]; tips: string[]; shadow: string }[];
 }
 
 function paint(size: number, seed: number, p: Painter): HTMLCanvasElement {
@@ -93,6 +98,34 @@ function paint(size: number, seed: number, p: Painter): HTMLCanvasElement {
       wrapped(size, x, y, l, (px, py) => { ctx.beginPath(); ctx.moveTo(px - dx, py - dy); ctx.lineTo(px + dx, py + dy); ctx.stroke(); });
     }
   }
+  for (const layer of p.clumps ?? []) {
+    ctx.lineCap = 'round';
+    for (let i = 0; i < layer.count; i++, k++) {
+      const x = hashI(k, 1, seed) * size, y = hashI(k, 2, seed) * size;
+      const r = layer.r0 + hashI(k, 3, seed) * (layer.r1 - layer.r0);
+      const blades = 6 + Math.floor(hashI(k, 4, seed) * 6);
+      const root = layer.roots[Math.floor(hashI(k, 5, seed) * layer.roots.length)];
+      const tip = layer.tips[Math.floor(hashI(k, 6, seed) * layer.tips.length)];
+      wrapped(size, x, y, r * 2, (px, py) => {
+        ctx.globalAlpha = 0.28;
+        ctx.fillStyle = layer.shadow;
+        ctx.beginPath(); ctx.ellipse(px + r * 0.35, py + r * 0.25, r * 0.95, r * 0.6, 0, 0, Math.PI * 2); ctx.fill();
+        for (let b = 0; b < blades; b++) {
+          const a = -Math.PI / 2 + (hashI(k * 13 + b, 7, seed) - 0.5) * 1.7;
+          const l = r * (0.6 + hashI(k * 13 + b, 8, seed) * 0.6);
+          const bx = px + (hashI(k * 13 + b, 9, seed) - 0.5) * r * 0.8, by = py + r * 0.3;
+          const mx = bx + Math.cos(a) * l * 0.5, my = by + Math.sin(a) * l * 0.5;
+          ctx.lineWidth = Math.max(1, r * 0.22);
+          ctx.globalAlpha = 0.85;
+          ctx.strokeStyle = root;
+          ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(mx, my); ctx.stroke();
+          ctx.lineWidth = Math.max(0.8, r * 0.16);
+          ctx.strokeStyle = tip;
+          ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(bx + Math.cos(a) * l, by + Math.sin(a) * l); ctx.stroke();
+        }
+      });
+    }
+  }
   ctx.globalAlpha = 1;
   return cv;
 }
@@ -100,31 +133,32 @@ function paint(size: number, seed: number, p: Painter): HTMLCanvasElement {
 let grassCanvas: HTMLCanvasElement | null = null;
 let dirtCanvas: HTMLCanvasElement | null = null;
 
-/** Lush meadow: warm yellow-olive greens, soft dapples, fine dabs and dark specks. */
+/**
+ * Lush painted meadow: rich greens from deep shade to sunlit yellow-green, broad soft
+ * patches, and thousands of painted grass clumps with dark roots and bright tips.
+ */
 export function paintMeadowTile(size = 1024): HTMLCanvasElement {
   if (grassCanvas) return grassCanvas;
-  const deep = hex(0x56703a), mid = hex(0x7a9248), warm = hex(0x94a454), sun = hex(0xb4b86c);
-  const broad = tileFbm(3, 3, 11), dapple = tileFbm(10, 3, 23), grain = tileFbm(40, 2, 37);
+  const deep = hex(0x3a5c24), mid = hex(0x537a2e), warm = hex(0x6e9436), sun = hex(0x96ae4e);
+  const broad = tileFbm(3, 3, 11), dapple = tileFbm(9, 3, 23), grain = tileFbm(40, 2, 37);
   grassCanvas = paint(size, 5, {
     base: (u, v) => {
       const b = broad(u, v), d = dapple(u, v), g = grain(u, v);
       let c = mix(deep, mid, clamp01((b - 0.2) * 1.8));
-      c = mix(c, warm, clamp01((d - 0.5) * 2.2));
-      c = mix(c, sun, clamp01((d - 0.75) * 2.5) * 0.35);
-      const k = 0.93 + g * 0.14; // fine mottling
+      c = mix(c, warm, clamp01((d - 0.48) * 2.2));
+      c = mix(c, sun, clamp01((d - 0.72) * 2.6) * 0.45);
+      const k = 0.92 + g * 0.16;
       return [c[0] * k, c[1] * k, c[2] * k];
     },
     dabs: [
-      // Dense dabs of every green, large enough to survive at gameplay zoom, then dark
-      // specks and a few sunlit flecks: a meadow mottled at every scale.
-      { colors: ['#52682f', '#5c7436', '#687e3c', '#768c44', '#84984c', '#94a656', '#a2ae5e', '#486028'], count: 30000, r0: 2.5, r1: 6, a0: 0.35, a1: 0.75 },
-      { colors: ['#304420', '#384c24', '#2c401c'], count: 13000, r0: 1.8, r1: 4, a0: 0.45, a1: 0.85 },
-      { colors: ['#c4c682', '#ced08c', '#d8d896'], count: 4200, r0: 1.5, r1: 3.4, a0: 0.55, a1: 0.95 },
+      { colors: ['#3c5e26', '#466a2a', '#50762e', '#5c8232', '#6a8e38', '#789a3e', '#32521e'], count: 22000, r0: 2.5, r1: 6, a0: 0.3, a1: 0.65 },
+      { colors: ['#203a14', '#264218', '#1c3412'], count: 6000, r0: 1.8, r1: 3.6, a0: 0.4, a1: 0.75 },
     ],
-    strokes: [
-      // Short dark blades leaning one way, and a few lit ones: a brushy meadow.
-      { colors: ['#344a1e', '#3c5424', '#2e4220'], count: 6000, l0: 5, l1: 12, w0: 1.4, w1: 2.6, a0: 0.4, a1: 0.75, angle: -1.1, spread: 0.5 },
-      { colors: ['#b8bc72', '#c4c67c'], count: 2200, l0: 4, l1: 9, w0: 1.2, w1: 2, a0: 0.4, a1: 0.8, angle: -1.1, spread: 0.5 },
+    clumps: [
+      // Shadowed tufts first, then sunlit ones on top, then a few bright yellow-green crowns.
+      { count: 2600, r0: 6, r1: 11, roots: ['#223e16', '#28461a', '#1e3814'], tips: ['#4e7a2a', '#58842e', '#608c32'], shadow: '#162a0e' },
+      { count: 3400, r0: 5, r1: 10, roots: ['#2e501a', '#36581e', '#2c4c1a'], tips: ['#7ea43e', '#8aae44', '#94b44c', '#a0bc54'], shadow: '#1a3010' },
+      { count: 900, r0: 4, r1: 8, roots: ['#3e6422', '#466e26'], tips: ['#b4c862', '#c0d06a', '#c8ce72'], shadow: '#1e3612' },
     ],
   });
   return grassCanvas;

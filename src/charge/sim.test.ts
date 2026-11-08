@@ -118,7 +118,8 @@ describe('squadron', () => {
 
   it('camp garrisons fill up while you are away; ride through to take the whole troop', () => {
     const camp = C.CAMPS[1];
-    const sim = new ChargeSim([], { seed: 1, squad: { x: 1200, y: 300, facing: 0, count: 4 } });
+    // Distant battalions keep the battle undecided (garrisons stop growing once it's won).
+    const sim = new ChargeSim([block({ x: 1200, y: 100 }), block({ team: 'blue', x: 1200, y: 700, facing: UP })], { seed: 1, squad: { x: 300, y: 300, facing: 0, count: 4 } });
     const garrison = () => sim.squadrons.find(sq => sq.ai === 'garrison' && Math.hypot(sq.home.x - camp.x, sq.home.y - camp.y) < 1)!;
     expect(garrison().riders).toHaveLength(C.GARRISON_START);
     for (let t = 0; t < C.GARRISON_INTERVAL * 3 + 0.1; t += 1 / 30) sim.step(1 / 30);
@@ -491,5 +492,55 @@ describe('the red general', () => {
     for (let t = 0; t < 2; t += 1 / 60) sim.step(1 / 60, { dirX: 0, dirY: 0, gallop: false });
     // 300 away: outside his radius, so the guard stays at its post.
     expect(Math.hypot(guard.riders[0].x - 600, guard.riders[0].y - 300)).toBeLessThan(30);
+  });
+});
+
+describe('review fixes', () => {
+  it('no army keeps losing heart once the battle is decided', () => {
+    const blues = [0, 1, 2, 3, 4].map(i => block({ team: 'blue', x: 300 + i * 150, y: 1300, facing: UP }));
+    const sim = new ChargeSim([block({ x: 2000, y: 200 }), ...blues], { seed: 1, squad: null });
+    // Blue badly hurt (wavering, draining) — then red breaks: victory.
+    for (const b of sim.battalions.filter(b => b.team === 'blue').slice(0, 3)) b.morale = -1;
+    sim.step(1 / 30); sim.step(1 / 30);
+    sim.battalions[0].morale = -1;
+    sim.step(1 / 30);
+    expect(sim.outcome).toBe('victory');
+    const before = sim.battalions.filter(b => b.team === 'blue' && !b.routed).map(b => b.morale);
+    for (let t = 0; t < 20; t += 1 / 30) sim.step(1 / 30);
+    const after = sim.battalions.filter(b => b.team === 'blue' && !b.routed).map(b => b.morale);
+    after.forEach((m, i) => expect(m).toBeGreaterThanOrEqual(before[i]));
+  });
+
+  it("the general's bodyguard rides with him", () => {
+    const sim = new ChargeSim([block({ y: 900 })], {
+      seed: 1, squad: { x: 300, y: 300, facing: 0, count: 1 }, muster: false,
+      squads: [
+        { team: 'red', ai: 'general', x: 600, y: 300, facing: DOWN, count: 1 },
+        { team: 'red', ai: 'guard', ward: 'general', x: 600, y: 330, facing: DOWN, count: 4, guardRadius: 170 },
+      ],
+    });
+    const general = sim.squadrons.find(sq => sq.ai === 'general')!;
+    const guard = sim.squadrons.find(sq => sq.ai === 'guard')!;
+    // Move the general's post far away: he rides there, and his escort must follow.
+    general.home.x = 1300;
+    for (let t = 0; t < 8; t += 1 / 60) sim.step(1 / 60, { dirX: 0, dirY: 0, gallop: false });
+    const G = sim.general!;
+    expect(G.x).toBeGreaterThan(1150);
+    expect(Math.hypot(guard.riders[0].x - G.x, guard.riders[0].y - G.y)).toBeLessThan(120);
+  });
+
+  it('weaving along a camp ring does not heal again and again', () => {
+    const camp = C.CAMPS[1];
+    const sim = new ChargeSim([], { seed: 1, squad: { x: camp.x - C.CAMP_R - 20, y: camp.y, facing: 0, count: 3 }, muster: false });
+    let pits = 0;
+    const L = () => sim.leader!;
+    for (let i = 0; i < 4; i++) {
+      // In just past the edge, then out just past it again.
+      L().x = camp.x - C.CAMP_R + 5; sim.step(1 / 60);
+      pits += sim.events.filter(e => e.type === 'pit-stop').length;
+      L().x = camp.x - C.CAMP_R - 10; sim.step(1 / 60);
+      pits += sim.events.filter(e => e.type === 'pit-stop').length;
+    }
+    expect(pits).toBe(1);
   });
 });

@@ -68,8 +68,8 @@ export function createSquadSpecs(): SquadSpec[] {
     { team: 'red', ai: 'guard', x: cx + 640, y: C.FRONT_Y - 430, facing: DOWN, count: 8 },
     { team: 'red', ai: 'guard', x: cx - 640, y: C.FRONT_Y - 430, facing: DOWN, count: 8 },
     { team: 'red', ai: 'general', x: cx, y: C.FRONT_Y - 650, facing: DOWN, count: 1 },
-    // His bodyguard stays close: it rides only at horsemen who come near him.
-    { team: 'red', ai: 'guard', x: cx, y: C.FRONT_Y - 620, facing: DOWN, count: 6, guardRadius: 170 },
+    // His bodyguard escorts him wherever he rides, and rides only at horsemen who come near.
+    { team: 'red', ai: 'guard', ward: 'general', x: cx, y: C.FRONT_Y - 620, facing: DOWN, count: 6, guardRadius: 170 },
     { team: 'red', ai: 'hunter', x: cx + 300, y: C.FRONT_Y - 600, facing: DOWN, count: 10, muster: 70 },
   ];
 }

@@ -101,8 +101,9 @@ export class ChargeMode {
   private endTimer = -1;
   /** Seconds since victory — the pursuit, when you ride down the fleeing army (-1 = not won yet). */
   private pursuitTimer = -1;
-  /** Your kill count at the moment of victory. */
+  /** Your kill count and riders at the moment of victory. */
   private pursuitKills = -1;
+  private victoryRiders = 0;
   private readonly endBtn = $('ch-end-btn');
   private hudTimer = 0;
   private frameEvents: SimEvent[] = [];
@@ -442,16 +443,19 @@ export class ChargeMode {
       if (this.pursuitTimer < 0) {
         this.pursuitTimer = 0;
         this.pursuitKills = sim.kills;
+        this.victoryRiders = sim.riders.length;
         this.banner('Victory!', 3200, true);
         this.audio.victory();
         this.endBtn.classList.add('active');
         setTimeout(() => {
-          if (this.sim === sim && this.pursuitTimer >= 0) this.banner('The enemy flees — ride them down!', 2800, true);
+          if (this.sim === sim && this.pursuitTimer >= 0 && !this.paused) this.banner('The enemy flees — ride them down!', 2800, true);
         }, 3400);
       }
       this.pursuitTimer += rawDt;
       const fleeing = sim.soldiers.some(s => s.team === 'red' && s.alive);
-      if (this.pursuitTimer > PURSUIT_MAX || (!fleeing && this.pursuitTimer > 6)) this.finish();
+      // Ends on its own once the field is clear — or if your squadron fell in the chase.
+      const noSquad = sim.riders.length === 0 && this.pursuitTimer > 3;
+      if (this.pursuitTimer > PURSUIT_MAX || (!fleeing && this.pursuitTimer > 6) || noSquad) this.finish();
     } else if (sim.outcome !== 'playing') {
       if (this.endTimer < 0) {
         this.endTimer = END_DELAY;
@@ -466,7 +470,8 @@ export class ChargeMode {
     const sim = this.sim!;
     this.endBtn.classList.remove('active');
     this.pursuitTimer = -1;
-    const score = sim.score + (sim.outcome === 'victory' ? 500 + sim.riders.length * 50 : 0);
+    // The victory bonus counts the riders who won the battle, not those picked up in the pursuit.
+    const score = sim.score + (sim.outcome === 'victory' ? 500 + this.victoryRiders * 50 : 0);
     const prevBest = readBest();
     const newBest = score > prevBest;
     if (newBest) writeBest(score);
@@ -518,7 +523,7 @@ export class ChargeMode {
     let hurt = false;
     for (const e of events) {
       if (e.type === 'rider-hit' && e.mine) hurt = true;
-      if (e.type === 'rout' && e.team === 'blue' && !this.sim?.armyBroken.blue) this.banner('Our line is breaking — hurry!', 2200, true);
+      if (e.type === 'rout' && e.team === 'blue' && !this.sim?.armyBroken.blue && this.sim?.outcome === 'playing') this.banner('Our line is breaking — hurry!', 2200, true);
       if (e.type === 'rout' && e.team === 'red' && this.sim && this.sim.outcome === 'playing') {
         if (!this.sim.armyBroken.red) this.banner(`Enemy morale ${Math.round(this.sim.armyMorale('red') * 100)}%`, 1600);
       }

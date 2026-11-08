@@ -775,7 +775,7 @@ export class ChargeView {
         case 'muster':
           this.popup(e.x, e.y - 20, 'Fresh riders!', t.blue, 16, 1.6);
           break;
-        case 'rally':
+        case 'garrison':
           this.popup(e.x, e.y - 10, '+1 rider', t.blue, 13);
           break;
         case 'rout':

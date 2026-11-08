@@ -407,6 +407,26 @@ export class ChargeMode {
     this.view.resize(this.host.clientWidth, this.host.clientHeight);
   }
 
+  /** Real seconds of hit-stop left, and how slow the battle runs during it. */
+  private hitStop = 0;
+  private hitStopSlow = 1;
+
+  /**
+   * The big moments land with weight: time briefly slows (hit-stop) when your charge
+   * crashes home, longer when you break a squadron or cut down the general. Eases back
+   * to full speed rather than snapping.
+   */
+  private hitStopScale(rawDt: number): number {
+    if (this.hitStop <= 0) return 1;
+    this.hitStop -= rawDt;
+    const k = Math.min(1, Math.max(0, this.hitStop / 0.08));
+    return 1 - (1 - this.hitStopSlow) * k;
+  }
+
+  private triggerHitStop(seconds: number, slow: number): void {
+    if (seconds > this.hitStop) { this.hitStop = seconds; this.hitStopSlow = slow; }
+  }
+
   private tick(ticker: Ticker): void {
     const sim = this.sim, view = this.view;
     if (!sim || !view) return;
@@ -416,7 +436,7 @@ export class ChargeMode {
     if (this.paused) return;
 
     const drawing = this.controls.drawing && this.endTimer < 0;
-    const dt = rawDt;
+    const dt = rawDt * this.hitStopScale(rawDt);
 
     // Advance by exactly the real time since the last frame, in slices of at most
     // 1/60 s. A fixed step would run 0 or 2 steps on some frames (constantly on
@@ -554,7 +574,10 @@ export class ChargeMode {
       }
       if (e.type === 'general-down') {
         this.banner(e.byPlayer ? 'You cut down the enemy general!' : 'The enemy general has fallen!', 2800, true);
+        if (e.byPlayer) this.triggerHitStop(0.6, 0.25);
       }
+      if (e.type === 'clash') this.triggerHitStop(e.pike ? 0.12 : 0.16, 0.3);
+      if (e.type === 'squad-break' && e.byPlayer) this.triggerHitStop(0.35, 0.35);
       if (e.type === 'hunt') this.banner('Enemy knights ride for your banner!', 2400, true);
       if (e.type === 'muster') this.banner('Fresh riders at camp — ride in to take command', 2600);
       if (e.type === 'join') this.banner(`+${e.count} riders join your squadron`, 1600);

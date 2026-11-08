@@ -248,3 +248,41 @@ describe('the pike hedge', () => {
     expect(events.some(e => e.type === 'rider-down' && e.team === 'blue')).toBe(false);
   });
 });
+
+describe('warnings and big moments', () => {
+  it('warns when enemy horse charges you from behind, not when it comes head-on', () => {
+    const tailRun = (redX: number, redFacing: number) => {
+      const sim = new ChargeSim([block()], {
+        seed: 6, squad: { x: 800, y: 600, facing: 0, count: 3 }, muster: false,
+        squads: [{ team: 'red', ai: 'hunter', x: redX, y: 600, facing: redFacing, count: 3, style: 'heavy' }],
+      });
+      sim.squadrons[1].riders.forEach(r => { r.speed = C.GALLOP_SPEED; });
+      const events: SimEvent[] = [];
+      let tailed = false;
+      for (let t = 0; t < 0.5; t += 1 / 60) {
+        sim.step(1 / 60, { dirX: 1, dirY: 0, gallop: false });
+        events.push(...sim.events);
+        if (sim.onTail.length > 0) tailed = true;
+      }
+      return { tailed, warned: events.filter(e => e.type === 'tail').length };
+    };
+    const behind = tailRun(620, 0); // they gallop up behind us
+    expect(behind.tailed).toBe(true);
+    expect(behind.warned).toBe(1); // once, not every step
+    const ahead = tailRun(1050, Math.PI); // they come at our front
+    expect(ahead.tailed).toBe(false);
+    expect(ahead.warned).toBe(0);
+  });
+
+  it('a squadron crashing into enemy horse is one clash, not one per rider', () => {
+    const sim = new ChargeSim([block()], {
+      seed: 4, squad: { x: 470, y: 600, facing: 0, count: 6 }, muster: false,
+      squads: [{ team: 'red', ai: 'hunter', x: 600, y: 600, facing: 0, count: 5, muster: 20 }],
+    });
+    for (const r of sim.riders) r.speed = C.GALLOP_SPEED;
+    const events = ride(sim, 0, 0.6);
+    const clashes = events.filter(e => e.type === 'clash').length;
+    expect(clashes).toBeGreaterThan(0);
+    expect(clashes).toBeLessThan(3);
+  });
+});

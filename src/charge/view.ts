@@ -1038,6 +1038,21 @@ export class ChargeView {
           }
           break;
         }
+        case 'clash': {
+          // Your squadron crashes home: a big shockwave, flying earth and splinters.
+          if (this.impacts.length > 40) this.impacts.shift();
+          this.impacts.push({ x: e.x, y: e.y, angle: e.angle, age: 0, strength: 2.6, rear: !e.pike, pike: e.pike });
+          this.burstDust(e.x, e.y, e.angle, 6);
+          for (let i = 0; i < 7; i++) {
+            const a = e.angle + Math.PI + (this.rand() - 0.5) * 2.6, sp = 60 + this.rand() * 110;
+            this.addParticle({
+              x: e.x, y: e.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, age: 0,
+              life: 0.3 + this.rand() * 0.3, size: 0.7 + this.rand() * 0.6, grow: -0.5,
+              color: e.pike ? t.steel : t.wood, alpha: 0.95, stain: false,
+            });
+          }
+          break;
+        }
         case 'general-down':
           if (this.impacts.length > 40) this.impacts.shift();
           this.impacts.push({ x: e.x, y: e.y, angle: 0, age: 0, strength: 3, rear: true, pike: false });
@@ -1663,6 +1678,19 @@ export class ChargeView {
 
     if (!L) return;
     this.drawExposed(g, sim, L);
+    // On your tail: a pulsing red chevron beside your leader, pointing at the danger.
+    for (const R of sim.onTail) {
+      const a = Math.atan2(R.y - L.y, R.x - L.x);
+      const pulse = 0.55 + 0.45 * Math.sin(sim.time * 14);
+      const cx = L.x + Math.cos(a) * 24, cy = L.y + Math.sin(a) * 24;
+      const px = -Math.sin(a), py = Math.cos(a);
+      g.poly([
+        cx + Math.cos(a) * 5, cy + Math.sin(a) * 5,
+        cx + px * 4.5 - Math.cos(a) * 1.5, cy + py * 4.5 - Math.sin(a) * 1.5,
+        cx + Math.cos(a) * 1.5, cy + Math.sin(a) * 1.5,
+        cx - px * 4.5 - Math.cos(a) * 1.5, cy - py * 4.5 - Math.sin(a) * 1.5,
+      ]).fill({ color: t.labelWarn, alpha: 0.5 + 0.45 * pulse }).stroke({ width: 0.8, color: 0x1a0c08, alpha: 0.6 });
+    }
     // Leader marker: a small, faint heading chevron ahead of him.
     const cx = L.x + Math.cos(L.facing) * 17, cy = L.y + Math.sin(L.facing) * 17;
     const px = -Math.sin(L.facing), py = Math.cos(L.facing);

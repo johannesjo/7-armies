@@ -36,9 +36,9 @@ function teamCss(team: 'blue' | 'red'): string {
   return `#${c.toString(16).padStart(6, '0')}`;
 }
 
-/** Parchment and ink use the light page styling; the others use the dark overlays. */
+/** Ink & watercolour uses the light page styling; the others use the dark overlays. */
 function applyBodyTheme(): void {
-  document.body.classList.toggle('day-mode', themeSelect.value === 'parchment' || themeSelect.value === 'ink');
+  document.body.classList.toggle('day-mode', themeSelect.value === 'ink');
   document.body.classList.toggle('style-rts', themeSelect.value === 'rts');
 }
 

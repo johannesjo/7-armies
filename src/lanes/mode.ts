@@ -1,5 +1,5 @@
 import { Application } from 'pixi.js';
-import { FIELD_THEME, Theme } from '../theme';
+import { RTS_THEME, Theme } from '../theme';
 import { ChargeMode } from '../charge/mode';
 import { CHARGE as C } from '../charge/config';
 import { ChargeSim, SimEvent } from '../charge/sim';
@@ -137,8 +137,8 @@ export class LaneMode extends ChargeMode {
   }
 
   protected override async createView(app: Application, theme: Theme): Promise<ChargeRenderer> {
-    // The 3D renderer only knows the battle's field so far: lanes use the painted field look.
-    return new LaneView(app, theme.artStyle === '3d' ? FIELD_THEME : theme);
+    // The 3D renderer only knows the battle's field so far: lanes use the Classic RTS look.
+    return new LaneView(app, theme.artStyle === '3d' ? RTS_THEME : theme);
   }
 
   protected override intro(): void {

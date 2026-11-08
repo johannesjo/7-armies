@@ -4,7 +4,7 @@ import { Team, UnitType, Vec2 } from '../types';
 import { Theme } from '../theme';
 import { drawUnitArt, HORSE_VARIANTS, attackPose, attackDuration } from '../unit-art';
 import { CHARGE as C } from './config';
-import { ArtStyle, drawStyledUnit, paintFeltTile, paintPaperTile } from './art-styles';
+import { ArtStyle, drawStyledUnit, paintPaperTile } from './art-styles';
 import { CORPSE_FRAME, FRAMES, DRAWN_DIRS, IDLE_FRAME, INFANTRY_LOOKS, WeaponSegment, attackFrame, buildFigure, canvasPainter, deathFrame, dirAngle, facingFrame, fleeFrame, paintLongWeapon, projectLocal, walkFrame } from './figure-art';
 import { Battalion, ChargeSim, SimEvent, Soldier, Squadron, angleDiff, attackSide, mulberry32 } from './sim';
 import { PathPoint } from './path';
@@ -398,8 +398,7 @@ export class ChargeView {
     this.ink = theme.labelFill;
     this.dust = theme.grass ? mixColor(theme.dirt, theme.trim, 0.45) : mixColor(theme.bg, theme.obstacleBorder, 0.35);
     // Beyond the field: forest floor on grass, a darker margin otherwise.
-    app.renderer.background.color = this.style === 'mini' ? 0x4e3420 // the wooden table under the felt
-      : this.style === 'ink' ? 0xd6c7a2
+    app.renderer.background.color = this.style === 'ink' ? 0xd6c7a2
       : theme.artStyle === 'rts' ? CANOPY
       : theme.grass ? 0x33441f : mixColor(theme.bg, this.ink, 0.18);
 
@@ -583,13 +582,13 @@ export class ChargeView {
     const t = this.theme;
     const rand = mulberry32(4321);
     // The grass tile and its texture live for the whole session (shared by every battle).
-    const tile = this.style === 'mini' ? paintFeltTile(t) : this.style === 'ink' ? paintPaperTile(t) : paintGrassTile(t, 768, 3);
+    const tile = this.style === 'ink' ? paintPaperTile(t) : paintGrassTile(t, 768, 3);
     // Upright style: the meadow runs on under the wood, so the ragged edge has grass in its bays.
     const gm = this.upright ? 120 : 0;
     const grass = new TilingSprite({ texture: sharedTexture(tile), width: this.W + gm * 2, height: this.H + gm * 2 });
     grass.position.set(-gm, -gm);
     grass.tilePosition.set(gm, gm);
-    grass.tileScale.set(this.style === 'mini' || this.style === 'ink' ? 0.75 : 0.5);
+    grass.tileScale.set(this.style === 'ink' ? 0.75 : 0.5);
     // The meadow's colour patches run on under the wood too (no seam in its bays).
     const overlay = new Sprite(sharedTexture(gm > 0
       ? paintGroundOverlay(this.W + gm * 2, this.H + gm * 2, t, (x, y) => this.earthAt(x - gm, y - gm), 4, 11, `${this.field.key}-wide`)
@@ -606,28 +605,6 @@ export class ChargeView {
       forest.width = this.W + FOREST_MARGIN * 2;
       forest.height = this.H + FOREST_MARGIN * 2;
       this.world.addChild(forest);
-    }
-    if (this.style === 'mini') {
-      // Scatter-flock patches, the way terrain is dressed on a wargames table.
-      const flock = new Graphics();
-      const fr = mulberry32(77);
-      const tones = [t.grassLight, t.grassDry, mixColor(t.grassDark, 0x1a2a10, 0.4), t.dirt];
-      for (let i = 0; i < 420; i++) {
-        const x = fr() * this.W, y = fr() * this.H;
-        const color = tones[Math.floor(fr() * tones.length)];
-        const spread = 8 + fr() * 22;
-        // A patch is a drift of fine grains, denser in the middle.
-        for (let k = 0; k < 40; k++) {
-          const a = fr() * Math.PI * 2, d = Math.pow(fr(), 1.6) * spread;
-          flock.circle(x + Math.cos(a) * d * 1.4, y + Math.sin(a) * d, 0.5 + fr() * 1.1)
-            .fill({ color, alpha: 0.35 + fr() * 0.3 });
-        }
-      }
-      this.world.addChild(flock);
-      // The felt's cut edge, with the table showing beyond.
-      const edge = new Graphics();
-      edge.rect(-6, -6, this.W + 12, this.H + 12).stroke({ width: 10, color: 0x000000, alpha: 0.25 });
-      this.world.addChild(edge);
     }
 
     // Scenery as sprites baked from a handful of drawings.
@@ -785,7 +762,7 @@ export class ChargeView {
         n++;
       }
     }
-    const trees = this.style === 'mini' || this.upright ? 0 : 300;
+    const trees = this.upright ? 0 : 300;
     for (let i = 0; i < trees; i++) {
       const side = Math.floor(rand() * 4);
       const along = rand();
@@ -1105,12 +1082,7 @@ export class ChargeView {
       this.stainDirty = true;
       return;
     }
-    if (this.style === 'mini') {
-      // A toppled miniature: knocked flat on its side, paint intact.
-      root.alpha = 1;
-      root.scale.set(1, 0.62);
-      if (body) body.tint = 0xd6d6d6;
-    } else if (this.style === 'ink') {
+    if (this.style === 'ink') {
       root.alpha = 0.55;
       if (body) body.tint = 0xffffff;
     }
@@ -1438,28 +1410,7 @@ export class ChargeView {
     // Upright figures stride further per cycle: a full gallop stride is about a horse length and a half.
     u.phase += Math.min(dist, 12) * (this.upright ? (s.type === 'cavalry' ? 0.2 : 0.55) : s.rider ? 0.32 : 0.75);
     const moving = speed > 6 && !down;
-    if (this.style === 'mini') {
-      if (down) {
-        // Knocked flat: the figure lies on its side, base and all.
-        u.root.rotation += (s.id % 2 === 0 ? 0.25 : -0.25);
-        sy *= 0.8;
-      } else if (s.rider) {
-        // Rocking horse: pitch fore and aft (seen from above it lengthens and shortens)
-        // and a lift on every stride.
-        const rock = Math.sin(u.phase);
-        const k = Math.min(1, speed / C.CANTER_SPEED);
-        sx *= 1 + 0.08 * rock * k;
-        u.root.x += Math.cos(s.facing) * rock * 0.9 * k;
-        u.root.y -= Math.abs(rock) * 1.6 * k;
-        scale *= 1 + Math.abs(rock) * 0.05 * k;
-      } else if (moving) {
-        // Hopping across the table as if moved by hand, with a little wobble.
-        const hop = Math.abs(Math.sin(u.phase));
-        u.root.y -= hop * 1.5;
-        scale *= 1 + hop * 0.06;
-        u.root.rotation += Math.sin(u.phase) * 0.09;
-      }
-    } else if (this.style === 'ink') {
+    if (this.style === 'ink') {
       // Line boil: every few frames each figure is "redrawn" a hair differently.
       const k = Math.floor(time * 8);
       const h = (n: number) => { const x = Math.sin((s.id * 12.9898 + k * 78.233 + n * 37.719)) * 43758.5453; return x - Math.floor(x); };

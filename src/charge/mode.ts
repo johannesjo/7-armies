@@ -592,9 +592,11 @@ export class ChargeMode {
     ctx.strokeStyle = hex(theme.blue);
     ctx.globalAlpha = 0.6;
     ctx.lineWidth = dpr;
-    ctx.beginPath();
-    ctx.arc(C.CAMP_X * sx, C.CAMP_Y * sy, C.CAMP_R * sx, 0, Math.PI * 2);
-    ctx.stroke();
+    for (const c of C.CAMPS) {
+      ctx.beginPath();
+      ctx.arc(c.x * sx, c.y * sy, C.CAMP_R * sx, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     const dot = Math.max(1, 1.5 * dpr);
     // One pass per team and state, so the fill style changes only four times.

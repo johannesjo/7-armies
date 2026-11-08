@@ -157,8 +157,8 @@ export class ChargeView {
   private readonly ink: number;
   private readonly dust: number;
 
-  private camX: number = C.CAMP_X;
-  private camY: number = C.CAMP_Y - 200;
+  private camX: number = C.CAMPS[0].x;
+  private camY: number = C.CAMPS[0].y - 200;
   private zoom = 2;
   private viewW = 800;
   private viewH = 450;
@@ -342,7 +342,8 @@ export class ChargeView {
     const cx = C.WORLD_W / 2;
     const xFade = Math.max(0, 1 - Math.max(0, Math.abs(x - cx) - 380) / 160);
     const front = Math.max(0, 1 - Math.abs(y - C.FRONT_Y) / 80) * xFade;
-    const camp = Math.max(0, 1 - Math.hypot(x - C.CAMP_X, y - C.CAMP_Y) / (C.CAMP_R * 1.15));
+    let camp = 0;
+    for (const c of C.CAMPS) camp = Math.max(camp, 1 - Math.hypot(x - c.x, y - c.y) / (C.CAMP_R * 1.15));
     const redCamp = y < 200 ? Math.max(0, 1 - Math.max(0, Math.abs(x - cx) - 300) / 120) * (1 - y / 200) * 0.8 : 0;
     return Math.max(front, camp, redCamp);
   };
@@ -473,20 +474,22 @@ export class ChargeView {
 
   private drawCamps(g: Graphics, rand: () => number): void {
     const t = this.theme;
-    // Blue rally camp.
+    // Blue rally camps behind each wing.
     const blue = t.blue;
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2 + 0.3;
-      this.drawTent(g, C.CAMP_X + Math.cos(a) * (C.CAMP_R + 26), C.CAMP_Y + Math.sin(a) * (C.CAMP_R + 26), blue);
+    for (const c of C.CAMPS) {
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + 0.3;
+        this.drawTent(g, c.x + Math.cos(a) * (C.CAMP_R + 26), c.y + Math.sin(a) * (C.CAMP_R + 26), blue);
+      }
+      g.circle(c.x, c.y, C.CAMP_R).fill({ color: blue, alpha: 0.07 });
+      const dashes = 28;
+      for (let i = 0; i < dashes; i++) {
+        const a0 = (i / dashes) * Math.PI * 2;
+        const a1 = a0 + (Math.PI * 2) / dashes * 0.55;
+        arcPath(g, c.x, c.y, C.CAMP_R, a0, a1).stroke({ width: 2, color: blue, alpha: 0.5 });
+      }
+      this.drawBanner(g, c.x + C.CAMP_R * 0.55, c.y - C.CAMP_R * 0.55, blue);
     }
-    g.circle(C.CAMP_X, C.CAMP_Y, C.CAMP_R).fill({ color: blue, alpha: 0.07 });
-    const dashes = 28;
-    for (let i = 0; i < dashes; i++) {
-      const a0 = (i / dashes) * Math.PI * 2;
-      const a1 = a0 + (Math.PI * 2) / dashes * 0.55;
-      arcPath(g, C.CAMP_X, C.CAMP_Y, C.CAMP_R, a0, a1).stroke({ width: 2, color: blue, alpha: 0.5 });
-    }
-    this.drawBanner(g, C.CAMP_X, C.CAMP_Y, blue);
 
     // Red camp along the far edge (scenery).
     for (let i = 0; i < 9; i++) {
@@ -494,15 +497,17 @@ export class ChargeView {
     }
     this.drawBanner(g, C.WORLD_W / 2, 150, t.red);
 
-    const label = new Text({
-      text: 'RALLY',
-      style: { fontFamily: 'Segoe UI, system-ui, sans-serif', fontSize: 12, fontWeight: '800', fill: blue, letterSpacing: 3 },
-      resolution: 4,
-    });
-    label.anchor.set(0.5);
-    label.alpha = 0.6;
-    label.position.set(C.CAMP_X, C.CAMP_Y + C.CAMP_R - 16);
-    this.world.addChild(label);
+    for (const c of C.CAMPS) {
+      const label = new Text({
+        text: 'CAMP',
+        style: { fontFamily: 'Segoe UI, system-ui, sans-serif', fontSize: 12, fontWeight: '800', fill: blue, letterSpacing: 3 },
+        resolution: 4,
+      });
+      label.anchor.set(0.5);
+      label.alpha = 0.6;
+      label.position.set(c.x, c.y + C.CAMP_R - 16);
+      this.world.addChild(label);
+    }
   }
 
   private drawTent(g: Graphics, x: number, y: number, color: number): void {

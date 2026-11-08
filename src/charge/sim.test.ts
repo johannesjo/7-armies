@@ -103,10 +103,34 @@ describe('squadron', () => {
     expect(turned(false)).toBeGreaterThan(turned(true));
   });
 
-  it('the camp rallies fresh riders', () => {
-    const sim = new ChargeSim([], { seed: 1, squad: { x: C.CAMP_X, y: C.CAMP_Y, facing: 0, count: 4 } });
-    for (let t = 0; t < C.RALLY_INTERVAL * 3 + 0.1; t += 1 / 60) sim.step(1 / 60);
-    expect(sim.riders.length).toBe(7);
+  it('riding into a camp heals every rider at once', () => {
+    const camp = C.CAMPS[1];
+    const sim = new ChargeSim([], { seed: 1, squad: { x: camp.x - 140, y: camp.y - 60, facing: 0, count: 6 } });
+    for (const r of sim.riders) r.hp = 5;
+    let pit = false;
+    for (let t = 0; t < 1.5 && !sim.inCamp; t += 1 / 60) {
+      sim.step(1 / 60, { dirX: 1, dirY: 0.4, gallop: false });
+      if (sim.events.some(e => e.type === 'pit-stop')) pit = true;
+    }
+    expect(pit).toBe(true);
+    for (const r of sim.riders) expect(r.hp).toBe(r.maxHp);
+  });
+
+  it('camp garrisons fill up while you are away; ride through to take the whole troop', () => {
+    const camp = C.CAMPS[1];
+    const sim = new ChargeSim([], { seed: 1, squad: { x: 1200, y: 300, facing: 0, count: 4 } });
+    const garrison = () => sim.squadrons.find(sq => sq.ai === 'garrison' && Math.hypot(sq.home.x - camp.x, sq.home.y - camp.y) < 1)!;
+    expect(garrison().riders).toHaveLength(C.GARRISON_START);
+    for (let t = 0; t < C.GARRISON_INTERVAL * 3 + 0.1; t += 1 / 30) sim.step(1 / 30);
+    expect(garrison().riders).toHaveLength(C.GARRISON_START + 3);
+    // Gallop straight through the camp without stopping.
+    const L = sim.leader!;
+    L.x = camp.x - 120; L.y = camp.y;
+    for (const r of sim.riders) { r.x = L.x - 10; r.y = L.y; }
+    (sim as unknown as { resetTrail: (sq: unknown, x: number, y: number, f: number) => void }).resetTrail(sim.player, L.x, L.y, 0);
+    for (let t = 0; t < 1.6; t += 1 / 60) sim.step(1 / 60, { dirX: 1, dirY: 0, gallop: true });
+    expect(sim.riders.length).toBe(4 + C.GARRISON_START + 3);
+    expect(sim.leader!.x).toBeGreaterThan(camp.x + 60); // never had to stop
   });
 });
 
@@ -254,9 +278,9 @@ describe('cavalry squadrons', () => {
       if (sim.events.some(e => e.type === 'muster')) mustered = true;
     }
     expect(mustered).toBe(true);
-    const troop = sim.squadrons.find(sq => sq !== sim.player)!;
+    const troop = sim.squadrons.find(sq => sq !== sim.player && sq.ai !== 'garrison')!;
     expect(troop.riders).toHaveLength(C.MUSTER_SIZE);
-    expect(Math.hypot(troop.riders[0].x - C.CAMP_X, troop.riders[0].y - C.CAMP_Y)).toBeLessThan(C.CAMP_R);
+    expect(Math.hypot(troop.riders[0].x - C.CAMPS[0].x, troop.riders[0].y - C.CAMPS[0].y)).toBeLessThan(C.CAMP_R);
   });
 
   it('allied raiders charge enemy battalions on their own', () => {

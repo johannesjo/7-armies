@@ -235,11 +235,17 @@ export const CHARGE = {
   /** He rides away from enemy horsemen that come this close. */
   GENERAL_FLEE_RADIUS: 240,
 
-  // --- Rally camp (bottom-left, behind the blue line) ---
-  CAMP_X: 330,
-  CAMP_Y: 1270,
+  // --- Rally camps, one behind each wing of the blue line ---
+  CAMPS: [{ x: 420, y: 1200 }, { x: 1980, y: 1200 }] as readonly { x: number; y: number }[],
   CAMP_R: 95,
-  RALLY_INTERVAL: 2.2,
+  /**
+   * Pit stops: each camp's garrison gains a fresh rider this often (s) while you are
+   * away, up to GARRISON_MAX. Ride through the camp to take them all at once — your
+   * riders are healed to full the moment you enter.
+   */
+  GARRISON_INTERVAL: 7,
+  GARRISON_MAX: 8,
+  GARRISON_START: 4,
   CAMP_HEAL: 12,
 
   // --- Scoring ---

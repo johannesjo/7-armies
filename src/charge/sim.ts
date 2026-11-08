@@ -57,7 +57,7 @@ export interface Soldier {
 }
 
 /** Who controls a squadron: the player, or one of the AI behaviours. */
-export type SquadAI = 'player' | 'raider' | 'guard' | 'hunter' | 'general';
+export type SquadAI = 'player' | 'raider' | 'guard' | 'hunter' | 'general' | 'garrison';
 export type SquadPhase = 'muster' | 'approach' | 'charge' | 'retreat' | 'idle' | 'broken';
 
 export interface Squadron {
@@ -182,6 +182,8 @@ export type SimEvent =
   | { type: 'squad-break'; x: number; y: number; team: Team; byPlayer: boolean }
   | { type: 'muster'; x: number; y: number; count: number }
   | { type: 'rally'; x: number; y: number; id: number }
+  /** The squadron rode into a camp: every rider healed to full. */
+  | { type: 'pit-stop'; x: number; y: number; healed: number }
   | { type: 'rout'; x: number; y: number; team: Team; byPlayer: boolean; type2: UnitType }
   | { type: 'combo'; count: number }
   | { type: 'wave'; index: number; battalions: number; x: number; y: number }
@@ -291,6 +293,7 @@ export class ChargeSim {
   outcome: Outcome = 'playing';
   outcomeReason = '';
   inCamp = false;
+  private musterCount = 0;
 
   /** Reinforcement waves not yet on the field. */
   pendingWaves: Wave[] = [];
@@ -305,7 +308,8 @@ export class ChargeSim {
   generalKilledByPlayer = false;
   wavesArrived = 0;
   private comboTimer = 0;
-  private rallyTimer = 0;
+  /** Each camp's garrison troop (null when empty) and the timer to its next fresh rider. */
+  private readonly camps: { x: number; y: number; garrison: Squadron | null; timer: number }[] = [];
   private musterTimer: number = C.MUSTER_FIRST;
   private readonly muster: boolean;
   private redSquadsSpawned = 0;
@@ -326,14 +330,20 @@ export class ChargeSim {
     muster?: boolean;
   } = {}) {
     this.rand = mulberry32(opts.seed ?? 1);
+    this.muster = opts.muster ?? opts.squad !== null;
     for (const spec of specs) this.addBattalion(spec);
     this.pendingWaves = [...(opts.waves ?? [])].sort((a, b) => a.time - b.time);
     if (opts.squad !== null) {
-      const sq = opts.squad ?? { x: C.CAMP_X + 60, y: C.CAMP_Y - 80, facing: -Math.PI / 4 };
+      const sq = opts.squad ?? { x: C.CAMPS[0].x + 60, y: C.CAMPS[0].y - 80, facing: -Math.PI / 4 };
       this.player = this.addSquad({ team: 'blue', ai: 'player', x: sq.x, y: sq.y, facing: sq.facing, count: sq.count ?? C.SQUAD_SIZE });
     }
     for (const spec of opts.squads ?? []) this.addSquad(spec);
-    this.muster = opts.muster ?? opts.squad !== null;
+    // Each camp starts with a garrison waiting (only when camps are in play).
+    for (const c of C.CAMPS) {
+      const camp = { x: c.x, y: c.y, garrison: null as Squadron | null, timer: C.GARRISON_INTERVAL };
+      this.camps.push(camp);
+      if (this.muster) for (let i = 0; i < C.GARRISON_START; i++) this.growGarrison(camp);
+    }
   }
 
   /** Your squadron's riders in command order. */
@@ -792,9 +802,10 @@ export class ChargeSim {
     this.musterTimer -= dt;
     if (this.musterTimer > 0) return;
     this.musterTimer = C.MUSTER_INTERVAL;
-    const allied = this.squadrons.filter(sq => sq !== this.player && sq.team === 'blue' && sq.riders.length > 0).length;
+    const allied = this.squadrons.filter(sq => sq !== this.player && sq.team === 'blue' && sq.ai !== 'garrison' && sq.riders.length > 0).length;
     if (allied >= C.MAX_ALLIED_SQUADS) return;
-    const x = C.CAMP_X + 55, y = C.CAMP_Y - 45;
+    const camp = C.CAMPS[this.musterCount++ % C.CAMPS.length];
+    const x = camp.x + 55, y = camp.y - 45;
     this.addSquad({ team: 'blue', ai: 'raider', x, y, facing: -Math.PI / 4, count: C.MUSTER_SIZE, muster: C.MUSTER_WAIT });
     this.events.push({ type: 'muster', x, y, count: C.MUSTER_SIZE });
   }
@@ -901,6 +912,7 @@ export class ChargeSim {
     const L = sq.riders[0];
     sq.phaseTimer -= dt;
     if (sq.ai === 'general') return this.generalInput(sq, L);
+    if (sq.ai === 'garrison') return this.rideTo(L, sq.home, false); // waits in camp for you
 
     if (sq.riders.length <= C.AI_RETREAT_AT && sq.phase !== 'retreat' && sq.phase !== 'idle' && sq.phase !== 'muster') {
       sq.phase = 'retreat';
@@ -924,8 +936,9 @@ export class ChargeSim {
           if (L.y < 20) for (const r of sq.riders) r.alive = false;
           return this.rideTo(L, { x: L.x, y: -100 }, true);
         }
-        if (Math.hypot(L.x - C.CAMP_X, L.y - C.CAMP_Y) < C.CAMP_R * 0.5) sq.phase = 'idle';
-        return this.rideTo(L, { x: C.CAMP_X, y: C.CAMP_Y }, false);
+        const camp = this.nearestCamp(L);
+        if (Math.hypot(L.x - camp.x, L.y - camp.y) < C.CAMP_R * 0.5) sq.phase = 'idle';
+        return this.rideTo(L, camp, false);
       case 'broken': {
         // Scattered: gallop away from whoever broke us, then regroup and come again.
         if (sq.phaseTimer <= 0) { sq.phase = 'approach'; sq.phaseTimer = 0; break; }
@@ -1753,27 +1766,63 @@ export class ChargeSim {
 
   // --- Camp, morale, outcome --------------------------------------------------------
 
+  private nearestCamp(p: Vec2): { x: number; y: number } {
+    let best = C.CAMPS[0], bestD = Infinity;
+    for (const c of C.CAMPS) {
+      const d = Math.hypot(c.x - p.x, c.y - p.y);
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    return best;
+  }
+
+  /** A fresh rider joins the camp's garrison troop (forming one if it is empty). */
+  private growGarrison(camp: { x: number; y: number; garrison: Squadron | null }): void {
+    const g = camp.garrison;
+    if (!g || g.riders.length === 0 || !this.squadrons.includes(g)) {
+      camp.garrison = this.addSquad({ team: 'blue', ai: 'garrison', x: camp.x, y: camp.y, facing: -Math.PI / 2, count: 1 });
+      return;
+    }
+    if (g.riders.length >= C.GARRISON_MAX) return;
+    const r = this.addRider(g, camp.x + (this.rand() - 0.5) * 30, camp.y + 24 + this.rand() * 10, -Math.PI / 2);
+    this.events.push({ type: 'rally', x: r.x, y: r.y, id: r.id });
+  }
+
+  /**
+   * Camps are pit stops. Garrisons fill up while you are away; ride into one and the
+   * whole troop falls in behind you (see checkJoins). Entering a camp heals every
+   * rider to full at once — no waiting about.
+   */
   private updateCamp(dt: number): void {
-    // Allied troops resting in camp tend their wounds too.
+    for (const camp of this.camps) {
+      if (!this.muster) break;
+      const g = camp.garrison;
+      if (g && g.riders.length >= C.GARRISON_MAX && this.squadrons.includes(g)) continue;
+      camp.timer -= dt;
+      if (camp.timer <= 0) {
+        camp.timer = C.GARRISON_INTERVAL;
+        this.growGarrison(camp);
+      }
+    }
+    // Allied troops resting in a camp tend their wounds too.
     for (const sq of this.squadrons) {
       const AL = sq.riders[0];
       if (sq === this.player || sq.team !== 'blue' || !AL) continue;
-      if (Math.hypot(AL.x - C.CAMP_X, AL.y - C.CAMP_Y) < C.CAMP_R) {
+      const c = this.nearestCamp(AL);
+      if (Math.hypot(AL.x - c.x, AL.y - c.y) < C.CAMP_R) {
         for (const r of sq.riders) r.hp = Math.min(r.maxHp, r.hp + C.CAMP_HEAL * dt);
       }
     }
     const L = this.leader;
-    this.inCamp = !!L && Math.hypot(L.x - C.CAMP_X, L.y - C.CAMP_Y) < C.CAMP_R;
-    if (!this.inCamp || !L) { this.rallyTimer = 0; return; }
-    for (const r of this.riders) r.hp = Math.min(r.maxHp, r.hp + C.CAMP_HEAL * dt);
-    if (this.riders.length >= C.SQUAD_SIZE) { this.rallyTimer = 0; return; }
-    this.rallyTimer += dt;
-    if (this.rallyTimer >= C.RALLY_INTERVAL) {
-      this.rallyTimer = 0;
-      const r = this.addRider(this.player!, C.CAMP_X + (this.rand() - 0.5) * 30, C.CAMP_Y + 30, L.facing);
-      r.speed = L.speed;
-      this.events.push({ type: 'rally', x: r.x, y: r.y, id: r.id });
+    const camp = L ? this.nearestCamp(L) : null;
+    const inCamp = !!L && !!camp && Math.hypot(L.x - camp.x, L.y - camp.y) < C.CAMP_R;
+    if (inCamp && !this.inCamp) {
+      let healed = 0;
+      for (const r of this.riders) {
+        if (r.hp < r.maxHp) { healed++; r.hp = r.maxHp; }
+      }
+      this.events.push({ type: 'pit-stop', x: L!.x, y: L!.y, healed });
     }
+    this.inCamp = inCamp;
   }
 
   private updateMorale(dt: number): void {

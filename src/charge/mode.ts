@@ -5,6 +5,7 @@ import { ChargeSim, SimEvent, NO_INPUT, ChargeInput } from './sim';
 import { createBattleSpecs, createSquadSpecs } from './scenario';
 import { ChargeView, mixColor } from './view';
 import type { ChargeRenderer } from './view3d';
+import { QualitySetting, readQuality, resolveQuality, writeQuality } from './quality3d';
 import { ChargeControls, Joystick, StrokeHandler } from './input';
 import { RiderPath, StrokePace } from './path';
 import { ChargeAudio } from './audio';
@@ -117,6 +118,7 @@ export class ChargeMode {
   private readonly controlsBtn = $('ch-controls-btn');
   private readonly joystick = new Joystick($('ch-joy-zone'), $('ch-joy'), $('ch-joy-knob'));
   private readonly textBtn = $('ch-text-btn');
+  private readonly qualityBtn = $('ch-quality-btn');
   /** Floating combat text, combo counter and banners — off by default for a cleaner screen. */
   private combatText = readFlag(TEXT_KEY, false);
   private readonly pace = new StrokePace(800);
@@ -167,6 +169,12 @@ export class ChargeMode {
       this.updateTextBtn();
     });
     this.updateTextBtn();
+    this.qualityBtn.addEventListener('click', () => {
+      const order: QualitySetting[] = ['auto', 'high', 'low'];
+      writeQuality(order[(order.indexOf(readQuality()) + 1) % order.length]);
+      this.updateQualityBtn();
+    });
+    this.updateQualityBtn();
     this.controls.onPause = () => this.togglePause();
     this.controls.handler = this.strokes;
     $('ch-pause-btn').addEventListener('click', () => this.togglePause());
@@ -387,6 +395,12 @@ export class ChargeMode {
 
   private zones() {
     return this.cachedZones ??= directZones(this.host.clientWidth, this.host.clientHeight);
+  }
+
+  private updateQualityBtn(): void {
+    const q = readQuality();
+    const now = q === 'auto' ? `auto (${resolveQuality(q)})` : q;
+    this.qualityBtn.textContent = `Graphics (3D): ${now} — next battle`;
   }
 
   private updateTextBtn(): void {

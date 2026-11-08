@@ -317,7 +317,7 @@ export const RTS_THEME: Theme = {
   artStyle: 'rts',
   blue: 0x1f55e0, blueDark: 0x0d2a80, red: 0xd8261c, redDark: 0x7a0f0b,
   steel: 0xd8d8de, steelDark: 0x55555e, wood: 0x9a6a38, leather: 0x7a5030, trim: 0xfff2c4,
-  grassDark: 0x3d7a22, grassLight: 0x86b84a, grassDry: 0xc0b25e, dirt: 0xa07848,
+  grassDark: 0x4c7a1c, grassLight: 0x92b843, grassDry: 0xc2b45c, dirt: 0xa07848,
 };
 
 export type ThemeName = 'field' | 'parchment' | 'night' | 'mini' | 'ink' | 'rts';

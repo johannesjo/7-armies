@@ -1,10 +1,11 @@
-import { Application, BitmapFont, BitmapText, Container, Graphics, RenderTexture, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
+import { Application, BitmapFont, BitmapText, Container, Graphics, Rectangle, RenderTexture, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
 import { paintGrassTile, paintGroundOverlay } from '../ground';
 import { Team, UnitType, Vec2 } from '../types';
 import { Theme } from '../theme';
 import { drawUnitArt, HORSE_VARIANTS, attackPose, attackDuration } from '../unit-art';
 import { CHARGE as C } from './config';
 import { ArtStyle, drawStyledUnit, paintFeltTile, paintPaperTile } from './art-styles';
+import { FRAMES, DRAWN_DIRS, IDLE_FRAME, attackFrame, buildFigure, dirAngle, facingFrame, walkFrame } from './figure-art';
 import { Battalion, ChargeSim, SimEvent, Soldier, Squadron, angleDiff, attackSide, mulberry32 } from './sim';
 import { PathPoint } from './path';
 import { DirectZones } from './direct';
@@ -23,6 +24,17 @@ interface UnitGfx {
   px: number;
   py: number;
   phase: number;
+  /** Upright figures: measured ground speed, and the frame sheet and frame on show. */
+  speed: number;
+  sheet: FigureSheet | null;
+  frame: number;
+}
+
+/** Every facing and frame of one upright unit design: textures and their foot anchors. */
+interface FigureSheet {
+  frames: Texture[];
+  ax: number[];
+  ay: number[];
 }
 
 interface Dying {
@@ -172,9 +184,15 @@ export class ChargeView {
   private readonly rand = mulberry32(99);
 
   private readonly style: ArtStyle;
+  /** Upright three-quarter-view figures (the classic RTS style) instead of top-down art. */
+  private readonly upright: boolean;
+  private readonly figureSheets = new Map<string, FigureSheet>();
 
   constructor(private readonly app: Application, private readonly theme: Theme) {
     this.style = theme.artStyle ?? 'classic';
+    this.upright = this.style === 'rts';
+    // Upright figures overlap: whoever stands nearer the camera (lower on screen) is drawn on top.
+    this.unitLayer.sortableChildren = this.upright;
     this.ink = theme.labelFill;
     this.dust = theme.grass ? mixColor(theme.dirt, theme.trim, 0.45) : mixColor(theme.bg, theme.obstacleBorder, 0.35);
     // Beyond the field: forest floor on grass, a darker margin otherwise.
@@ -203,6 +221,8 @@ export class ChargeView {
     this.grassTexture?.destroy(true);
     for (const c of this.unitTextures.values()) { c.body.destroy(true); c.weapon.destroy(true); }
     this.unitTextures.clear();
+    for (const sh of this.figureSheets.values()) sh.frames[0].destroy(true);
+    this.figureSheets.clear();
     for (const tex of this.ownedTextures) tex.destroy(true);
     this.ownedTextures.length = 0;
     this.units.clear();
@@ -398,6 +418,7 @@ export class ChargeView {
 
     // Scenery as sprites baked from a handful of drawings.
     const deco = new Container();
+    deco.sortableChildren = this.upright;
     this.world.addChild(deco);
     const keep = (b: { tex: Texture; ax: number; ay: number }) => { this.ownedTextures.push(b.tex); return b; };
     const INK = 0x2a2018;
@@ -415,7 +436,29 @@ export class ChargeView {
         g.moveTo(o, r * 0.55).lineTo(r * 0.55, o).stroke({ width: 0.7, color: INK, alpha: 0.45 });
       }
     }, 2));
-    const treeTex = this.style === 'ink' ? [0, 1, 2].map(v => inkTree(v, 24)) : [0, 1, 2].map(v => keep(this.bake(g => {
+    // Upright trees for the three-quarter view: a trunk under a heaped, sunlit crown.
+    const uprightTree = (v: number, r: number, trunk: number) => keep(this.bake(g => {
+      const r2 = mulberry32(57 + v * 13);
+      const leaf = mixColor(t.grassDark, 0x0e1a06, 0.35 + 0.08 * (v % 3));
+      g.ellipse(r * 0.45, 0, r * 1.05, r * 0.42).fill({ color: 0x000000, alpha: 0.3 });
+      g.moveTo(0, 0).lineTo(0, -trunk - r * 0.4).stroke({ width: Math.max(1.5, r * 0.22), color: 0x4a3420, cap: 'round' });
+      g.moveTo(-r * 0.04, 0).lineTo(-r * 0.04, -trunk).stroke({ width: Math.max(0.6, r * 0.07), color: 0x7a5a38, cap: 'round' });
+      const cy = -trunk - r * 0.75;
+      const blobs: [number, number, number][] = [];
+      for (let i = 0; i < 9 + v; i++) {
+        const a = r2() * Math.PI * 2, d = Math.sqrt(r2()) * r * 0.55;
+        blobs.push([Math.cos(a) * d, cy + Math.sin(a) * d * 0.85, r * (0.38 + r2() * 0.22)]);
+      }
+      blobs.sort((a, b) => a[1] - b[1]);
+      for (const [x, y, br] of blobs) g.circle(x, y, br + 0.6).fill(mixColor(leaf, 0x000000, 0.5));
+      for (const [x, y, br] of blobs) {
+        g.circle(x, y, br).fill(leaf);
+        g.circle(x - br * 0.25, y - br * 0.3, br * 0.6).fill(mixColor(leaf, t.grassLight, 0.35));
+        g.circle(x - br * 0.38, y - br * 0.45, br * 0.25).fill({ color: mixColor(t.grassLight, 0xfff0a0, 0.3), alpha: 0.6 });
+      }
+    }, 2));
+    const treeTex = this.upright ? [0, 1, 2, 3, 4].map(v => uprightTree(v, 15 + v * 1.5, 9 + (v % 2) * 4))
+      : this.style === 'ink' ? [0, 1, 2].map(v => inkTree(v, 24)) : [0, 1, 2].map(v => keep(this.bake(g => {
       const r = 26;
       g.circle(r * 0.28, r * 0.34, r).fill({ color: 0x000000, alpha: 0.28 });
       const lobes = 6 + v;
@@ -426,7 +469,8 @@ export class ChargeView {
       g.circle(-r * 0.12, -r * 0.12, r * 0.62).fill(mixColor(t.grassDark, 0x1c2a10, 0.15));
       g.circle(-r * 0.32, -r * 0.34, r * 0.3).fill({ color: t.grassLight, alpha: 0.32 });
     }, 2)));
-    const bushTex = this.style === 'ink' ? [0, 1, 2].map(v => inkTree(v + 5, 8)) : [0, 1, 2].map(v => keep(this.bake(g => {
+    const bushTex = this.upright ? [5, 6, 7].map(v => uprightTree(v, 6, -3))
+      : this.style === 'ink' ? [0, 1, 2].map(v => inkTree(v + 5, 8)) : [0, 1, 2].map(v => keep(this.bake(g => {
       const r = 8;
       g.ellipse(r * 0.3, r * 0.4, r * 1.3, r * 0.9).fill({ color: 0x000000, alpha: 0.25 });
       for (let i = 0; i < 4 + v; i++) {
@@ -452,18 +496,26 @@ export class ChargeView {
       sp.position.set(x, y);
       sp.scale.set(scale);
       sp.rotation = rand() * Math.PI * 2;
+      if (this.upright && (treeTex.includes(b) || bushTex.includes(b))) {
+        // Upright scenery stands up the screen; nearer trees overlap farther ones.
+        sp.rotation = 0;
+        sp.scale.x *= rand() < 0.5 ? -1 : 1;
+        sp.zIndex = y;
+      }
       deco.addChild(sp);
     };
 
     // Forest beyond the field edge (on the table: just the felt's edge).
     const band = 170;
-    for (let i = 0; i < (this.style === 'mini' ? 0 : 300); i++) {
+    // Upright trees crowd into a dense wood, crowns overlapping, right up to the field's edge.
+    const trees = this.style === 'mini' ? 0 : this.upright ? 1400 : 300;
+    for (let i = 0; i < trees; i++) {
       const side = Math.floor(rand() * 4);
       const along = rand();
-      const depth = 14 + rand() * band;
+      const depth = (this.upright ? 2 : 14) + rand() * band;
       const x = side === 0 || side === 2 ? along * (C.WORLD_W + band * 2) - band : side === 1 ? C.WORLD_W + depth : -depth;
       const y = side === 0 ? -depth : side === 2 ? C.WORLD_H + depth : along * (C.WORLD_H + band * 2) - band;
-      place(treeTex[Math.floor(rand() * treeTex.length)], x, y, 0.6 + rand() * 0.7);
+      place(treeTex[Math.floor(rand() * treeTex.length)], x, y, this.upright ? 0.8 + rand() * 0.5 : 0.6 + rand() * 0.7);
     }
     for (let i = 0; i < 70; i++) {
       const edge = Math.floor(rand() * 4);
@@ -562,6 +614,23 @@ export class ChargeView {
   }
 
   private drawTent(g: Graphics, x: number, y: number, color: number): void {
+    if (this.upright) {
+      // A round pavilion seen from the side: striped wall, conical roof, pennant on the pole.
+      const cloth = mixColor(this.theme.trim, 0xffffff, 0.3), w = 11, wall = 9, roof = 12;
+      g.ellipse(x + 4, y + 1, w + 4, w * 0.45).fill({ color: 0x000000, alpha: 0.3 });
+      g.rect(x - w, y - wall, w * 2, wall).fill(cloth);
+      g.ellipse(x, y, w, w * 0.4).fill(cloth);
+      for (const k of [-0.6, 0, 0.6]) g.rect(x + k * w - 1.6, y - wall, 3.2, wall + w * 0.4 * Math.sqrt(1 - k * k)).fill(color);
+      g.rect(x + w * 0.35, y - wall, w * 0.65, wall).fill({ color: 0x000000, alpha: 0.18 });
+      g.poly([x - w - 1.5, y - wall, x, y - wall - roof, x + w + 1.5, y - wall]).fill(color);
+      g.ellipse(x, y - wall, w + 1.5, w * 0.35).fill(color);
+      g.poly([x, y - wall - roof, x + w + 1.5, y - wall, x + w * 0.3, y - wall + w * 0.3]).fill({ color: 0x000000, alpha: 0.2 });
+      g.moveTo(x - w - 1.5, y - wall + 0.5).quadraticCurveTo(x, y - wall + w * 0.5, x + w + 1.5, y - wall + 0.5)
+        .stroke({ width: 1.2, color: this.theme.trim });
+      g.moveTo(x, y - wall - roof).lineTo(x, y - wall - roof - 6).stroke({ width: 0.9, color: 0x3a2a1a });
+      g.poly([x, y - wall - roof - 6, x + 6, y - wall - roof - 4.5, x, y - wall - roof - 3]).fill(color);
+      return;
+    }
     g.poly([x - 11, y + 8, x, y - 9, x + 11, y + 8]).fill({ color: mixColor(this.theme.trim, color, 0.22) })
       .stroke({ width: 1.2, color, alpha: 0.6 });
     g.moveTo(x, y - 9).lineTo(x, y + 8).stroke({ width: 0.8, color, alpha: 0.5 });
@@ -598,9 +667,50 @@ export class ChargeView {
     ensureCombatFont();
     this.dotTextures();
     for (const team of ['blue', 'red'] as const) {
-      for (const type of ['swordsman', 'pikeman', 'archer'] as const) this.texturesFor(type, team, C.INFANTRY_RADIUS[type], 0);
-      for (let v = 0; v < HORSE_VARIANTS; v++) this.texturesFor('cavalry', team, C.RIDER_RADIUS, v);
+      for (const type of ['swordsman', 'pikeman', 'archer'] as const) {
+        if (this.upright) this.sheetFor(type, team, C.INFANTRY_RADIUS[type], 0);
+        else this.texturesFor(type, team, C.INFANTRY_RADIUS[type], 0);
+      }
+      for (let v = 0; v < HORSE_VARIANTS; v++) {
+        if (this.upright) this.sheetFor('cavalry', team, C.RIDER_RADIUS, v);
+        else this.texturesFor('cavalry', team, C.RIDER_RADIUS, v);
+      }
     }
+  }
+
+  /**
+   * Bake every facing and frame of an upright unit design into one texture: rows of
+   * facings, columns of frames. Frames are sub-rectangles anchored at the feet.
+   */
+  private sheetFor(type: UnitType, team: Team, r: number, variant: number): FigureSheet {
+    const key = `${type}:${team}:${r}:${variant}`;
+    const hit = this.figureSheets.get(key);
+    if (hit) return hit;
+    const g = new Graphics();
+    const PAD = 1;
+    const cells: { x: number; y: number; w: number; h: number; ax: number; ay: number }[] = [];
+    let y = 0, width = 0;
+    for (let d = 0; d < DRAWN_DIRS; d++) {
+      const row = [];
+      for (let f = 0; f < FRAMES; f++) row.push(buildFigure(type, team, r, this.theme, variant, dirAngle(d), f));
+      const h = Math.ceil(Math.max(...row.map(fr => fr.maxY - fr.minY)) + PAD * 2);
+      let x = 0;
+      for (const fr of row) {
+        const w = Math.ceil(fr.maxX - fr.minX + PAD * 2);
+        const ox = x + PAD - fr.minX, oy = y + PAD - fr.minY;
+        fr.draw(g, ox, oy);
+        cells.push({ x, y, w, h, ax: (ox - x) / w, ay: (oy - y) / h });
+        x += w;
+      }
+      width = Math.max(width, x);
+      y += h;
+    }
+    const tex = this.app.renderer.generateTexture({ target: g, frame: new Rectangle(0, 0, width, y), resolution: this.artResolution, antialias: true });
+    g.destroy();
+    const frames = cells.map(c => new Texture({ source: tex.source, frame: new Rectangle(c.x, c.y, c.w, c.h) }));
+    const sheet = { frames, ax: cells.map(c => c.ax), ay: cells.map(c => c.ay) };
+    this.figureSheets.set(key, sheet);
+    return sheet;
   }
 
   private texturesFor(type: UnitType, team: Team, r: number, variant: number) {
@@ -622,15 +732,26 @@ export class ChargeView {
   private gfxFor(s: Soldier): UnitGfx {
     let u = this.units.get(s.id);
     if (u) return u;
-    const t = this.texturesFor(s.type, s.team, s.radius, s.type === 'cavalry' ? s.id % HORSE_VARIANTS : 0);
+    const variant = s.type === 'cavalry' ? s.id % HORSE_VARIANTS : 0;
     const root = new Container();
-    const body = new Sprite(t.body);
-    body.anchor.set(t.bx, t.by);
-    const weapon = new Sprite(t.weapon);
-    weapon.anchor.set(t.wx, t.wy);
+    let body: Sprite, weapon: Sprite, sheet: FigureSheet | null = null;
+    if (this.upright) {
+      // The weapon is part of each frame; the spare sprite stays hidden.
+      sheet = this.sheetFor(s.type, s.team, s.radius, variant);
+      body = new Sprite(sheet.frames[0]);
+      body.anchor.set(sheet.ax[0], sheet.ay[0]);
+      weapon = new Sprite(Texture.EMPTY);
+      weapon.visible = false;
+    } else {
+      const t = this.texturesFor(s.type, s.team, s.radius, variant);
+      body = new Sprite(t.body);
+      body.anchor.set(t.bx, t.by);
+      weapon = new Sprite(t.weapon);
+      weapon.anchor.set(t.wx, t.wy);
+    }
     root.addChild(body, weapon);
     this.unitLayer.addChild(root);
-    u = { root, body, weapon, pulse: 0, fleeing: false, aimRot: 0, stamp: this.unitStamp, px: s.x, py: s.y, phase: (s.id * 1.7) % 6.28 };
+    u = { root, body, weapon, pulse: 0, fleeing: false, aimRot: 0, stamp: this.unitStamp, px: s.x, py: s.y, phase: (s.id * 1.7) % 6.28, speed: 0, sheet, frame: -1 };
     this.units.set(s.id, u);
     return u;
   }
@@ -643,6 +764,7 @@ export class ChargeView {
     const body = root.children[0] as Sprite | undefined;
     const weapon = root.children[1] as Sprite | undefined;
     if (body) body.tint = 0x8c8c8c;
+    if (this.upright && body) body.position.set(0, 0);
     if (this.style === 'mini') {
       // A toppled miniature: knocked flat on its side, paint intact.
       root.alpha = 1;
@@ -874,9 +996,13 @@ export class ChargeView {
       u.root.rotation = s.facing + (s.rider || s.fleeing ? 0 : quirk * 0.28);
       // Knocked down: lying tipped over on his side, weapon dropped, until he gets up.
       const down = !s.rider && s.down > 0;
-      if (down) u.root.rotation += (s.id % 2 === 0 ? 1 : -1) * 1.35;
+      if (this.upright) {
+        // Upright figures turn by showing another facing; the sprite itself stays upright.
+        u.root.rotation = down ? (s.id % 2 === 0 ? 1 : -1) * 1.45 : 0;
+        u.root.zIndex = s.y;
+      } else if (down) u.root.rotation += (s.id % 2 === 0 ? 1 : -1) * 1.35;
       u.fleeing = s.fleeing;
-      u.weapon.visible = !s.fleeing && !down; // weapons thrown down
+      u.weapon.visible = !this.upright && !s.fleeing && !down; // weapons thrown down
       this.animateFighting(u, s, sim.time, dt);
       const hpK = s.hp / s.maxHp;
       u.root.alpha = (s.fleeing ? 0.6 : 0.55) + 0.45 * hpK;
@@ -895,6 +1021,7 @@ export class ChargeView {
       }
       if (down) { sx *= 1.12; sy *= 0.7; }
       if (this.style !== 'classic') ({ scale, sx, sy } = this.styleMotion(u, s, sim.time, dt, scale, sx, sy, down));
+      if (this.upright) this.poseFigure(u, s, sim.time, down, quirk);
       u.root.scale.set(scale * sx, scale * sy);
     }
     for (const [id, u] of this.units) {
@@ -917,11 +1044,18 @@ export class ChargeView {
       const decel = 1 - k * 0.9;
       d.root.x += d.vx * dt * decel;
       d.root.y += d.vy * dt * decel;
+      const air = Math.sin(k * Math.PI) * d.lift;
+      d.root.alpha = 1;
+      if (this.upright) {
+        // Toppling: he tips over onto his side, thrown up and along by the blow.
+        d.root.rotation = Math.sign(d.spin || 1) * 1.5 * Math.min(1, k * 2.2);
+        const body = d.root.children[0];
+        if (body) body.y = -air * 9;
+        return true;
+      }
       d.root.rotation += d.spin * dt * (1 - k * 0.7);
       // Up through the air and back down (seen from above: grows, then shrinks to rest).
-      const air = Math.sin(k * Math.PI) * d.lift;
       d.root.scale.set(1 + 0.4 * air);
-      d.root.alpha = 1;
       return true;
     });
   }
@@ -935,7 +1069,9 @@ export class ChargeView {
     u.px = s.x;
     u.py = s.y;
     const speed = dt > 0 ? dist / dt : 0;
-    u.phase += Math.min(dist, 12) * (s.rider ? 0.32 : 0.75);
+    u.speed += (speed - u.speed) * Math.min(1, dt * 10);
+    // Upright figures stride further per cycle: a full gallop stride is about a horse length and a half.
+    u.phase += Math.min(dist, 12) * (this.upright ? (s.type === 'cavalry' ? 0.2 : 0.55) : s.rider ? 0.32 : 0.75);
     const moving = speed > 6 && !down;
     if (this.style === 'mini') {
       if (down) {
@@ -966,17 +1102,30 @@ export class ChargeView {
       u.root.y += (h(2) - 0.5) * 0.6;
       u.root.rotation += (h(3) - 0.5) * 0.08;
       sx *= 1 + (h(4) - 0.5) * 0.06;
-    } else if (this.style === 'rts') {
-      if (s.rider && speed > 20) {
-        const k = Math.min(1, speed / C.CANTER_SPEED);
-        u.root.y -= Math.abs(Math.sin(u.phase)) * 1.5 * k;
-        sx *= 1 + 0.05 * Math.sin(u.phase) * k;
-      } else if (moving) {
-        u.root.y -= Math.abs(Math.sin(u.phase)) * 0.9;
-        u.root.rotation += Math.sin(u.phase) * 0.05;
-      }
     }
     return { scale, sx, sy };
+  }
+
+  /**
+   * Pick an upright figure's frame: the facing nearest its heading (mirrored for the
+   * west half), then an attack, a walk or gallop step, or standing still.
+   */
+  private poseFigure(u: UnitGfx, s: Soldier, time: number, down: boolean, quirk: number): void {
+    const sheet = u.sheet;
+    if (!sheet) return;
+    const { dir, mirror } = facingFrame(s.facing + (s.rider || s.fleeing ? 0 : quirk * 0.28));
+    const since = time - s.lastAttack;
+    const dur = attackDuration(s.type);
+    let frame = IDLE_FRAME;
+    if (!down && !s.fleeing && since >= 0 && since < dur) frame = attackFrame(since / dur);
+    else if (!down && u.speed > (s.type === 'cavalry' ? 10 : 5)) frame = walkFrame(u.phase);
+    const i = dir * FRAMES + frame;
+    if (i !== u.frame) {
+      u.frame = i;
+      u.body.texture = sheet.frames[i];
+      u.body.anchor.set(sheet.ax[i], sheet.ay[i]);
+    }
+    u.body.scale.x = mirror ? -1 : 1;
   }
 
   /**
@@ -1001,6 +1150,12 @@ export class ChargeView {
     const target = Number.isNaN(s.aim) || s.fleeing ? 0
       : Math.max(-reach, Math.min(reach, angleDiff(s.aim, u.root.rotation)));
     u.aimRot += (target - u.aimRot) * Math.min(1, dt * 7);
+    if (this.upright) {
+      // The sprite doesn't turn, so a lunge moves it along the heading (foreshortened).
+      const c = Math.cos(s.facing), sn = Math.sin(s.facing);
+      u.body.position.set(bX * c - bY * sn, (bX * sn + bY * c) * 0.55);
+      return;
+    }
     u.body.position.set(bX, bY);
     u.weapon.position.set(bX + wX, bY);
     u.weapon.rotation = u.aimRot + wRot;

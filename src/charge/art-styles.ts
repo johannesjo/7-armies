@@ -11,25 +11,21 @@ type Canvas = Graphics | GraphicsContext;
  * - classic: the current look.
  * - mini: painted tabletop miniatures on bases, felt table, toy-like motion.
  * - ink: ink and watercolour on paper, line boil, brush-stroke trails.
- * - rts: chunky painted sprites with bold outlines in the classic painted-RTS manner.
+ * - rts: upright three-quarter-view figures in the classic painted-RTS manner. Those are
+ *   posed and baked per facing and frame (see figure-art.ts), not drawn here.
  */
 export type { ArtStyle };
 
-const HORSES: Record<Exclude<ArtStyle, 'classic'>, [number, number][]> = {
+type FlatStyle = 'mini' | 'ink';
+
+const HORSES: Record<FlatStyle, [number, number][]> = {
   mini: [[0x6a4a32, 0x2a1c12], [0x9a7a54, 0x4a3828], [0xb8b2a6, 0x6a645c], [0x3a302a, 0x161210]],
   ink: [[0x8a6a4a, 0x3a2a1a], [0xa08868, 0x4a3a2a], [0xb0a898, 0x5a5448], [0x5a4a3a, 0x2a2018]],
-  rts: [[0x8a4a22, 0x3a1a08], [0xb07838, 0x5a3410], [0xd8d0c0, 0x7a7060], [0x3a2a20, 0x120a06]],
 };
 
-function horse(style: Exclude<ArtStyle, 'classic'>, variant: number): [number, number] {
+function horse(style: FlatStyle, variant: number): [number, number] {
   const list = HORSES[style];
   return list[((variant % HORSE_VARIANTS) + HORSE_VARIANTS) % HORSE_VARIANTS % list.length];
-}
-
-function lighten(c: number, k: number): number {
-  const r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
-  const f = (v: number) => Math.round(v + (255 - v) * k);
-  return (f(r) << 16) | (f(g) << 8) | f(b);
 }
 
 function darken(c: number, k: number): number {
@@ -42,7 +38,6 @@ function darken(c: number, k: number): number {
 export function drawStyledUnit(style: ArtStyle, shape: Canvas, weapon: Canvas, type: UnitType, team: Team, r: number, theme: Theme, variant = 0): void {
   if (style === 'mini') drawMini(shape, weapon, type, team, r, theme, variant);
   else if (style === 'ink') drawInk(shape, weapon, type, team, r, theme, variant);
-  else if (style === 'rts') drawRts(shape, weapon, type, team, r, theme, variant);
   else drawUnitArt(shape, weapon, type, team, r, theme, variant);
 }
 
@@ -146,67 +141,6 @@ function drawInk(shape: Canvas, weapon: Canvas, type: UnitType, team: Team, r: n
   } else {
     weapon.moveTo(r * 0.5, r * 0.72).lineTo(r * 1.8, r * 0.7).stroke(line);
     weapon.moveTo(r * 0.5, r * 0.42).lineTo(r * 0.5, r * 1.02).stroke({ ...line, width: Math.max(0.45, r * 0.09) });
-  }
-}
-
-// --- Classic painted RTS -----------------------------------------------------------------
-
-/** Chunky painted sprite: bold outline, three-tone shading, long sunlit shadow. */
-function drawRts(shape: Canvas, weapon: Canvas, type: UnitType, team: Team, r: number, theme: Theme, variant: number): void {
-  const color = team === 'blue' ? theme.blue : theme.red;
-  const dark = team === 'blue' ? theme.blueDark : theme.redDark;
-  const light = lighten(color, 0.35);
-  const OUT = { width: Math.max(0.7, r * 0.17), color: 0x120c08 };
-  if (type === 'cavalry') {
-    const [coat, mane] = horse('rts', variant);
-    shape.ellipse(r * 0.55, r * 0.75, r * 1.8, r * 0.75).fill({ color: 0x000000, alpha: 0.32 });
-    shape.ellipse(-r * 0.1, 0, r * 1.15, r * 0.52).fill(coat).stroke(OUT);
-    shape.ellipse(r * 1.0, 0, r * 0.42, r * 0.26).fill(coat).stroke(OUT);
-    shape.ellipse(r * 1.42, 0, r * 0.32, r * 0.2).fill(coat).stroke(OUT);
-    shape.ellipse(-r * 0.3, -r * 0.22, r * 0.7, r * 0.18).fill(lighten(coat, 0.3));
-    shape.moveTo(r * 0.55, 0).lineTo(r * 1.2, 0).stroke({ width: Math.max(0.7, r * 0.18), color: mane });
-    shape.moveTo(-r * 1.1, 0).lineTo(-r * 1.8, 0).stroke({ width: Math.max(0.8, r * 0.22), color: mane });
-    shape.roundRect(-r * 0.85, -r * 0.58, r * 1.25, r * 1.16, r * 0.2).fill(color).stroke(OUT);
-    shape.roundRect(-r * 0.8, -r * 0.52, r * 1.1, r * 0.4, r * 0.15).fill(light);
-    shape.ellipse(-r * 0.12, 0, r * 0.3, r * 0.5).fill(dark).stroke(OUT);
-    shape.circle(-r * 0.08, 0, r * 0.26).fill(theme.steel).stroke(OUT);
-    shape.circle(-r * 0.15, -r * 0.1, r * 0.1).fill(0xffffff);
-    weapon.moveTo(-r * 0.7, r * 0.4).lineTo(r * 2.3, r * 0.4).stroke({ width: Math.max(1, r * 0.2), color: 0x120c08 });
-    weapon.moveTo(-r * 0.7, r * 0.4).lineTo(r * 2.3, r * 0.4).stroke({ width: Math.max(0.6, r * 0.11), color: theme.wood });
-    weapon.poly([r * 2.3, r * 0.24, r * 2.8, r * 0.4, r * 2.3, r * 0.56]).fill(theme.steel).stroke({ width: 0.5, color: 0x120c08 });
-    weapon.poly([r * 1.7, r * 0.4, r * 2.15, r * 0.4, r * 1.9, r * 0.78]).fill(light).stroke({ width: 0.4, color: 0x120c08 });
-    return;
-  }
-  shape.ellipse(r * 0.45, r * 0.7, r * 1.0, r * 1.25).fill({ color: 0x000000, alpha: 0.32 });
-  shape.ellipse(0, 0, r * 0.66, r * 1.1).fill(dark).stroke(OUT);
-  shape.ellipse(r * 0.05, -r * 0.18, r * 0.5, r * 0.78).fill(color);
-  shape.ellipse(r * 0.05, -r * 0.45, r * 0.3, r * 0.4).fill(light);
-  if (type === 'swordsman') {
-    shape.circle(r * 0.42, -r * 0.84, r * 0.56).fill(color).stroke(OUT);
-    shape.circle(r * 0.32, -r * 0.94, r * 0.3).fill(light);
-    shape.circle(r * 0.42, -r * 0.84, r * 0.15).fill(0xe8c050).stroke({ width: 0.4, color: 0x120c08 });
-  } else if (type === 'archer') {
-    shape.roundRect(-r * 1.0, r * 0.05, r * 0.72, r * 0.44, r * 0.15).fill(theme.leather).stroke({ width: 0.5, color: 0x120c08 });
-  }
-  const helm = type === 'archer' ? 0x5a7a30 : theme.steel;
-  shape.circle(r * 0.05, 0, r * (type === 'pikeman' ? 0.6 : 0.44)).fill(helm).stroke(OUT);
-  shape.circle(-r * 0.08, -r * 0.14, r * 0.16).fill({ color: 0xffffff, alpha: 0.85 });
-  const shaft = (x0: number, x1: number, y: number, w: number) => {
-    weapon.moveTo(x0, y).lineTo(x1, y).stroke({ width: w + 0.6, color: 0x120c08 });
-    weapon.moveTo(x0, y).lineTo(x1, y).stroke({ width: w, color: theme.wood });
-  };
-  if (type === 'pikeman') {
-    const len = r * 3.4;
-    shaft(-r * 1.1, len, r * 0.35, Math.max(0.6, r * 0.16));
-    weapon.poly([len, r * 0.12, len + r * 0.85, r * 0.35, len, r * 0.58]).fill(theme.steel).stroke({ width: 0.5, color: 0x120c08 });
-  } else if (type === 'archer') {
-    weapon.arc(0, 0, r * 1.6, -0.95, 0.95).stroke({ width: Math.max(1.2, r * 0.36), color: 0x120c08 });
-    weapon.arc(0, 0, r * 1.6, -0.95, 0.95).stroke({ width: Math.max(0.7, r * 0.22), color: theme.wood });
-  } else {
-    const y = r * 0.74;
-    weapon.moveTo(r * 0.5, y).lineTo(r * 1.85, y).stroke({ width: Math.max(1.1, r * 0.3), color: 0x120c08 });
-    weapon.moveTo(r * 0.5, y).lineTo(r * 1.85, y).stroke({ width: Math.max(0.7, r * 0.18), color: 0xe8e8f0 });
-    weapon.moveTo(r * 0.5, y - r * 0.34).lineTo(r * 0.5, y + r * 0.34).stroke({ width: Math.max(0.8, r * 0.18), color: 0xe8c050 });
   }
 }
 

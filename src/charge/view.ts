@@ -220,6 +220,8 @@ export class ChargeView {
   private readonly arrowsG = new Graphics();
   private readonly overlay = new Graphics();
   private readonly popupLayer = new Container();
+  /** Screen-space pointers to calls for help that are off screen. */
+  private readonly callG = new Graphics();
 
   private readonly units = new Map<number, UnitGfx>();
   private unitStamp = 0;
@@ -269,7 +271,7 @@ export class ChargeView {
 
     this.drawGround();
     this.world.addChild(this.ground, this.stainSprite, this.route, this.aimG, this.telegraph, this.unitLayer, this.particleLayer, this.fx, this.arrowsG, this.overlay);
-    this.root.addChild(this.world, this.popupLayer);
+    this.root.addChild(this.world, this.callG, this.popupLayer);
     app.stage.addChild(this.root);
     this.prewarm();
     // Start from a blank stain layer (render textures may hold stale GPU memory).
@@ -1038,6 +1040,12 @@ export class ChargeView {
           }
           break;
         }
+        case 'rally':
+          this.popup(e.x, e.y - 16, 'Rallied!', e.team === 'blue' ? t.blue : t.red, 15, 1.4);
+          break;
+        case 'call-done':
+          this.popup(e.x, e.y - 22, `+${e.points}`, t.elevationBonus, 20, 1.6);
+          break;
         case 'clash': {
           // Your squadron crashes home: a big shockwave, flying earth and splinters.
           if (this.impacts.length > 40) this.impacts.shift();
@@ -1634,6 +1642,8 @@ export class ChargeView {
       g.roundRect(x, y, w * m, h, 1.2).fill({ color: mc, alpha: 0.9 });
     }
 
+    this.drawCalls(g, sim);
+
     // Banners on other squadrons' leaders; allied troops show they can be collected.
     for (const sq of sim.squadrons) {
       const SL = sq.riders[0];
@@ -1708,6 +1718,56 @@ export class ChargeView {
     const wave = Math.sin(sim.time * 10) * 1.5;
     g.moveTo(bx, by).lineTo(bx, by - 14).stroke({ width: 1, color: t.obstacleBorder });
     g.poly([bx, by - 14, bx + 9, by - 12 + wave, bx, by - 9]).fill(t.blue);
+  }
+
+  /**
+   * Calls for help: a pulsing ring round the enemy battalion to break, with an arc
+   * showing the time left; off screen, an arrow at the screen's edge points the way.
+   */
+  private drawCalls(g: Graphics, sim: ChargeSim): void {
+    const t = this.theme;
+    const sg = this.callG;
+    sg.clear();
+    const margin = 34;
+    for (const c of sim.calls) {
+      const b = c.target;
+      const left = Math.max(0, (c.expires - sim.time) / (c.expires - c.started));
+      const pulse = 0.55 + 0.45 * Math.sin(sim.time * 6 + c.id);
+      const urgent = left < 0.3;
+      const color = urgent ? t.labelWarn : t.hpMid;
+      const rx = (b.cols / 2) * b.spacing + 18, ry = rx * 0.62;
+      g.ellipse(b.x, b.y, rx, ry).stroke({ width: 2, color, alpha: 0.35 + 0.45 * pulse });
+      // Time left: an arc round the top of the ring that shrinks away.
+      const a0 = -Math.PI / 2 - Math.PI * left, a1 = -Math.PI / 2 + Math.PI * left;
+      const steps = 24;
+      g.moveTo(b.x + Math.cos(a0) * (rx + 5), b.y + Math.sin(a0) * (ry + 5));
+      for (let i = 1; i <= steps; i++) {
+        const a = a0 + (a1 - a0) * (i / steps);
+        g.lineTo(b.x + Math.cos(a) * (rx + 5), b.y + Math.sin(a) * (ry + 5));
+      }
+      g.stroke({ width: 2.4, color, alpha: 0.9, cap: 'round' });
+      if (c.ally) {
+        // Our buckling line, faintly marked.
+        const ax = (c.ally.cols / 2) * c.ally.spacing + 14;
+        g.ellipse(c.ally.x, c.ally.y, ax, ax * 0.62).stroke({ width: 1.2, color: t.blue, alpha: 0.35 * pulse });
+      }
+
+      // Off screen: an arrow at the edge, pointing at it.
+      const p = this.worldToScreen(b);
+      if (p.x > margin && p.x < this.viewW - margin && p.y > margin && p.y < this.viewH - margin) continue;
+      const cx = this.viewW / 2, cy = this.viewH / 2;
+      const dx = p.x - cx, dy = p.y - cy;
+      const k = Math.min((cx - margin) / Math.max(1e-6, Math.abs(dx)), (cy - margin) / Math.max(1e-6, Math.abs(dy)));
+      const ex = cx + dx * k, ey = cy + dy * k;
+      const a = Math.atan2(dy, dx);
+      const s = 1 + 0.15 * pulse;
+      const pts = [[13, 0], [-7, -9], [-3, 0], [-7, 9]].map(([u, v]) => [ex + (u * Math.cos(a) - v * Math.sin(a)) * s, ey + (u * Math.sin(a) + v * Math.cos(a)) * s]).flat();
+      sg.poly(pts).fill({ color, alpha: 0.85 }).stroke({ width: 1.5, color: 0x1a140a, alpha: 0.6 });
+      sg.circle(ex - Math.cos(a) * 16, ey - Math.sin(a) * 16, 5).stroke({ width: 2, color, alpha: 0.8 });
+      // The countdown on the dot.
+      sg.moveTo(ex - Math.cos(a) * 16, ey - Math.sin(a) * 16 - 5).arc(ex - Math.cos(a) * 16, ey - Math.sin(a) * 16, 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * left)
+        .stroke({ width: 2, color: 0xffffff, alpha: 0.7 });
+    }
   }
 
   /**

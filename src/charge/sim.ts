@@ -174,6 +174,25 @@ export interface Battalion {
   rotateTimer: number;
   /** Sim time this battalion gives up as its army collapses (Infinity = not yet). */
   breakAt: number;
+  /** When it last routed, and whether it has already rallied once (or can't). */
+  routedAt: number;
+  rallied: boolean;
+}
+
+export type CallKind = 'buckling' | 'breakthrough' | 'archers';
+
+/** Your army calls for the squadron: break `target` before the call runs out. */
+export interface HelpCall {
+  id: number;
+  kind: CallKind;
+  /** The enemy battalion to break. */
+  target: Battalion;
+  /** Ours, in trouble (buckling calls). */
+  ally: Battalion | null;
+  /** Which part of the field, as your army sees it. */
+  side: 'left' | 'centre' | 'right';
+  started: number;
+  expires: number;
 }
 
 export interface Arrow {
@@ -207,6 +226,12 @@ export type SimEvent =
   | { type: 'clash'; x: number; y: number; angle: number; pike: boolean }
   /** An enemy horseman has got onto your tail (fires when the danger begins). */
   | { type: 'tail'; x: number; y: number }
+  /** A routed battalion has re-formed and comes back into the fight. */
+  | { type: 'rally'; x: number; y: number; team: Team }
+  /** Your army calls for help; answered (done), or too late (failed). */
+  | { type: 'call'; x: number; y: number; kind: CallKind; side: HelpCall['side'] }
+  | { type: 'call-done'; x: number; y: number; kind: CallKind; side: HelpCall['side']; points: number }
+  | { type: 'call-failed'; x: number; y: number; kind: CallKind; side: HelpCall['side'] }
   | { type: 'hit'; x: number; y: number; angle: number; team: Team; damage: number; id: number }
   | { type: 'kill'; x: number; y: number; angle: number; team: Team; id: number; byPlayer: boolean; side: AttackSide; points: number }
   | { type: 'volley'; id: number; team: Team; x: number; y: number; radius: number; flight: number; atPlayer: boolean }
@@ -322,6 +347,12 @@ export class ChargeSim {
   bowled = 0;
   /** Enemy knights killed by your infantry or archers while they hunted you. */
   lured = 0;
+  /** Where your army needs you right now. */
+  calls: HelpCall[] = [];
+  callsAnswered = 0;
+  private callCooldown: number = C.CALL_FIRST;
+  private lastArcherCall = -Infinity;
+  private nextCallId = 1;
   /** Enemy horsemen on your tail right now: behind your leader, riding at him. */
   onTail: Soldier[] = [];
   private tailCooldown = 0;
@@ -474,6 +505,8 @@ export class ChargeSim {
       lastPlayerHit: -99,
       rotateTimer: this.rand() * C.ROTATE_INTERVAL,
       breakAt: Infinity,
+      routedAt: -Infinity,
+      rallied: false,
     };
     for (let i = 0; i < spec.count; i++) {
       const p = this.slotPos(bat, i);
@@ -615,6 +648,7 @@ export class ChargeSim {
     this.updateCamp(dt);
     this.updateMorale(dt);
     this.updateTail(dt);
+    this.updateCalls(dt);
     this.clashCooldown -= dt;
 
     this.comboTimer -= dt;
@@ -1216,6 +1250,8 @@ export class ChargeSim {
 
       if (role === 'front') {
         if (engaged) { this.pressLine(b, dt); continue; } // locked in melee: push and shove
+        // Our opponent broke: swing into the flank of an enemy battalion still fighting.
+        if (this.seekFlank(b, dt)) continue;
         const target = this.nearestEnemyBattalion(b);
         if (!target) continue;
         const dx = target.x - b.x, dy = target.y - b.y;
@@ -1254,6 +1290,132 @@ export class ChargeSim {
   }
 
   /** Fighting strength for the shoving match: numbers, heart and the kind of men. */
+  /**
+   * A free battalion near an enemy battalion that is locked in melee marches round to
+   * its open flank and wheels into it — two against one, from the side. Returns false
+   * if there's no such enemy within reach (then it marches at the nearest enemy).
+   */
+  private seekFlank(b: Battalion, dt: number): boolean {
+    let foe: Battalion | null = null;
+    let best: number = C.FLANK_SEEK_RANGE;
+    for (const o of this.battalions) {
+      if (o.team === b.team || o.routed || o.role === 'archer' || o.engagedTimer <= 0) continue;
+      const d = Math.hypot(o.x - b.x, o.y - b.y);
+      if (d >= best) continue;
+      // Only an enemy busy with another of ours: one fighting us we just face.
+      const busy = this.battalions.some(m => m !== b && m.team === b.team && !m.routed && m.role !== 'archer'
+        && Math.hypot(m.x - o.x, m.y - o.y) < C.PUSH_RANGE);
+      if (busy) { best = d; foe = o; }
+    }
+    if (!foe) return false;
+    // Its flanks lie square to its facing; take the nearer one.
+    const px = -Math.sin(foe.facing), py = Math.cos(foe.facing);
+    const half = (foe.cols / 2) * foe.spacing + b.spacing * 2;
+    const side = (b.x - foe.x) * px + (b.y - foe.y) * py >= 0 ? 1 : -1;
+    const ax = foe.x + px * side * half, ay = foe.y + py * side * half;
+    const dx = ax - b.x, dy = ay - b.y, d = Math.hypot(dx, dy);
+    // Face the enemy's flank: our front toward his side.
+    b.facing = turnToward(b.facing, Math.atan2(foe.y - b.y, foe.x - b.x), C.BATTALION_TURN_RATE * 2 * dt);
+    if (d > 1) {
+      const step = Math.min(d, (d > C.MARCH_DISTANCE ? C.MARCH_SPEED : C.ADVANCE_SPEED * 1.4) * dt);
+      b.x += (dx / d) * step;
+      b.y += (dy / d) * step;
+    }
+    return true;
+  }
+
+  /**
+   * A routed battalion with enough men left re-forms where it has fled to and comes
+   * back as a reserve. Returns true if it rallied this step.
+   */
+  private tryRally(b: Battalion): boolean {
+    if (b.rallied || this.time - b.routedAt < C.RALLY_DELAY) return false;
+    if (this.outcome !== 'playing' || this.armyBroken[b.team] || this.armyWavered[b.team]) return false;
+    const men = this.members(b);
+    b.rallied = true; // one chance only
+    if (men.length < Math.max(C.RALLY_MIN, b.initial * C.RALLY_SHARE)) return false;
+    let cx = 0, cy = 0;
+    for (const s of men) { cx += s.x; cy += s.y; }
+    cx = clamp(cx / men.length, 120, C.WORLD_W - 120);
+    cy = clamp(cy / men.length, 150, C.WORLD_H - 150);
+    b.routed = false;
+    b.morale = C.RALLY_MORALE;
+    b.sinceShock = 0;
+    b.engagedTimer = 0;
+    b.x = cx; b.y = cy;
+    b.home = { x: cx, y: cy };
+    b.facing = b.homeFacing = b.team === 'blue' ? -Math.PI / 2 : Math.PI / 2;
+    if (b.role === 'front') b.role = 'reserve';
+    for (const s of men) s.fleeing = false;
+    this.events.push({ type: 'rally', x: cx, y: cy, team: b.team });
+    return true;
+  }
+
+  /**
+   * Your army calls for the squadron where the battle is turning against it: a line
+   * buckling, an enemy battalion breaking through, their archers thinning our ranks.
+   * Break the battalion named in time and the call is answered.
+   */
+  private updateCalls(dt: number): void {
+    const P = this.player;
+    if (!P) return;
+    const enemy: Team = P.team === 'blue' ? 'red' : 'blue';
+    // Resolve the calls in hand.
+    for (let i = this.calls.length - 1; i >= 0; i--) {
+      const c = this.calls[i];
+      const at = { x: c.target.x, y: c.target.y, kind: c.kind, side: c.side };
+      if (c.target.routed) {
+        this.calls.splice(i, 1);
+        this.callsAnswered++;
+        this.score += C.CALL_SCORE;
+        for (const b of this.battalions) if (b.team === P.team && !b.routed) b.morale = Math.min(100, b.morale + C.CALL_MORALE);
+        this.events.push({ type: 'call-done', ...at, points: C.CALL_SCORE });
+      } else if ((c.ally && c.ally.routed) || this.time > c.expires || this.outcome !== 'playing') {
+        this.calls.splice(i, 1);
+        this.events.push({ type: 'call-failed', ...at });
+      } else if (c.ally && c.ally.morale > 65) {
+        this.calls.splice(i, 1); // the line steadied on its own
+      }
+    }
+    this.callCooldown -= dt;
+    if (this.outcome !== 'playing' || this.calls.length >= C.CALL_MAX || this.callCooldown > 0) return;
+    const named = (b: Battalion) => this.calls.some(c => c.target === b || c.ally === b);
+    const sideOf = (x: number): HelpCall['side'] => x < C.WORLD_W * 0.38 ? 'left' : x > C.WORLD_W * 0.62 ? 'right' : 'centre';
+    // Which way is "into our side of the field"?
+    const ours = P.team === 'blue' ? 1 : -1;
+    let pick: { kind: CallKind; target: Battalion; ally: Battalion | null } | null = null;
+    for (const b of this.battalions) {
+      // A line of ours buckling in melee.
+      if (b.team !== P.team || b.routed || b.role !== 'front' || b.engagedTimer <= 0 || b.morale > C.CALL_BUCKLE_MORALE || named(b)) continue;
+      const foe = this.nearestEnemyBattalion(b, C.PUSH_RANGE);
+      if (foe && !named(foe)) { pick = { kind: 'buckling', target: foe, ally: b }; break; }
+    }
+    if (!pick) {
+      for (const b of this.battalions) {
+        // An enemy battalion deep in our half.
+        if (b.team !== enemy || b.routed || b.role === 'archer' || b.engagedTimer > 0 || named(b)) continue;
+        if ((b.y - C.FRONT_Y) * ours > C.CALL_BREAKTHROUGH_DEPTH) { pick = { kind: 'breakthrough', target: b, ally: null }; break; }
+      }
+    }
+    if (!pick && this.time > C.CALL_ARCHERS_AFTER && this.time - this.lastArcherCall > C.CALL_ARCHERS_EVERY) {
+      let best: Battalion | null = null, most = 0;
+      for (const b of this.battalions) {
+        if (b.team !== enemy || b.routed || b.role !== 'archer' || named(b)) continue;
+        const n = this.members(b).length;
+        if (n > most) { most = n; best = b; }
+      }
+      if (best) { pick = { kind: 'archers', target: best, ally: null }; this.lastArcherCall = this.time; }
+    }
+    if (!pick) return;
+    const call: HelpCall = {
+      id: this.nextCallId++, ...pick, side: sideOf(pick.target.x),
+      started: this.time, expires: this.time + C.CALL_TIME[pick.kind],
+    };
+    this.calls.push(call);
+    this.callCooldown = C.CALL_GAP;
+    this.events.push({ type: 'call', x: call.target.x, y: call.target.y, kind: call.kind, side: call.side });
+  }
+
   private lineStrength(b: Battalion): number {
     return this.members(b).length * (0.3 + 0.7 * clamp01(b.morale / 100)) * C.PUSH_WEIGHT[b.type];
   }
@@ -2021,7 +2183,7 @@ export class ChargeSim {
     const lost = { blue: 0, red: 0 }, total = { blue: 0, red: 0 };
     for (const b of this.battalions) {
       total[b.team] += b.initial;
-      if (b.routed) { lost[b.team] += b.initial; continue; }
+      if (b.routed && !this.tryRally(b)) { lost[b.team] += b.initial; continue; }
       const alive = this.members(b).length;
       lost[b.team] += b.initial - alive;
       if (alive === 0) { b.routed = true; continue; }
@@ -2082,6 +2244,7 @@ export class ChargeSim {
   private rout(b: Battalion): void {
     b.routed = true;
     b.morale = 0;
+    b.routedAt = this.time;
     for (const s of this.members(b)) {
       s.fleeing = true;
       s.fleeDrift = (this.rand() - 0.5) * 0.9;

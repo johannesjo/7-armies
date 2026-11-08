@@ -195,6 +195,40 @@ export const CHARGE = {
   ARCHER_RETREAT_SPEED: 32,
   /** A routed line pulls up the nearest reserve within this distance. */
   PLUG_RANGE: 700,
+  /**
+   * A battalion whose opponent broke swings into the flank of an enemy battalion
+   * still fighting within this range, rather than marching at a fresh front.
+   */
+  FLANK_SEEK_RANGE: 420,
+  /**
+   * Rallying: a routed battalion re-forms where it has fled to after this long (s),
+   * if at least this many men (and this share of its strength) are still with it,
+   * and comes back as a reserve at this morale. Once per battalion, and never once
+   * its army is wavering or broken.
+   */
+  RALLY_DELAY: 7,
+  RALLY_MIN: 6,
+  RALLY_SHARE: 0.3,
+  RALLY_MORALE: 45,
+  /**
+   * Calls for help: where your army needs the squadron. The first comes after
+   * CALL_FIRST s, then at most one every CALL_GAP s, two at a time. Answer one (break
+   * the enemy battalion named) within its time for CALL_SCORE and a morale lift
+   * across your army.
+   */
+  CALL_FIRST: 20,
+  CALL_GAP: 14,
+  CALL_MAX: 2,
+  CALL_TIME: { buckling: 40, breakthrough: 50, archers: 60 },
+  CALL_SCORE: 300,
+  CALL_MORALE: 12,
+  /** A front battalion this low on morale, locked in melee, is buckling. */
+  CALL_BUCKLE_MORALE: 40,
+  /** An enemy battalion this far past the front line (into your side) is breaking through. */
+  CALL_BREAKTHROUGH_DEPTH: 140,
+  /** Calls about the enemy archers wait until this far into the battle, and recur at most this often (s). */
+  CALL_ARCHERS_AFTER: 45,
+  CALL_ARCHERS_EVERY: 90,
 
   // --- Archers ---
   ARCHER_RANGE: 480,

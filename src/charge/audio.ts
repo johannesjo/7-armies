@@ -150,6 +150,19 @@ export class ChargeAudio {
       case 'combo':
         this.chime([784, 988]);
         break;
+      case 'call':
+        // A rising call to arms.
+        this.horn([262, 330, 392], 0.55);
+        break;
+      case 'call-done':
+        this.chime([523, 659, 784]);
+        break;
+      case 'call-failed':
+        this.horn([294, 220], 0.4);
+        break;
+      case 'rally':
+        if (e.team === 'blue') this.horn([330, 392], 0.3);
+        break;
       case 'tail':
         // Warning: a sharp, low double call on the horn.
         this.horn([196, 196], 0.55);

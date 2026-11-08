@@ -577,6 +577,19 @@ export class ChargeMode {
         if (e.byPlayer) this.triggerHitStop(0.6, 0.25);
       }
       if (e.type === 'clash') this.triggerHitStop(e.pike ? 0.12 : 0.16, 0.3);
+      if (e.type === 'call') {
+        const where = e.side === 'centre' ? 'centre' : `${e.side} flank`;
+        const msg = e.kind === 'buckling' ? `Our ${where} is buckling — charge the enemy there!`
+          : e.kind === 'breakthrough' ? `The enemy is breaking through on our ${where}!`
+          : 'Their archers are cutting us down — ride them down!';
+        this.banner(msg, 3000, true);
+      }
+      if (e.type === 'call-done') {
+        this.banner(e.kind === 'buckling' ? `The ${e.side} holds! +${e.points}` : e.kind === 'breakthrough' ? `Breakthrough stopped! +${e.points}` : `Archers silenced! +${e.points}`, 2000);
+      }
+      if (e.type === 'call-failed') {
+        this.banner(e.kind === 'buckling' ? `Too late — our ${e.side} gives way` : e.kind === 'breakthrough' ? 'Too late — they broke through' : 'Their archers keep shooting', 2000);
+      }
       if (e.type === 'squad-break' && e.byPlayer) this.triggerHitStop(0.35, 0.35);
       if (e.type === 'hunt') this.banner('Enemy knights ride for your banner!', 2400, true);
       if (e.type === 'muster') this.banner('Fresh riders at camp — ride in to take command', 2600);
@@ -666,6 +679,18 @@ export class ChargeMode {
       ctx.arc(v.x * sx, v.y * sy, Math.max(2 * dpr, v.radius * sx), 0, Math.PI * 2);
       ctx.stroke();
     }
+
+    // Calls for help: blinking rings on the battalions to break.
+    const blink = 0.5 + 0.5 * Math.sin(performance.now() / 160);
+    ctx.lineWidth = 1.6 * dpr;
+    for (const c of sim.calls) {
+      ctx.globalAlpha = 0.4 + 0.6 * blink;
+      ctx.strokeStyle = hex(theme.hpMid);
+      ctx.beginPath();
+      ctx.arc(c.target.x * sx, c.target.y * sy, 6 * dpr, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.lineWidth = dpr;
 
     // Other cavalry: allied troops (collectable) and enemy knights.
     for (const sq of sim.squadrons) {

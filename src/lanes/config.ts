@@ -28,7 +28,7 @@ export const LANES = {
 
   KEEP: { blue: { x: 270, y: 1200 }, red: { x: 2730, y: 1200 } } as Record<Team, { x: number; y: number }>,
   KEEP_R: 54,
-  KEEP_HP: 1300,
+  KEEP_HP: 1000,
   KEEP_RANGE: 430,
   KEEP_VOLLEY: 1.9,
   KEEP_ARROWS: 16,
@@ -68,9 +68,9 @@ export const LANES = {
   WAVE_SWORDS: 20,
   WAVE_PIKES: 16,
   /** Every this many waves each battalion grows by WAVE_GROWTH men, up to WAVE_GROWTH_MAX. */
-  WAVE_GROWTH_EVERY: 5,
-  WAVE_GROWTH: 2,
-  WAVE_GROWTH_MAX: 10,
+  WAVE_GROWTH_EVERY: 3,
+  WAVE_GROWTH: 3,
+  WAVE_GROWTH_MAX: 24,
   LANE_MARCH: 32,
   /** A lane battalion turns on enemy foot this close, in its lane. */
   AGGRO: 270,

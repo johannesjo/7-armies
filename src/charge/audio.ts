@@ -151,6 +151,12 @@ export class ChargeAudio {
     }
   }
 
+  /** A rising fanfare for the enemy army's flight. */
+  victory(): void {
+    if (!this.ctx) return;
+    this.horn([392, 523, 659, 784], 0.7);
+  }
+
   private envGain(peak: number, attack: number, decay: number, at = this.ctx!.currentTime): GainNode {
     const g = this.ctx!.createGain();
     g.gain.setValueAtTime(0, at);

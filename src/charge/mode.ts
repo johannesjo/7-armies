@@ -19,6 +19,8 @@ export interface ChargeResult {
   ridersLost: number;
   bestCombo: number;
   joined: number;
+  /** Fleeing enemies ridden down after the victory. */
+  pursuit: number;
   /** You cut down the red general yourself. */
   general: boolean;
   time: number;
@@ -73,6 +75,8 @@ const STEP = 1 / 60;
 const MAX_FRAME_DT = 0.25;
 const MAX_STEPS_PER_FRAME = Math.ceil(MAX_FRAME_DT / STEP) + 1;
 const END_DELAY = 2.2;
+/** The pursuit after victory ends on its own after this long (s). */
+const PURSUIT_MAX = 60;
 /** Drawing faster than this share of the screen's long side per second means gallop. */
 const GALLOP_STROKE_SPEED = 0.6;
 /** Strokes starting this close (px) to the end of the current route extend it. */
@@ -95,6 +99,11 @@ export class ChargeMode {
   private controls: ChargeControls;
   private paused = false;
   private endTimer = -1;
+  /** Seconds since victory — the pursuit, when you ride down the fleeing army (-1 = not won yet). */
+  private pursuitTimer = -1;
+  /** Your kill count at the moment of victory. */
+  private pursuitKills = -1;
+  private readonly endBtn = $('ch-end-btn');
   private hudTimer = 0;
   private frameEvents: SimEvent[] = [];
   private theme: Theme | null = null;
@@ -159,6 +168,7 @@ export class ChargeMode {
     this.controls.onPause = () => this.togglePause();
     this.controls.handler = this.strokes;
     $('ch-pause-btn').addEventListener('click', () => this.togglePause());
+    this.endBtn.addEventListener('click', () => { if (this.pursuitTimer >= 0) this.finish(); });
     $('ch-resume-btn').addEventListener('click', () => this.togglePause(false));
     $('ch-quit-btn').addEventListener('click', () => this.cb.onQuit());
   }
@@ -209,6 +219,9 @@ export class ChargeMode {
     this.view.focus(this.sim.leader!);
 
     this.endTimer = -1;
+    this.pursuitTimer = -1;
+    this.pursuitKills = -1;
+    this.endBtn.classList.remove('active');
     this.paused = false;
     this.lastRiders = -1;
     this.movedOnce = false;
@@ -423,10 +436,26 @@ export class ChargeMode {
       this.drawMinimap();
     }
 
-    if (sim.outcome !== 'playing') {
+    if (sim.outcome === 'victory') {
+      // The pursuit: no cut to the results — ride down the fleeing army for as long as
+      // you like, until it has left the field or you end the battle.
+      if (this.pursuitTimer < 0) {
+        this.pursuitTimer = 0;
+        this.pursuitKills = sim.kills;
+        this.banner('Victory!', 3200, true);
+        this.audio.victory();
+        this.endBtn.classList.add('active');
+        setTimeout(() => {
+          if (this.sim === sim && this.pursuitTimer >= 0) this.banner('The enemy flees — ride them down!', 2800, true);
+        }, 3400);
+      }
+      this.pursuitTimer += rawDt;
+      const fleeing = sim.soldiers.some(s => s.team === 'red' && s.alive);
+      if (this.pursuitTimer > PURSUIT_MAX || (!fleeing && this.pursuitTimer > 6)) this.finish();
+    } else if (sim.outcome !== 'playing') {
       if (this.endTimer < 0) {
         this.endTimer = END_DELAY;
-        this.banner(sim.outcome === 'victory' ? 'Victory!' : 'Defeat', END_DELAY * 1000, true);
+        this.banner('Defeat', END_DELAY * 1000, true);
       }
       this.endTimer -= rawDt;
       if (this.endTimer <= 0) this.finish();
@@ -435,6 +464,8 @@ export class ChargeMode {
 
   private finish(): void {
     const sim = this.sim!;
+    this.endBtn.classList.remove('active');
+    this.pursuitTimer = -1;
     const score = sim.score + (sim.outcome === 'victory' ? 500 + sim.riders.length * 50 : 0);
     const prevBest = readBest();
     const newBest = score > prevBest;
@@ -448,6 +479,7 @@ export class ChargeMode {
       ridersLost: sim.ridersLost,
       bestCombo: sim.bestCombo,
       joined: sim.ridersJoined,
+      pursuit: this.pursuitKills >= 0 ? sim.kills - this.pursuitKills : 0,
       general: sim.generalKilledByPlayer,
       time: sim.time,
       best: Math.max(prevBest, score),
@@ -486,21 +518,21 @@ export class ChargeMode {
     let hurt = false;
     for (const e of events) {
       if (e.type === 'rider-hit' && e.mine) hurt = true;
-      if (e.type === 'rout' && e.team === 'blue' && !this.sim?.armyBroken.blue) this.banner('Our line is breaking — hurry!', 2200);
+      if (e.type === 'rout' && e.team === 'blue' && !this.sim?.armyBroken.blue) this.banner('Our line is breaking — hurry!', 2200, true);
       if (e.type === 'rout' && e.team === 'red' && this.sim && this.sim.outcome === 'playing') {
         if (!this.sim.armyBroken.red) this.banner(`Enemy morale ${Math.round(this.sim.armyMorale('red') * 100)}%`, 1600);
       }
       if (e.type === 'rider-down' && e.mine && e.wasLeader && this.sim?.leader) this.banner('A new rider takes the banner', 1600);
       if (e.type === 'army-break') {
-        this.banner(e.team === 'red' ? 'The enemy army is breaking!' : 'Our army is breaking!', 3000);
+        this.banner(e.team === 'red' ? 'The enemy army is breaking!' : 'Our army is breaking!', 3200, true);
       }
       if (e.type === 'army-waver') {
-        this.banner(e.team === 'red' ? 'The enemy wavers — keep pressing!' : 'Our army wavers — hurry!', 2400);
+        this.banner(e.team === 'red' ? 'The enemy wavers — keep pressing!' : 'Our army wavers — hurry!', 2800, true);
       }
       if (e.type === 'general-down') {
-        this.banner(e.byPlayer ? 'You cut down the enemy general!' : 'The enemy general has fallen!', 2600);
+        this.banner(e.byPlayer ? 'You cut down the enemy general!' : 'The enemy general has fallen!', 2800, true);
       }
-      if (e.type === 'hunt') this.banner('Enemy knights ride for your banner!', 2400);
+      if (e.type === 'hunt') this.banner('Enemy knights ride for your banner!', 2400, true);
       if (e.type === 'muster') this.banner('Fresh riders at camp — ride in to take command', 2600);
       if (e.type === 'join') this.banner(`+${e.count} riders join your squadron`, 1600);
     }

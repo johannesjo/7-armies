@@ -20,8 +20,13 @@ export const CHARGE = {
   TURN_RATE_FAST: 2.9,
   /** Followers close the gap to their slot at this rate (1/s), along their heading. */
   FOLLOW_GAIN: 3,
-  /** Followers can ride at most this much faster than the leader to regain their place. */
+  /** Followers can ride at most this much faster than the leader to regain their place... */
   FOLLOW_CATCH_UP: 1.06,
+  /**
+   * ...plus up to this much (world units/s) when the leader rides slowly, fading to
+   * nothing at full gallop: stragglers close up fast at a walk, never at the charge.
+   */
+  FOLLOW_CATCH_UP_SLOW: 95,
   /**
    * Followers steer toward a point this far ahead along their own lane (world units),
    * so they keep to their lane round a wheel instead of cutting the corner.
@@ -145,7 +150,7 @@ export const CHARGE = {
   VS_RIDER_DAMAGE_MULT: 1.4,
   /** Team-wide melee multipliers: the blue line is slowly losing without help. */
   TEAM_MELEE_MULT: { blue: 0.78, red: 1 },
-  FLEE_SPEED: 58,
+  FLEE_SPEED: 46,
   ADVANCE_SPEED: 14,
   /** Soldiers point their weapons at enemies within this distance. */
   AIM_RADIUS: 70,
@@ -211,20 +216,20 @@ export const CHARGE = {
    * An army's morale runs out once this share of its foot is dead or fled. Blue holds
    * out a little longer so the battle lasts a few minutes without you.
    */
-  ARMY_BREAK: { blue: 0.8, red: 0.7 },
+  ARMY_BREAK: { blue: 0.8, red: 0.8 },
   /** Below this army morale (0..1) the army wavers: every battalion slowly loses heart... */
-  ARMY_WAVER: 0.35,
+  ARMY_WAVER: 0.3,
   /** ...by up to this much morale per second as army morale nears zero, and stops recovering. */
-  ARMY_DRAIN: 4,
+  ARMY_DRAIN: 2.5,
   /** When morale runs out the army collapses: the rest break one by one over this long (s). */
-  ARMY_COLLAPSE_TIME: 10,
+  ARMY_COLLAPSE_TIME: 14,
   ARMY_COLLAPSE_MIN: 1.2,
 
   // --- The red general ---
   GENERAL_HP: 45,
   GENERAL_SCORE: 1000,
   /** His fall counts toward the red army breaking as if this share of it had fled... */
-  GENERAL_ARMY_SHOCK: 0.15,
+  GENERAL_ARMY_SHOCK: 0.1,
   /** ...and shakes every red battalion by this much morale. */
   GENERAL_MORALE_SHOCK: 25,
   /** He rides away from enemy horsemen that come this close. */

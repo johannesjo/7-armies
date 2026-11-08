@@ -344,6 +344,7 @@ function onChargeEnd(result: ChargeResult): void {
     `Enemies ridden down: ${result.kills}`,
     `Battalions routed by your charges: ${result.routs}`,
     ...(result.general ? ['You cut down the enemy general'] : []),
+    ...(result.pursuit > 0 ? [`Ridden down in the pursuit: ${result.pursuit}`] : []),
     `Best trample combo: ${result.bestCombo}`,
     `Riders recruited: ${result.joined} · lost: ${result.ridersLost}`,
     `Time: ${mins}:${secs}`,

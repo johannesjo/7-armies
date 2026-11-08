@@ -633,6 +633,8 @@ export class ChargeSim {
     // and little spare speed to regain its place. On a curve the outer lanes are
     // longer, so riders there fall behind; sharp turns string the squadron out.
     const maxFollow = Math.min(C.GALLOP_SPEED, Math.max(L.speed, C.CANTER_SPEED * 0.6)) * C.FOLLOW_CATCH_UP;
+    // Spare speed for stragglers: plenty at a walk, none at full gallop.
+    const spareMax = C.FOLLOW_CATCH_UP_SLOW * (1 - Math.min(1, L.speed / C.GALLOP_SPEED));
     let tight = 0;
     for (let i = 1; i < sq.riders.length; i++) {
       const f = sq.riders[i];
@@ -649,15 +651,20 @@ export class ChargeSim {
       f.facing = turnToward(f.facing, desired, this.turnRate(f.speed) * C.FOLLOWER_AGILITY * dt);
 
       // Close the gap along our own heading; ease off if the slot has swung behind us.
+      // The further out of place, the more spare speed (when the leader isn't flat out).
+      const spare = Math.min(spareMax, dist * C.FOLLOW_GAIN);
+      const maxF = Math.max(maxFollow, Math.min(C.GALLOP_SPEED, L.speed + spare));
       const along = dx * Math.cos(f.facing) + dy * Math.sin(f.facing);
-      let target = L.speed + clamp(along * C.FOLLOW_GAIN, -L.speed, maxFollow - L.speed);
+      let target = L.speed + clamp(along * C.FOLLOW_GAIN, -L.speed, maxF - L.speed);
       // A rider that needs a sharp turn reins in to turn tighter — so the inside of a
-      // wheel slows down while the outside has to ride hard to keep up.
+      // wheel slows down while the outside has to ride hard to keep up. A straggler
+      // paces that against his catch-up speed, not the leader's walk.
+      const pace = Math.max(L.speed, Math.min(maxF, L.speed + spare));
       const sharp = Math.abs(diff);
-      if (sharp > 0.35) target = Math.min(target, L.speed * Math.max(0.45, 1 - (sharp - 0.35) * 0.6));
-      if (sharp > 1.8) target = Math.min(target, Math.max(L.speed * 0.55, C.CANTER_SPEED * 0.45));
+      if (sharp > 0.35) target = Math.min(target, pace * Math.max(0.45, 1 - (sharp - 0.35) * 0.6));
+      if (sharp > 1.8) target = Math.min(target, Math.max(pace * 0.55, C.CANTER_SPEED * 0.45));
       if (dist < 4 && L.speed < 5) target = 0;
-      target = clamp(target, 0, maxFollow);
+      target = clamp(target, 0, maxF);
       if (f.speed < target) f.speed = Math.min(target, f.speed + C.GALLOP_ACCEL * 1.05 * dt);
       else f.speed = Math.max(target, f.speed - C.FOLLOW_BRAKE * dt);
 

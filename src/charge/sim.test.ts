@@ -380,10 +380,10 @@ describe('army morale', () => {
   it('a wavering army slowly loses heart instead of recovering', () => {
     const reds = [0, 1, 2, 3, 4, 5].map(i => block({ x: 200 + i * 150 }));
     const sim = new ChargeSim([...reds, block({ team: 'blue', y: 1300, facing: UP })], { seed: 1, squad: null });
-    for (const b of sim.battalions.slice(0, 3)) b.morale = -1;
+    for (const b of sim.battalions.slice(0, 4)) b.morale = -1;
     sim.step(1 / 30);
     sim.step(1 / 30);
-    // Half the army gone: morale low enough to waver.
+    // Two thirds of the army gone: morale low enough to waver.
     expect(sim.armyMorale('red')).toBeLessThan(C.ARMY_WAVER);
     const before = sim.battalions[4].morale;
     run(sim, 3);
@@ -394,16 +394,16 @@ describe('army morale', () => {
   it('when morale runs out the red army collapses battalion by battalion — then it is won', () => {
     const reds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => block({ x: 150 + i * 100 }));
     const sim = new ChargeSim([...reds, block({ team: 'blue', y: 1300, facing: UP })], { seed: 1, squad: null });
-    for (const b of sim.battalions.slice(0, 7)) b.morale = -1; // 70%
+    for (const b of sim.battalions.slice(0, 8)) b.morale = -1; // 80%
     sim.step(1 / 30);
     sim.step(1 / 30);
     expect(sim.armyBroken.red).toBe(true);
     // Not an instant switch: the last battalions are still standing for a few seconds...
     expect(sim.outcome).toBe('playing');
-    expect(sim.battalions.filter(b => b.team === 'red' && !b.routed).length).toBe(3);
-    run(sim, C.ARMY_COLLAPSE_MIN + 0.5);
+    expect(sim.battalions.filter(b => b.team === 'red' && !b.routed).length).toBe(2);
+    run(sim, C.ARMY_COLLAPSE_MIN + 1);
     const mid = sim.battalions.filter(b => b.team === 'red' && !b.routed).length;
-    expect(mid).toBeLessThan(3);
+    expect(mid).toBe(1);
     // ...then the collapse runs its course and the day is won.
     run(sim, C.ARMY_COLLAPSE_TIME + 1);
     expect(sim.battalions.filter(b => b.team === 'red').every(b => b.routed)).toBe(true);

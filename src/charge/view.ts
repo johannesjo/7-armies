@@ -1,5 +1,5 @@
 import { Application, BitmapFont, BitmapText, CanvasSource, Container, Graphics, Rectangle, RenderTexture, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
-import { paintGrassTile, paintGroundOverlay } from '../ground';
+import { fbm, paintGrassTile, paintGroundOverlay } from '../ground';
 import { Team, UnitType, Vec2 } from '../types';
 import { Theme } from '../theme';
 import { drawUnitArt, HORSE_VARIANTS, attackPose, attackDuration } from '../unit-art';
@@ -194,6 +194,107 @@ function paintStandard(g: Graphics, x: number, y: number, h: number, color: numb
   g.circle(x - 0.35 * s, top - 1.3 * s, 0.5 * s).fill({ color: 0xfff0b0, alpha: 0.8 });
 }
 
+/** How far the forest is painted beyond the field (world units): past what the camera can show. */
+const FOREST_MARGIN = 760;
+/** The deep forest's canopy colour, also what lies beyond the painted margin. */
+const CANOPY = 0x22341a;
+const forestNoise = fbm(23, 4);
+const floorNoise = fbm(57, 4);
+
+/**
+ * How deep into the surrounding forest a point lies: negative on the field, positive
+ * among the trees. The edge is ragged (noise), so the wood has bays and spurs rather
+ * than a ruled line.
+ */
+function forestDepth(x: number, y: number): number {
+  const out = Math.max(-x, x - C.WORLD_W, -y, y - C.WORLD_H);
+  return out + (forestNoise(x / 150, y / 150) - 0.5) * 80;
+}
+
+let forestCanvas: HTMLCanvasElement | null = null;
+
+/**
+ * The forest round the field, painted once: dappled shade spilling onto the grass at
+ * the edge, a floor of leaf litter and moss under the trees, and further in, the
+ * unbroken canopy of the deep wood (overlapping crowns). The shade and floor are low
+ * resolution (3 units a pixel): soft texture, with the trees on top giving detail.
+ */
+function paintForest(theme: Theme): HTMLCanvasElement {
+  if (forestCanvas) return forestCanvas;
+  const S = 3, M = FOREST_MARGIN;
+  const w = Math.ceil((C.WORLD_W + M * 2) / S), h = Math.ceil((C.WORLD_H + M * 2) / S);
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d')!;
+  const img = ctx.createImageData(w, h);
+  const d = img.data;
+  const rgb = (c: number) => [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+  const shade = rgb(0x1a2610), floorA = rgb(mixColor(theme.grassDark, 0x2a2410, 0.55)), floorB = rgb(0x4a3a20);
+  const canopyDark = rgb(CANOPY);
+  let seed = 5;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const smooth = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
+      const x = px * S - M, y = py * S - M;
+      const i = (py * w + px) * 4;
+      // Well inside the meadow: nothing to paint (skip the noise).
+      if (Math.max(-x, x - C.WORLD_W, -y, y - C.WORLD_H) < -112) { d[i + 3] = 0; continue; }
+      const f = forestDepth(x, y);
+      if (f < -70) { d[i + 3] = 0; continue; }
+      // Dappled shade cast onto the meadow by the trees at its edge.
+      const dapple = 0.65 + 0.35 * floorNoise(x / 22, y / 22);
+      let r = shade[0], g = shade[1], b = shade[2];
+      let a = 0.42 * smooth(-70, 0, f) * dapple;
+      if (f > -4) {
+        // Forest floor: moss and leaf litter, mottled at two scales.
+        const n = floorNoise(x / 60, y / 60), grain = (rnd() - 0.5) * 14;
+        const k = smooth(-4, 14, f);
+        const fr = floorA[0] + (floorB[0] - floorA[0]) * n + grain, fg = floorA[1] + (floorB[1] - floorA[1]) * n + grain, fb = floorA[2] + (floorB[2] - floorA[2]) * n + grain * 0.7;
+        // Shade deepens toward the heart of the wood.
+        const dim = 1 - 0.35 * smooth(0, 260, f);
+        r = r + (fr * dim - r) * k; g = g + (fg * dim - g) * k; b = b + (fb * dim - b) * k;
+        a = a + (1 - a) * k;
+        // Deep in, the floor sinks into the canopy's shade (the crowns are drawn below).
+        const c = smooth(220, 320, f);
+        r += (canopyDark[0] - r) * c; g += (canopyDark[1] - g) * c; b += (canopyDark[2] - b) * c;
+      }
+      d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = Math.round(Math.min(1, a) * 255);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  // The deep wood's roof: overlapping treetops, dark below and sunlit on top, drawn
+  // as crowns (like the trees in front) rather than a blur.
+  ctx.save();
+  ctx.scale(1 / S, 1 / S);
+  ctx.translate(M, M);
+  const css = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
+  const dark = css(mixColor(CANOPY, 0x000000, 0.35)), base = css(mixColor(CANOPY, theme.grassDark, 0.25));
+  const lit = css(mixColor(mixColor(CANOPY, theme.grassDark, 0.6), theme.grassLight, 0.12)), glint = css(mixColor(theme.grassDark, theme.grassLight, 0.4));
+  const step = 15;
+  const crowns: [number, number, number][] = [];
+  for (let y = -M; y < C.WORLD_H + M; y += step) {
+    for (let x = -M; x < C.WORLD_W + M; x += step) {
+      const cx = x + (rnd() - 0.5) * step, cy = y + (rnd() - 0.5) * step;
+      const f = forestDepth(cx, cy);
+      if (f < 250 || rnd() > smooth(250, 330, f)) continue;
+      crowns.push([cx, cy, 10 + rnd() * 7]);
+    }
+  }
+  crowns.sort((a, b) => a[1] - b[1]);
+  for (const [x, y, r] of crowns) {
+    ctx.fillStyle = dark; ctx.beginPath(); ctx.arc(x + r * 0.15, y + r * 0.25, r * 1.05, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = base; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = lit; ctx.beginPath(); ctx.arc(x - r * 0.25, y - r * 0.3, r * 0.6, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.4;
+    ctx.fillStyle = glint; ctx.beginPath(); ctx.arc(x - r * 0.4, y - r * 0.45, r * 0.25, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+  forestCanvas = cv;
+  return cv;
+}
+
 /** Arc as its own sub-path — Pixi otherwise joins it to the previous path's last point. */
 function arcPath(g: Graphics, x: number, y: number, r: number, a0: number, a1: number): Graphics {
   return g.moveTo(x + Math.cos(a0) * r, y + Math.sin(a0) * r).arc(x, y, r, a0, a1);
@@ -263,6 +364,7 @@ export class ChargeView {
     // Beyond the field: forest floor on grass, a darker margin otherwise.
     app.renderer.background.color = this.style === 'mini' ? 0x4e3420 // the wooden table under the felt
       : this.style === 'ink' ? 0xd6c7a2
+      : theme.artStyle === 'rts' ? CANOPY
       : theme.grass ? 0x33441f : mixColor(theme.bg, this.ink, 0.18);
 
     this.stainRT = RenderTexture.create({ width: C.WORLD_W, height: C.WORLD_H, resolution: 1.25 });
@@ -444,13 +546,29 @@ export class ChargeView {
     const rand = mulberry32(4321);
     // The grass tile and its texture live for the whole session (shared by every battle).
     const tile = this.style === 'mini' ? paintFeltTile(t) : this.style === 'ink' ? paintPaperTile(t) : paintGrassTile(t, 768, 3);
-    const grass = new TilingSprite({ texture: sharedTexture(tile), width: C.WORLD_W, height: C.WORLD_H });
+    // Upright style: the meadow runs on under the wood, so the ragged edge has grass in its bays.
+    const gm = this.upright ? 120 : 0;
+    const grass = new TilingSprite({ texture: sharedTexture(tile), width: C.WORLD_W + gm * 2, height: C.WORLD_H + gm * 2 });
+    grass.position.set(-gm, -gm);
+    grass.tilePosition.set(gm, gm);
     grass.tileScale.set(this.style === 'mini' || this.style === 'ink' ? 0.75 : 0.5);
-    const overlay = new Sprite(sharedTexture(paintGroundOverlay(C.WORLD_W, C.WORLD_H, t, this.earthAt, 4, 11, 'charge')));
-    overlay.width = C.WORLD_W;
-    overlay.height = C.WORLD_H;
+    // The meadow's colour patches run on under the wood too (no seam in its bays).
+    const overlay = new Sprite(sharedTexture(gm > 0
+      ? paintGroundOverlay(C.WORLD_W + gm * 2, C.WORLD_H + gm * 2, t, (x, y) => this.earthAt(x - gm, y - gm), 4, 11, 'charge-wide')
+      : paintGroundOverlay(C.WORLD_W, C.WORLD_H, t, this.earthAt, 4, 11, 'charge')));
+    overlay.position.set(-gm, -gm);
+    overlay.width = C.WORLD_W + gm * 2;
+    overlay.height = C.WORLD_H + gm * 2;
     if (this.style === 'ink') overlay.alpha = 0.6; // pale washes over the paper
     this.world.addChild(grass, overlay);
+    if (this.upright) {
+      // The wood round the field: shade at its ragged edge, floor, and deep canopy.
+      const forest = new Sprite(sharedTexture(paintForest(t)));
+      forest.position.set(-FOREST_MARGIN, -FOREST_MARGIN);
+      forest.width = C.WORLD_W + FOREST_MARGIN * 2;
+      forest.height = C.WORLD_H + FOREST_MARGIN * 2;
+      this.world.addChild(forest);
+    }
     if (this.style === 'mini') {
       // Scatter-flock patches, the way terrain is dressed on a wargames table.
       const flock = new Graphics();
@@ -584,8 +702,32 @@ export class ChargeView {
 
     // Forest beyond the field edge (on the table: just the felt's edge).
     const band = 170;
-    // Upright trees crowd into a dense wood, crowns overlapping, right up to the field's edge.
-    const trees = this.style === 'mini' ? 0 : this.upright ? 1400 : 300;
+    if (this.upright) {
+      // Trees crowd the ragged edge and thin into the canopy further in; a band of
+      // undergrowth fringes the meadow.
+      const span = 380;
+      let placed = 0;
+      for (let tries = 0; placed < 2300 && tries < 14000; tries++) {
+        const side = Math.floor(rand() * 4), along = rand(), depth = -40 + rand() * span;
+        const x = side === 0 || side === 2 ? along * (C.WORLD_W + span * 2) - span : side === 1 ? C.WORLD_W + depth : -depth;
+        const y = side === 0 ? -depth : side === 2 ? C.WORLD_H + depth : along * (C.WORLD_H + span * 2) - span;
+        const f = forestDepth(x, y);
+        // Densest at the edge, thinning where the painted canopy takes over.
+        if (f < 4 || f > 350 || rand() > 1 - f / 420) continue;
+        place(treeTex[Math.floor(rand() * treeTex.length)], x, y, 0.8 + rand() * 0.5);
+        placed++;
+      }
+      for (let tries = 0, n = 0; n < 320 && tries < 6000; tries++) {
+        const side = Math.floor(rand() * 4), along = rand(), depth = -60 + rand() * 90;
+        const x = side === 0 || side === 2 ? along * C.WORLD_W : side === 1 ? C.WORLD_W + depth : -depth;
+        const y = side === 0 ? -depth : side === 2 ? C.WORLD_H + depth : along * C.WORLD_H;
+        const f = forestDepth(x, y);
+        if (f < -22 || f > 10 || this.earthAt(x, y) > 0.1) continue;
+        place(bushTex[Math.floor(rand() * bushTex.length)], x, y, 0.8 + rand() * 0.7);
+        n++;
+      }
+    }
+    const trees = this.style === 'mini' || this.upright ? 0 : 300;
     for (let i = 0; i < trees; i++) {
       const side = Math.floor(rand() * 4);
       const along = rand();

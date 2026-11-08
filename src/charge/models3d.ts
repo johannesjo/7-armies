@@ -10,8 +10,8 @@ import { Team, UnitType } from '../types';
  * Every vertex carries:
  * - `color`
  * - `aRig = (pivotX, pivotY, phaseOffset, kind)` — how the part moves (see RIG_KIND)
- * - `aRig2 = (kneeX, kneeY, tint, 0)` — knee pivot for lower legs; tint 1 = cloth that
- *   varies a little from soldier to soldier
+ * - `aRig2 = (kneeX, kneeY, tint, team)` — knee pivot for lower legs; tint 1 = cloth that
+ *   varies a little from soldier to soldier; team 1 = team-coloured (kept vivid in shade)
  * - `aMat = (roughness, metalness)`
  */
 
@@ -33,13 +33,14 @@ export const RIG_KIND = {
 } as const;
 
 export const PAL = {
-  blue: 0x2758d0, blueDark: 0x15306e, red: 0xc8281c, redDark: 0x6a120c,
+  blue: 0x1e5cff, blueDark: 0x163c9c, red: 0xe8231a, redDark: 0x8e1610,
   gold: 0xd8b040, white: 0xeee6d2,
   mail: 0x8c9096, steel: 0xc8ccd2, skin: 0xd8a074, leather: 0x6e4626, boot: 0x3a2618,
   gambeson: 0xb8a07a, hose: 0x5a4a3a, tunic: 0x5e6a38, wood: 0x8a6034,
   coats: [0x6e3c1e, 0x2e2420, 0x9a9488, 0x9a5a2a],
 };
 export const COATS = PAL.coats.length;
+const TEAM_COLORS = new Set([PAL.blue, PAL.blueDark, PAL.red, PAL.redDark]);
 
 type Mat = [number, number];
 const CLOTH: Mat = [0.88, 0], MAIL: Mat = [0.5, 0.55], STEEL: Mat = [0.32, 0.85], LEATHER: Mat = [0.7, 0];
@@ -60,10 +61,11 @@ function finish(geo: THREE.BufferGeometry, color: number, o: PartOpts = {}): THR
   const c = new THREE.Color(color), n = g.attributes.position.count;
   const col = new Float32Array(n * 3), r = new Float32Array(n * 4), r2 = new Float32Array(n * 4), m = new Float32Array(n * 2);
   const [px, py] = o.pivot ?? [0, 0], [kx, ky] = o.knee ?? [0, 0], mat = o.mat ?? CLOTH;
+  const team = TEAM_COLORS.has(color) ? 1 : 0;
   for (let i = 0; i < n; i++) {
     col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
     r[i * 4] = px; r[i * 4 + 1] = py; r[i * 4 + 2] = o.phase ?? 0; r[i * 4 + 3] = o.kind ?? 0;
-    r2[i * 4] = kx; r2[i * 4 + 1] = ky; r2[i * 4 + 2] = o.tint ? 1 : 0;
+    r2[i * 4] = kx; r2[i * 4 + 1] = ky; r2[i * 4 + 2] = o.tint ? 1 : 0; r2[i * 4 + 3] = team;
     m[i * 2] = mat[0]; m[i * 2 + 1] = mat[1];
   }
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
@@ -137,10 +139,14 @@ function head(g: THREE.BufferGeometry[], y = 1.62) {
 }
 
 /** Shoulders and arms; the right arm (and what it holds) turns with the attack. */
-function arms(g: THREE.BufferGeometry[], sleeve: number, sleeveMat: Mat, left: [number, number], right: [number, number]) {
+function arms(g: THREE.BufferGeometry[], sleeve: number, sleeveMat: Mat, left: [number, number], right: [number, number], team?: Team) {
   const hl = { x: 0, y: 0, z: 0 }, hr = { x: 0, y: 0, z: 0 };
   const atk: PartOpts = { kind: RIG_KIND.attack, pivot: [0, 1.4], mat: sleeveMat };
   g.push(P(sph(0.12), sleeve, 0, 1.39, -0.28, 0, 0, 0, { mat: sleeveMat }), P(sph(0.12), sleeve, 0, 1.39, 0.28, 0, 0, 0, { mat: sleeveMat }));
+  if (team) {
+    // Team-coloured shoulder guards: the colour you see first from above.
+    for (const z of [-0.29, 0.29]) g.push(P(halfSph(0.16), teamColor(team), 0, 1.42, z, 0, 0, 0, { tint: true }));
+  }
   g.push(limb(0.62, 0.075, 0.06, sleeve, 0, 1.41, -0.3, left[0], left[1], hl, { mat: sleeveMat }));
   g.push(limb(0.62, 0.075, 0.06, sleeve, 0, 1.41, 0.3, right[0], right[1], hr, atk));
   g.push(P(sph(0.078), PAL.skin, hl.x, hl.y, hl.z, 0, 0, 0, { mat: SKIN }), P(sph(0.078), PAL.skin, hr.x, hr.y, hr.z, 0, 0, 0, { ...atk, mat: SKIN }));
@@ -151,12 +157,13 @@ function swordsman(team: Team) {
   const g: THREE.BufferGeometry[] = [];
   lowerBody(g, PAL.mail, PAL.mail, MAIL, false);
   tabard(g, team);
-  const { hl, hr, atk } = arms(g, PAL.mail, MAIL, [0.55, -0.35], [1.0, 0.25]);
+  const { hl, hr, atk } = arms(g, PAL.mail, MAIL, [0.55, -0.35], [1.0, 0.25], team);
   head(g);
   // Nasal helm.
   g.push(P(cone(0.17, 0.27, 10), PAL.steel, 0.02, 1.77, 0, 0, 0, 0, { mat: STEEL }));
   g.push(P(cyl(0.175, 0.175, 0.07, 10), PAL.steel, 0.02, 1.66, 0, 0, 0, 0, { mat: STEEL }));
   g.push(P(box(0.035, 0.14, 0.035), PAL.steel, 0.17, 1.6, 0, 0, 0, 0, { mat: STEEL }));
+  g.push(P(box(0.36, 0.1, 0.07), teamColor(team), -0.02, 1.9, 0, 0, 0, 0.25, { tint: true })); // crest
   // Round shield: team field, a pale cross, iron rim and boss.
   const sx = hl.x + 0.06, sy = hl.y + 0.06, sz = hl.z - 0.12;
   g.push(P(cyl(0.38, 0.38, 0.05, 14), teamColor(team), sx, sy, sz, Math.PI / 2, 0, 0, { tint: true }));
@@ -175,10 +182,14 @@ function pikeman(team: Team) {
   const g: THREE.BufferGeometry[] = [];
   lowerBody(g, PAL.gambeson, PAL.gambeson, CLOTH, true);
   tabard(g, team, 0.62, 1.1);
-  arms(g, PAL.gambeson, CLOTH, [0.75, 0.25], [0.5, -0.1]);
+  arms(g, PAL.gambeson, CLOTH, [0.75, 0.25], [0.5, -0.1], team);
   head(g);
   // Kettle hat.
-  g.push(P(halfSph(0.17), PAL.steel, 0.02, 1.68, 0, 0, 0, 0, { mat: STEEL }), P(cyl(0.31, 0.31, 0.03, 14), PAL.steel, 0.02, 1.69, 0, 0, 0, 0, { mat: STEEL }));
+  // Kettle hat with a brim painted in the team colour (it's what you see from above).
+  g.push(P(halfSph(0.17), PAL.steel, 0.02, 1.68, 0, 0, 0, 0, { mat: STEEL }), P(cyl(0.31, 0.31, 0.03, 14), teamColor(team), 0.02, 1.69, 0, 0, 0, 0, { tint: true }));
+  g.push(P(cyl(0.315, 0.315, 0.012, 14), PAL.steel, 0.02, 1.672, 0, 0, 0, 0, { mat: STEEL }));
+  g.push(P(cyl(0.175, 0.175, 0.06, 12), teamColor(team), 0.02, 1.73, 0, 0, 0, 0, { tint: true })); // hat band
+  g.push(P(sph(0.08), teamColor(team), 0.02, 1.86, 0, 0, 0, 0, { tint: true })); // tassel
   // The pike thrusts with the attack.
   const thrust: PartOpts = { kind: RIG_KIND.attack, pivot: [0.3, 1.25], mat: WOOD };
   const ang = 0.1;
@@ -191,9 +202,9 @@ function archer(team: Team) {
   const g: THREE.BufferGeometry[] = [];
   lowerBody(g, PAL.tunic, PAL.tunic, CLOTH, true);
   g.push(P(box(0.52, 0.22, 0.55), teamColor(team), 0, 1.37, 0, 0, 0, 0, { tint: true })); // cape
-  const { hl } = arms(g, PAL.tunic, CLOTH, [1.25, -0.15], [0.7, 0.3]);
+  const { hl } = arms(g, PAL.tunic, CLOTH, [1.25, -0.15], [0.7, 0.3], team);
   head(g);
-  g.push(P(halfSph(0.165), teamDark(team), 0, 1.64, 0, 0, 0, 0, { tint: true }));
+  g.push(P(halfSph(0.165), teamColor(team), 0, 1.64, 0, 0, 0, 0, { tint: true }));
   g.push(P(cyl(0.08, 0.08, 0.62), PAL.leather, -0.24, 1.25, 0.1, 0.35, 0, 0, { mat: LEATHER }));
   g.push(P(new THREE.TorusGeometry(0.7, 0.03, 4, seg(12), Math.PI * 0.72), PAL.wood, hl.x + 0.05 - 0.5, hl.y, hl.z, 0, 0, -Math.PI * 0.36, { mat: WOOD }));
   return mergeGeometries(g);
@@ -230,9 +241,9 @@ function knight(team: Team, coat: number) {
     g.push(P(cyl(0.07, 0.08, 0.09, 7), 0x1a1410, k.x, 0.05, lz, 0, 0, 0, { ...shin, mat: WOOD }));
   }
   // Caparison: team cloth with a trimmed hem and a stripe; saddle.
-  g.push(P(box(1.24, 0.38, 0.88), C, -0.12, 1.32, 0, 0, 0, 0, { tint: true }));
-  g.push(P(box(1.26, 0.07, 0.9), trim, -0.12, 1.12, 0, 0, 0, 0, { tint: true }));
-  g.push(P(box(0.13, 0.4, 0.895), trim, 0.1, 1.32, 0, 0, 0, 0, { tint: true }));
+  g.push(P(box(1.5, 0.42, 0.9), C, -0.1, 1.33, 0, 0, 0, 0, { tint: true }));
+  g.push(P(box(1.52, 0.07, 0.92), trim, -0.1, 1.12, 0, 0, 0, 0, { tint: true }));
+  g.push(P(box(0.13, 0.44, 0.915), trim, 0.1, 1.33, 0, 0, 0, 0, { tint: true }));
   g.push(P(box(0.58, 0.13, 0.64), PAL.leather, -0.1, 1.74, 0, 0, 0, 0, { mat: LEATHER }));
   // Rider, bobbing in the saddle.
   const bob: PartOpts = { kind: RIG_KIND.bob, mat: MAIL };
@@ -245,7 +256,8 @@ function knight(team: Team, coat: number) {
   g.push(limb(0.56, 0.07, 0.055, PAL.mail, -0.1, 2.32, -0.3, 0.9, -0.2, hl, bob), limb(0.56, 0.07, 0.055, PAL.mail, -0.1, 2.32, 0.3, 1.3, 0.25, hr, lance));
   g.push(P(cyl(0.17, 0.17, 0.33, 10), PAL.steel, -0.08, 2.6, 0, 0, 0, 0, { ...bob, mat: STEEL })); // great helm
   g.push(P(box(0.02, 0.035, 0.22), 0x111111, 0.09, 2.63, 0, 0, 0, 0, bob));
-  g.push(P(cone(0.08, 0.3, 6), C, -0.1, 2.9, 0, 0, 0, 0.4, { ...bob, mat: CLOTH }));
+  g.push(P(cone(0.13, 0.45, 7), C, -0.14, 2.95, 0, 0, 0, 0.5, { ...bob, mat: CLOTH }));
+  for (const z of [-0.28, 0.28]) g.push(P(halfSph(0.17), C, -0.1, 2.33, z, 0, 0, 0, { ...bob, mat: CLOTH, tint: true }));
   // Kite shield with a chevron; couched lance with a pennant.
   const kx = hl.x + 0.06, ky = hl.y + 0.05, kz = hl.z - 0.09;
   g.push(P(box(0.05, 0.7, 0.48), C, kx, ky, kz, 0, 0, 0.15, { ...bob, mat: CLOTH, tint: true }));

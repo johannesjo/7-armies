@@ -542,9 +542,9 @@ export class ChargeView3D implements ChargeRenderer {
         `;
       }
       if (fx.tint) {
-        vHead += 'varying float vTint;\n';
-        fHead += 'varying float vTint;\n';
-        begin += 'vTint = aRig2.z > 0.5 ? 0.84 + aAnim.w * 0.32 : 1.0;\n';
+        vHead += 'varying float vTint;\nvarying float vTeam;\n';
+        fHead += 'varying float vTint;\nvarying float vTeam;\n';
+        begin += 'vTint = aRig2.z > 0.5 ? 0.93 + aAnim.w * 0.14 : 1.0;\nvTeam = aRig2.w;\n';
       }
       if (fx.matAttr) {
         vHead += 'attribute vec2 aMat;\nvarying vec2 vMat;\n';
@@ -584,6 +584,10 @@ export class ChargeView3D implements ChargeRenderer {
       if (fx.matAttr) {
         frag = frag.replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vMat.x;')
           .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vMat.y;');
+      }
+      if (fx.tint) {
+        // Team colour glows a little on its own, so it stays vivid in shadow and dust.
+        frag = frag.replace('#include <opaque_fragment>', 'outgoingLight += diffuseColor.rgb * vTeam * 0.32;\n#include <opaque_fragment>');
       }
       if (fx.rim) {
         frag = frag.replace('#include <opaque_fragment>',

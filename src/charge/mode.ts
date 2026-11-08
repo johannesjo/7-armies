@@ -120,6 +120,8 @@ export class ChargeMode {
   private combatText = readFlag(TEXT_KEY, false);
   private readonly pace = new StrokePace(800);
   private movedOnce = false;
+  /** How long you've been steering the squadron without a break (s); the help text goes at 0.5 s. */
+  private steeringFor = 0;
   private bannerTimeout: ReturnType<typeof setTimeout> | null = null;
   private hintTimeout: ReturnType<typeof setTimeout> | null = null;
   private readonly onResize = () => this.resize();
@@ -228,6 +230,7 @@ export class ChargeMode {
     this.paused = false;
     this.lastRiders = -1;
     this.movedOnce = false;
+    this.steeringFor = 0;
     this.path.clear();
     this.aim = null;
     this.pauseEl.classList.remove('active');
@@ -444,9 +447,20 @@ export class ChargeMode {
     this.frameEvents.length = 0;
     const steps = Math.min(MAX_STEPS_PER_FRAME, Math.max(1, Math.ceil(dt / STEP - 1e-6)));
     const h = dt / steps;
+    let steering = false;
     for (let i = 0; i < steps; i++) {
-      sim.step(h, this.stepInput(sim));
+      const input = this.stepInput(sim);
+      if (Math.hypot(input.dirX, input.dirY) > 0.2) steering = true;
+      sim.step(h, input);
       for (const e of sim.events) this.frameEvents.push(e);
+    }
+    // Riding for real (steering, and the horses moving) for half a second: the help
+    // text has done its job and gets out of the way.
+    const L0 = sim.leader;
+    this.steeringFor = steering && L0 && L0.speed > 20 ? this.steeringFor + rawDt : 0;
+    if (this.steeringFor >= 0.5 && this.hintEl.classList.contains('active')) {
+      if (this.hintTimeout) clearTimeout(this.hintTimeout);
+      this.hintEl.classList.remove('active');
     }
     if (this.scheme === 'joystick') {
       view.holdCamera = false;

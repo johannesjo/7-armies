@@ -118,6 +118,12 @@ export const CHARGE = {
   COHESION_DIST: 9,
   /** A fully tight wedge hits other horsemen this much heavier (x1 + weight). */
   COHESION_WEIGHT: 0.6,
+  /**
+   * A horseman rammed from behind (or the side) counts as only this share of his
+   * weight in the collision: he's shoved on, and the rider who hit him keeps most of
+   * his speed. Head-on, both horses meet at full weight.
+   */
+  RAM_YIELD: { rear: 0.08, flank: 0.3 },
   /** Clash shock dealt to an AI squadron by the side it was hit on, and per rider it loses. */
   CLASH_SHOCK: { front: 0.25, flank: 1.2, rear: 2.2 },
   LOSS_SHOCK: 0.6,
@@ -195,6 +201,39 @@ export const CHARGE = {
   ARCHER_RETREAT_SPEED: 32,
   /** A routed line pulls up the nearest reserve within this distance. */
   PLUG_RANGE: 700,
+  /**
+   * A battalion whose opponent broke swings into the flank of an enemy battalion
+   * still fighting within this range, rather than marching at a fresh front.
+   */
+  FLANK_SEEK_RANGE: 420,
+  /**
+   * Rallying: a routed battalion re-forms where it has fled to after this long (s),
+   * if at least this many men (and this share of its strength) are still with it,
+   * and comes back as a reserve at this morale. Once per battalion, and never once
+   * its army is wavering or broken.
+   */
+  RALLY_DELAY: 7,
+  RALLY_MIN: 6,
+  RALLY_SHARE: 0.3,
+  RALLY_MORALE: 45,
+  /**
+   * Calls for help: where your army needs the squadron. The first comes after
+   * CALL_FIRST s, then at most one every CALL_GAP s, two at a time. Answer one (break
+   * the enemy battalion named) within its time for CALL_SCORE and a morale lift
+   * across your army.
+   */
+  CALL_FIRST: 20,
+  CALL_GAP: 14,
+  CALL_MAX: 2,
+  CALL_TIME: { buckling: 40, breakthrough: 50 },
+  CALL_SCORE: 300,
+  CALL_MORALE: 12,
+  /** A front battalion this low on morale, locked in melee, is buckling. */
+  CALL_BUCKLE_MORALE: 40,
+  /** An enemy battalion this far past the front line (into your side) is breaking through. */
+  CALL_BREAKTHROUGH_DEPTH: 140,
+  /** The one-off tip to ride down their archers comes this far into the battle (s). */
+  ARCHER_TIP_AFTER: 45,
 
   // --- Archers ---
   ARCHER_RANGE: 480,

@@ -286,3 +286,27 @@ describe('warnings and big moments', () => {
     expect(clashes).toBeLessThan(3);
   });
 });
+
+describe('ramming horsemen', () => {
+  const slowest = (redFacing: number) => {
+    const sim = new ChargeSim([block()], {
+      seed: 4, squad: { x: 470, y: 600, facing: 0, count: 6 }, muster: false,
+      squads: [{ team: 'red', ai: 'hunter', x: 620, y: 600, facing: redFacing, count: 5, muster: 20, style: 'heavy' }],
+    });
+    for (const r of sim.riders) r.speed = C.GALLOP_SPEED;
+    let min = Infinity;
+    for (let t = 0; t < 1.2; t += 1 / 60) {
+      sim.step(1 / 60, { dirX: 1, dirY: 0, gallop: true });
+      if (sim.leader) min = Math.min(min, sim.leader.speed);
+    }
+    return min;
+  };
+
+  it('riding into enemy horse from behind barely checks the charge', () => {
+    expect(slowest(0)).toBeGreaterThan(C.GALLOP_SPEED * 0.8);
+  });
+
+  it('meeting them head-on still stops it', () => {
+    expect(slowest(Math.PI)).toBeLessThan(C.GALLOP_SPEED * 0.3);
+  });
+});

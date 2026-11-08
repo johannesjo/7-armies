@@ -120,6 +120,8 @@ export class ChargeMode {
   private combatText = readFlag(TEXT_KEY, false);
   private readonly pace = new StrokePace(800);
   private movedOnce = false;
+  /** How long you've been steering the squadron without a break (s); the help text goes at 0.5 s. */
+  private steeringFor = 0;
   private bannerTimeout: ReturnType<typeof setTimeout> | null = null;
   private hintTimeout: ReturnType<typeof setTimeout> | null = null;
   private readonly onResize = () => this.resize();
@@ -228,6 +230,7 @@ export class ChargeMode {
     this.paused = false;
     this.lastRiders = -1;
     this.movedOnce = false;
+    this.steeringFor = 0;
     this.path.clear();
     this.aim = null;
     this.pauseEl.classList.remove('active');
@@ -444,9 +447,20 @@ export class ChargeMode {
     this.frameEvents.length = 0;
     const steps = Math.min(MAX_STEPS_PER_FRAME, Math.max(1, Math.ceil(dt / STEP - 1e-6)));
     const h = dt / steps;
+    let steering = false;
     for (let i = 0; i < steps; i++) {
-      sim.step(h, this.stepInput(sim));
+      const input = this.stepInput(sim);
+      if (Math.hypot(input.dirX, input.dirY) > 0.2) steering = true;
+      sim.step(h, input);
       for (const e of sim.events) this.frameEvents.push(e);
+    }
+    // Riding for real (steering, and the horses moving) for half a second: the help
+    // text has done its job and gets out of the way.
+    const L0 = sim.leader;
+    this.steeringFor = steering && L0 && L0.speed > 20 ? this.steeringFor + rawDt : 0;
+    if (this.steeringFor >= 0.5 && this.hintEl.classList.contains('active')) {
+      if (this.hintTimeout) clearTimeout(this.hintTimeout);
+      this.hintEl.classList.remove('active');
     }
     if (this.scheme === 'joystick') {
       view.holdCamera = false;
@@ -482,7 +496,7 @@ export class ChargeMode {
         this.pursuitTimer = 0;
         this.pursuitKills = sim.kills;
         this.victoryRiders = sim.riders.length;
-        this.banner('Victory!', 3200, true);
+        this.banner('Victory!', 3200, true, true);
         this.audio.victory();
         this.endBtn.classList.add('active');
         setTimeout(() => {
@@ -497,7 +511,7 @@ export class ChargeMode {
     } else if (sim.outcome !== 'playing') {
       if (this.endTimer < 0) {
         this.endTimer = END_DELAY;
-        this.banner('Defeat', END_DELAY * 1000, true);
+        this.banner('Defeat', END_DELAY * 1000, true, true);
       }
       this.endTimer -= rawDt;
       if (this.endTimer <= 0) this.finish();
@@ -549,9 +563,19 @@ export class ChargeMode {
   }
 
   /** Centre-screen message; skipped when combat text is off unless `force` (victory/defeat). */
-  private banner(text: string, ms: number, force = false): void {
+  /**
+   * Show a banner. Most sit near the top, out of the way of the riding (just below
+   * the help text while that's still up); `center` puts the big endings mid-screen.
+   */
+  private banner(text: string, ms: number, force = false, center = false): void {
     if (!this.combatText && !force) return;
     this.bannerEl.textContent = text;
+    this.bannerEl.classList.toggle('center', center);
+    this.bannerEl.style.top = '';
+    if (!center && this.hintEl.classList.contains('active')) {
+      const below = this.hintEl.getBoundingClientRect().bottom - this.screen.getBoundingClientRect().top + 10;
+      this.bannerEl.style.top = `${Math.round(below)}px`;
+    }
     this.bannerEl.classList.add('active');
     if (this.bannerTimeout) clearTimeout(this.bannerTimeout);
     this.bannerTimeout = setTimeout(() => this.bannerEl.classList.remove('active'), ms);
@@ -577,9 +601,21 @@ export class ChargeMode {
         if (e.byPlayer) this.triggerHitStop(0.6, 0.25);
       }
       if (e.type === 'clash') this.triggerHitStop(e.pike ? 0.12 : 0.16, 0.3);
+      if (e.type === 'call') {
+        // Short, so it fits a phone: where, and what's wrong.
+        const where = e.side === 'centre' ? 'centre' : `${e.side} flank`;
+        this.banner(e.kind === 'buckling' ? `Our ${where} is buckling!` : `Enemy breaking through — ${e.side}!`, 3000, true);
+      }
+      if (e.type === 'call-done') {
+        this.banner(e.kind === 'buckling' ? `The ${e.side} holds! +${e.points}` : `Breakthrough stopped! +${e.points}`, 2000);
+      }
+      if (e.type === 'call-failed') {
+        this.banner(e.kind === 'buckling' ? `Too late — the ${e.side} gives way` : 'Too late — they broke through', 2000);
+      }
+      if (e.type === 'tip') this.banner('Tip: ride down their archers', 2400);
       if (e.type === 'squad-break' && e.byPlayer) this.triggerHitStop(0.35, 0.35);
       if (e.type === 'hunt') this.banner('Enemy knights ride for your banner!', 2400, true);
-      if (e.type === 'muster') this.banner('Fresh riders at camp — ride in to take command', 2600);
+      if (e.type === 'muster') this.banner('Fresh riders at camp — ride in!', 2600);
       if (e.type === 'join') this.banner(`+${e.count} riders join your squadron`, 1600);
     }
     if (hurt) {
@@ -666,6 +702,18 @@ export class ChargeMode {
       ctx.arc(v.x * sx, v.y * sy, Math.max(2 * dpr, v.radius * sx), 0, Math.PI * 2);
       ctx.stroke();
     }
+
+    // Calls for help: blinking rings on the battalions to break.
+    const blink = 0.5 + 0.5 * Math.sin(performance.now() / 160);
+    ctx.lineWidth = 1.6 * dpr;
+    for (const c of sim.calls) {
+      ctx.globalAlpha = 0.4 + 0.6 * blink;
+      ctx.strokeStyle = hex(theme.hpMid);
+      ctx.beginPath();
+      ctx.arc(c.target.x * sx, c.target.y * sy, 6 * dpr, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.lineWidth = dpr;
 
     // Other cavalry: allied troops (collectable) and enemy knights.
     for (const sq of sim.squadrons) {

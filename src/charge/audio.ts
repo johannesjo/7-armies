@@ -135,9 +135,11 @@ export class ChargeAudio {
       case 'hunt':
         this.horn([220, 220, 294], 0.6);
         break;
+      case 'pit-stop':
+        if (e.healed > 0) this.chime([523, 784]);
+        break;
       case 'join':
-      case 'rally':
-        this.chime(e.type === 'join' ? [660, 880, 1100] : [880]);
+        this.chime([660, 880, 1100]);
         break;
       case 'squad-break':
         this.horn(e.team === 'red' ? [523, 659] : [294, 220], 0.45);
@@ -149,6 +151,12 @@ export class ChargeAudio {
         this.chime([784, 988]);
         break;
     }
+  }
+
+  /** A rising fanfare for the enemy army's flight. */
+  victory(): void {
+    if (!this.ctx) return;
+    this.horn([392, 523, 659, 784], 0.7);
   }
 
   private envGain(peak: number, attack: number, decay: number, at = this.ctx!.currentTime): GainNode {

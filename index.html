@@ -360,6 +360,8 @@
     #ch-form.loose { background: var(--ch-warn, #d8402e); }
     #ch-red { background: var(--ch-red); }
     #ch-blue { background: var(--ch-blue); }
+    #ch-red.wavering, #ch-blue.wavering { animation: ch-waver 0.8s ease-in-out infinite alternate; }
+    @keyframes ch-waver { from { opacity: 1; } to { opacity: 0.35; } }
     .ch-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.7; }
     .ch-center { text-align: center; }
     #ch-score { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
@@ -394,6 +396,23 @@
       text-shadow: 0 2px 12px rgba(0,0,0,0.5);
     }
     #ch-banner.active { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    #ch-end-btn {
+      display: none;
+      position: absolute;
+      left: 50%;
+      bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+      transform: translateX(-50%);
+      padding: 10px 22px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: #f6f0dc;
+      background: rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(255, 255, 255, 0.45);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #ch-end-btn.active { display: block; }
     #ch-hint {
       position: absolute;
       top: calc(96px + env(safe-area-inset-top, 0px));
@@ -661,20 +680,22 @@
         <div id="ch-time">0:00</div>
       </div>
       <div class="ch-col right">
-        <span class="ch-label">Enemy army</span>
+        <span class="ch-label">Enemy morale</span>
         <div class="ch-bar"><div id="ch-red"></div></div>
-        <span class="ch-label">Our line</span>
+        <span class="ch-label">Our morale</span>
         <div class="ch-bar"><div id="ch-blue"></div></div>
       </div>
     </div>
     <canvas id="ch-minimap" aria-hidden="true"></canvas>
     <div id="ch-banner" aria-live="polite"></div>
+    <button id="ch-end-btn" type="button">End battle ▸</button>
     <div id="ch-hint">
       <span class="ctl-joystick"><b>Steer with the stick</b> at the bottom right — push further to ride faster, into the outer ring to <b>gallop</b>. Let go to rein in.<br></span>
       <span class="ctl-direct"><b>Point where to ride</b> — keep <span class="touch-only">your finger</span><span class="mouse-only">the mouse button held</span> on the field and your squadron rides toward it. Closer = slower, further = faster, far out = <b>gallop</b>.<br></span>
       <span class="ctl-route"><b>Draw your route</b> — <span class="mouse-only">drag with the mouse</span><span class="touch-only">drag your finger</span> and your squadron rides it.<br>
       <span class="legend canter"></span> draw slowly to canter · <span class="legend gallop"></span> flick quickly to gallop<br></span>
-      Hit flanks <b>×2</b> and rears <b>×3</b> · dodge the red circles · ride into <b>allied troops</b> to take command of them
+      Hit flanks <b>×2</b> and rears <b>×3</b> — <b>glowing edges</b> show an open side · dodge the red circles · ride into <b>allied troops</b> to take command of them<br>
+      Break the enemy's <b>morale</b> and their whole army flees · cut down their <b>general</b> (gold on the map) to shake it
       <span class="mouse-only"><br>Keyboard reins: <kbd>W</kbd> ride on · <kbd>A</kbd>/<kbd>D</kbd> turn · <kbd>S</kbd> rein in · <kbd>Space</kbd> gallop</span>
     </div>
     <div id="ch-joy-zone" aria-label="Steering stick"><div id="ch-joy"><div id="ch-joy-knob"></div></div></div>
@@ -685,7 +706,7 @@
     </div>
     <div id="ch-pause" role="dialog" aria-modal="true" aria-label="Paused">
       <h2>Paused</h2>
-      <p class="ch-help"><span class="ctl-joystick">Steer with the stick at the bottom right — push further to ride faster, into the outer ring to gallop.</span><span class="ctl-direct">Hold your finger or the mouse button where you want to ride — the further from your squadron, the faster it goes, and far out it gallops.</span><span class="ctl-route">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it.</span> Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Wheel wide: on a sharp turn the riders on the outside of your wedge fall behind, and a loose wedge loses to a tight one. Hit enemy horsemen in the flank or rear to scatter them — or lead pursuing knights onto our pikes and archers. Pikes facing you will stop a charge, and enemy knights will hunt you. Keep moving — riders that stall in the crowd get pulled down. Ride into allied cavalry troops to take them under your command (up to 30 riders); fresh troops muster at the blue camp, where your wounded heal and fallen riders are replaced. A full gallop hits hardest but turns wide; slow down to turn tight.</p>
+      <p class="ch-help"><span class="ctl-joystick">Steer with the stick at the bottom right — push further to ride faster, into the outer ring to gallop.</span><span class="ctl-direct">Hold your finger or the mouse button where you want to ride — the further from your squadron, the faster it goes, and far out it gallops.</span><span class="ctl-route">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it.</span> Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Wheel wide: on a sharp turn the riders on the outside of your wedge fall behind, and a loose wedge loses to a tight one. Hit enemy horsemen in the flank or rear to scatter them — or lead pursuing knights onto our pikes and archers. Pikes facing you will stop a charge, and enemy knights will hunt you. Keep moving — riders that stall in the crowd get pulled down. Ride into allied cavalry troops to take them under your command (up to 30 riders); the two blue camps behind our wings are pit stops — ride through one and its waiting riders fall in behind you, and your wounded are healed at once. The longer you stay away, the more riders gather there. A full gallop hits hardest but turns wide; slow down to turn tight.</p>
       <button id="ch-resume-btn">Resume</button>
       <button id="ch-controls-btn">Controls: point &amp; ride</button>
       <button id="ch-text-btn" aria-pressed="false">Combat text: off</button>

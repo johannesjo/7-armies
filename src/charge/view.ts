@@ -4,7 +4,7 @@ import { Team, UnitType, Vec2 } from '../types';
 import { Theme } from '../theme';
 import { drawUnitArt, HORSE_VARIANTS, attackPose, attackDuration } from '../unit-art';
 import { CHARGE as C } from './config';
-import { ChargeSim, SimEvent, Soldier, angleDiff, mulberry32 } from './sim';
+import { Battalion, ChargeSim, SimEvent, Soldier, Squadron, angleDiff, attackSide, mulberry32 } from './sim';
 import { PathPoint } from './path';
 import { DirectZones } from './direct';
 
@@ -42,6 +42,11 @@ interface ImpactFx {
 }
 
 const IMPACT_FX_LIFE = 0.26;
+/** Enemy formations within this distance of your leader show their open sides. */
+const EXPOSE_RANGE = 320;
+const EXPOSE_RANGE_SQUAD = 240;
+/** ...but only the one you are riding at: within this angle of the leader's heading. */
+const EXPOSE_CONE = 0.6;
 
 interface Particle {
   x: number;
@@ -152,8 +157,8 @@ export class ChargeView {
   private readonly ink: number;
   private readonly dust: number;
 
-  private camX: number = C.CAMP_X;
-  private camY: number = C.CAMP_Y - 200;
+  private camX: number = C.CAMPS[0].x;
+  private camY: number = C.CAMPS[0].y - 200;
   private zoom = 2;
   private viewW = 800;
   private viewH = 450;
@@ -337,7 +342,8 @@ export class ChargeView {
     const cx = C.WORLD_W / 2;
     const xFade = Math.max(0, 1 - Math.max(0, Math.abs(x - cx) - 380) / 160);
     const front = Math.max(0, 1 - Math.abs(y - C.FRONT_Y) / 80) * xFade;
-    const camp = Math.max(0, 1 - Math.hypot(x - C.CAMP_X, y - C.CAMP_Y) / (C.CAMP_R * 1.15));
+    let camp = 0;
+    for (const c of C.CAMPS) camp = Math.max(camp, 1 - Math.hypot(x - c.x, y - c.y) / (C.CAMP_R * 1.15));
     const redCamp = y < 200 ? Math.max(0, 1 - Math.max(0, Math.abs(x - cx) - 300) / 120) * (1 - y / 200) * 0.8 : 0;
     return Math.max(front, camp, redCamp);
   };
@@ -468,20 +474,22 @@ export class ChargeView {
 
   private drawCamps(g: Graphics, rand: () => number): void {
     const t = this.theme;
-    // Blue rally camp.
+    // Blue rally camps behind each wing.
     const blue = t.blue;
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2 + 0.3;
-      this.drawTent(g, C.CAMP_X + Math.cos(a) * (C.CAMP_R + 26), C.CAMP_Y + Math.sin(a) * (C.CAMP_R + 26), blue);
+    for (const c of C.CAMPS) {
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + 0.3;
+        this.drawTent(g, c.x + Math.cos(a) * (C.CAMP_R + 26), c.y + Math.sin(a) * (C.CAMP_R + 26), blue);
+      }
+      g.circle(c.x, c.y, C.CAMP_R).fill({ color: blue, alpha: 0.07 });
+      const dashes = 28;
+      for (let i = 0; i < dashes; i++) {
+        const a0 = (i / dashes) * Math.PI * 2;
+        const a1 = a0 + (Math.PI * 2) / dashes * 0.55;
+        arcPath(g, c.x, c.y, C.CAMP_R, a0, a1).stroke({ width: 2, color: blue, alpha: 0.5 });
+      }
+      this.drawBanner(g, c.x + C.CAMP_R * 0.55, c.y - C.CAMP_R * 0.55, blue);
     }
-    g.circle(C.CAMP_X, C.CAMP_Y, C.CAMP_R).fill({ color: blue, alpha: 0.07 });
-    const dashes = 28;
-    for (let i = 0; i < dashes; i++) {
-      const a0 = (i / dashes) * Math.PI * 2;
-      const a1 = a0 + (Math.PI * 2) / dashes * 0.55;
-      arcPath(g, C.CAMP_X, C.CAMP_Y, C.CAMP_R, a0, a1).stroke({ width: 2, color: blue, alpha: 0.5 });
-    }
-    this.drawBanner(g, C.CAMP_X, C.CAMP_Y, blue);
 
     // Red camp along the far edge (scenery).
     for (let i = 0; i < 9; i++) {
@@ -489,15 +497,17 @@ export class ChargeView {
     }
     this.drawBanner(g, C.WORLD_W / 2, 150, t.red);
 
-    const label = new Text({
-      text: 'RALLY',
-      style: { fontFamily: 'Segoe UI, system-ui, sans-serif', fontSize: 12, fontWeight: '800', fill: blue, letterSpacing: 3 },
-      resolution: 4,
-    });
-    label.anchor.set(0.5);
-    label.alpha = 0.6;
-    label.position.set(C.CAMP_X, C.CAMP_Y + C.CAMP_R - 16);
-    this.world.addChild(label);
+    for (const c of C.CAMPS) {
+      const label = new Text({
+        text: 'CAMP',
+        style: { fontFamily: 'Segoe UI, system-ui, sans-serif', fontSize: 12, fontWeight: '800', fill: blue, letterSpacing: 3 },
+        resolution: 4,
+      });
+      label.anchor.set(0.5);
+      label.alpha = 0.6;
+      label.position.set(c.x, c.y + C.CAMP_R - 16);
+      this.world.addChild(label);
+    }
   }
 
   private drawTent(g: Graphics, x: number, y: number, color: number): void {
@@ -610,7 +620,7 @@ export class ChargeView {
 
   /** Slash, shockwave and flying earth where a charge connects. */
   private impactFx(x: number, y: number, angle: number, side: 'front' | 'flank' | 'rear', pike: boolean): void {
-    const strength = side === 'rear' ? 1.25 : side === 'flank' ? 1 : 0.8;
+    const strength = side === 'rear' ? 1.7 : side === 'flank' ? 1.35 : 0.8;
     if (this.impacts.length > 40) this.impacts.shift();
     this.impacts.push({ x, y, angle, age: 0, strength, rear: side === 'rear', pike });
     // Clods of earth thrown forward and to the sides.
@@ -624,7 +634,19 @@ export class ChargeView {
         color: this.theme.dirt, alpha: 0.9, stain: false,
       });
     }
-    this.burstDust(x, y, angle, 2);
+    this.burstDust(x, y, angle, side === 'rear' ? 5 : side === 'flank' ? 3 : 2);
+    if (side !== 'front' && !pike) {
+      // Caught from the side or behind: men and shields thrown along the charge.
+      for (let i = 0; i < (side === 'rear' ? 6 : 4); i++) {
+        const a = angle + (this.rand() - 0.5) * 0.9;
+        const sp = 90 + this.rand() * 110;
+        this.addParticle({
+          x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, age: 0,
+          life: 0.25 + this.rand() * 0.2, size: 1 + this.rand() * 0.8, grow: -1,
+          color: 0xffffff, alpha: 0.8, stain: false,
+        });
+      }
+    }
     if (pike) {
       // Splinters from shattered lances.
       for (let i = 0; i < 4; i++) {
@@ -652,6 +674,10 @@ export class ChargeView {
       // Shockwave ring.
       const ringColor = fx.rear ? t.hpMid : t.trim;
       g.circle(fx.x, fx.y, (3 + k * 13) * fx.strength).stroke({ width: 1.6 * fade, color: ringColor, alpha: 0.55 * fade });
+      if (fx.strength > 1.2) {
+        // A second, wider shockwave for blows that land on an open side.
+        g.circle(fx.x, fx.y, (2 + k * 24) * fx.strength).stroke({ width: 1.2 * fade, color: 0xffffff, alpha: 0.3 * fade });
+      }
       // Crescent slash facing the direction of the charge.
       const r = 8 * fx.strength;
       const cx = fx.x - c * r * 0.55, cy = fx.y - sn * r * 0.55;
@@ -702,6 +728,12 @@ export class ChargeView {
           }
           break;
         }
+        case 'general-down':
+          if (this.impacts.length > 40) this.impacts.shift();
+          this.impacts.push({ x: e.x, y: e.y, angle: 0, age: 0, strength: 3, rear: true, pike: false });
+          this.burstDust(e.x, e.y, 0, 10);
+          this.blood(e.x, e.y, 0, 10, 1.5);
+          break;
         case 'hit':
           if (this.rand() < 0.5) this.blood(e.x, e.y, e.angle, 2, 0.8);
           this.pulse(e.id);
@@ -743,7 +775,7 @@ export class ChargeView {
         case 'muster':
           this.popup(e.x, e.y - 20, 'Fresh riders!', t.blue, 16, 1.6);
           break;
-        case 'rally':
+        case 'garrison':
           this.popup(e.x, e.y - 10, '+1 rider', t.blue, 13);
           break;
         case 'rout':
@@ -1084,7 +1116,7 @@ export class ChargeView {
       g.circle(px, top - 0.8, 0.9).fill(t.steel);
 
       if (b.team !== 'red') continue;
-      if (L && Math.hypot(b.x - L.x, b.y - L.y) > 450 && b.morale > 50) continue;
+      if (!L || Math.hypot(b.x - L.x, b.y - L.y) > 200) continue;
       const w = 22, h = 2.4;
       const x = px - w / 2, y = py + 3;
       const m = Math.max(0, Math.min(1, b.morale / 100));
@@ -1100,6 +1132,16 @@ export class ChargeView {
       const color = sq.team === 'blue' ? t.blue : t.red;
       const bx = SL.x - Math.cos(SL.facing) * 3, by = SL.y - Math.sin(SL.facing) * 3;
       const wave = Math.sin(sim.time * 9 + sq.id) * 1.2;
+      if (sq.ai === 'general') {
+        // The general: a tall gold-edged standard and a pulsing ring — hunt him down.
+        const pulse = 0.65 + 0.35 * Math.sin(sim.time * 5);
+        g.circle(SL.x, SL.y, 13).stroke({ width: 1.8, color: t.hpMid, alpha: pulse });
+        g.moveTo(bx, by).lineTo(bx, by - 22).stroke({ width: 1.3, color: t.wood });
+        g.poly([bx, by - 22, bx + 12, by - 20 + wave, bx + 11, by - 14 + wave, bx, by - 13])
+          .fill(color).stroke({ width: 1, color: t.hpMid });
+        g.circle(bx, by - 23, 1.4).fill(t.hpMid);
+        continue;
+      }
       g.moveTo(bx, by).lineTo(bx, by - 12).stroke({ width: 1, color: t.obstacleBorder });
       g.poly([bx, by - 12, bx + 7, by - 10 + wave, bx, by - 7]).fill(color);
       if (sq.team === 'blue') {
@@ -1111,6 +1153,7 @@ export class ChargeView {
     this.updateJoinTags(sim);
 
     if (!L) return;
+    this.drawExposed(g, sim, L);
     // Leader marker: ring + heading chevron.
     g.circle(L.x, L.y, 11).stroke({ width: 1.4, color: t.blue, alpha: 0.75 });
     const cx = L.x + Math.cos(L.facing) * 19, cy = L.y + Math.sin(L.facing) * 19;
@@ -1125,6 +1168,67 @@ export class ChargeView {
     const wave = Math.sin(sim.time * 10) * 1.5;
     g.moveTo(bx, by).lineTo(bx, by - 14).stroke({ width: 1, color: t.obstacleBorder });
     g.poly([bx, by - 14, bx + 9, by - 12 + wave, bx, by - 9]).fill(t.blue);
+  }
+
+  /**
+   * Open side: only the enemy formation you are riding at lights up the edge you
+   * would hit — amber for a flank (x2), red for the rear (x3), nothing head-on.
+   */
+  private drawExposed(g: Graphics, sim: ChargeSim, L: Soldier): void {
+    const t = this.theme;
+    // The nearest enemy formation roughly ahead of the leader.
+    let best: Battalion | Squadron | null = null;
+    let bestD = Infinity;
+    const consider = (o: Battalion | Squadron, x: number, y: number, range: number) => {
+      const d = Math.hypot(x - L.x, y - L.y);
+      if (d > range || d < 1 || d >= bestD) return;
+      if (Math.abs(angleDiff(L.facing, Math.atan2(y - L.y, x - L.x))) > EXPOSE_CONE) return;
+      best = o; bestD = d;
+    };
+    for (const b of sim.battalions) if (b.team !== L.team && !b.routed) consider(b, b.x, b.y, EXPOSE_RANGE);
+    for (const sq of sim.squadrons) {
+      if (sq.team === L.team || !sq.riders[0]) continue;
+      const c = sim.squadCenter(sq);
+      consider(sq, c.x, c.y, EXPOSE_RANGE_SQUAD);
+    }
+    const target = best as Battalion | Squadron | null;
+    if (!target) return;
+    const pulse = 0.75 + 0.25 * Math.sin(sim.time * 6);
+    const a = Math.min(1, (1 - bestD / EXPOSE_RANGE) * 2.5) * pulse;
+
+    if ('grid' in target) {
+      const b = target;
+      const dx = b.x - L.x, dy = b.y - L.y;
+      const side = attackSide(Math.atan2(dy, dx), b.facing);
+      if (side === 'front') return;
+      const rows = Math.ceil(b.grid.length / b.cols);
+      const sp = b.spacing * sim.looseness(b);
+      const hd = (rows * sp) / 2 + 3, hw = (b.cols * sp) / 2 + 3;
+      const fx = Math.cos(b.facing), fy = Math.sin(b.facing); // toward the front rank
+      const lx = -fy, ly = fx; // along the ranks
+      let cx: number, cy: number, tx: number, ty: number, half: number;
+      if (side === 'rear') {
+        cx = b.x - fx * hd; cy = b.y - fy * hd; tx = lx; ty = ly; half = hw;
+      } else {
+        const sgn = -dx * lx - dy * ly >= 0 ? 1 : -1; // which flank faces the leader
+        cx = b.x + lx * hw * sgn; cy = b.y + ly * hw * sgn; tx = fx; ty = fy; half = hd;
+      }
+      const color = side === 'rear' ? t.labelWarn : t.hpMid;
+      const x0 = cx - tx * half, y0 = cy - ty * half, x1 = cx + tx * half, y1 = cy + ty * half;
+      g.moveTo(x0, y0).lineTo(x1, y1).stroke({ width: 7, color, alpha: 0.2 * a, cap: 'round' });
+      g.moveTo(x0, y0).lineTo(x1, y1).stroke({ width: 2.4, color, alpha: 0.9 * a, cap: 'round' });
+      return;
+    }
+    const sq = target;
+    const c = sim.squadCenter(sq);
+    const dx = c.x - L.x, dy = c.y - L.y;
+    const side = attackSide(Math.atan2(dy, dx), sq.riders[0].facing);
+    if (side === 'front') return;
+    const r = 10 + Math.sqrt(sq.riders.length) * 5;
+    const color = side === 'rear' ? t.labelWarn : t.hpMid;
+    const ang = Math.atan2(-dy, -dx);
+    g.moveTo(c.x + Math.cos(ang - 0.7) * r, c.y + Math.sin(ang - 0.7) * r).arc(c.x, c.y, r, ang - 0.7, ang + 0.7)
+      .stroke({ width: 2.4, color, alpha: 0.9 * a, cap: 'round' });
   }
 
   // --- Camera & popups ---------------------------------------------------------------------

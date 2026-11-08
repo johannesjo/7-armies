@@ -82,6 +82,18 @@ describe('squadron formation movement', () => {
     expect(mean(slotErrors(sim).map(e => e.dist))).toBeLessThan(strung * 0.6);
   });
 
+  it('below a gallop, the wedge closes up quickly after a sharp turn', () => {
+    const sim = new ChargeSim([], { seed: 1, squad: { x: 300, y: 300, facing: 0, count: 12 }, muster: false });
+    for (let t = 0; t < 3; t += 1 / 60) sim.step(1 / 60, { dirX: 1, dirY: 0, gallop: false }); // canter east
+    let back = -1;
+    for (let t = 0; t < 4 && back < 0; t += 1 / 60) {
+      sim.step(1 / 60, { dirX: 0, dirY: 1, gallop: false }); // hard right
+      if (t > 0.5 && mean(slotErrors(sim).map(e => e.dist)) < 4) back = t;
+    }
+    expect(back).toBeGreaterThan(0);
+    expect(back).toBeLessThan(1.4);
+  });
+
   it('followers cannot outrun the leader by much', () => {
     const sim = gallopingSquad();
     ride(sim, Math.PI, 1.2); // reverse — everyone wants to catch up

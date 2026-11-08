@@ -57,7 +57,7 @@ export interface Soldier {
 }
 
 /** Who controls a squadron: the player, or one of the AI behaviours. */
-export type SquadAI = 'player' | 'raider' | 'guard' | 'hunter';
+export type SquadAI = 'player' | 'raider' | 'guard' | 'hunter' | 'general' | 'garrison';
 export type SquadPhase = 'muster' | 'approach' | 'charge' | 'retreat' | 'idle' | 'broken';
 
 export interface Squadron {
@@ -81,6 +81,10 @@ export interface Squadron {
   shock: number;
   /** Where a broken squadron flees from. */
   fleeFrom: Vec2 | null;
+  /** Guards: how far from their post they ride out at intruders. */
+  guardRadius: number;
+  /** Guards escorting another squad: their post moves with it. */
+  ward: Squadron | null;
   /** The leader's recent path; followers ride along it, offset into their lane. */
   trail: TrailPoint[];
   /** Distance the leader has ridden (the arc position of the newest trail point). */
@@ -115,6 +119,10 @@ export interface SquadSpec {
   count: number;
   /** Seconds to wait (mustering) before riding out. */
   muster?: number;
+  /** Guards: how far from their post they ride out at intruders (default GUARD_RADIUS). */
+  guardRadius?: number;
+  /** Guards: escort the first squad with this AI on our side (e.g. the general) instead of a fixed post. */
+  ward?: SquadAI;
 }
 
 export interface Battalion {
@@ -140,6 +148,8 @@ export interface Battalion {
   lastPlayerHit: number;
   /** Paces how often wounded men in the front rank swap with fresh men behind. */
   rotateTimer: number;
+  /** Sim time this battalion gives up as its army collapses (Infinity = not yet). */
+  breakAt: number;
 }
 
 export interface Arrow {
@@ -175,10 +185,18 @@ export type SimEvent =
   | { type: 'join'; x: number; y: number; count: number }
   | { type: 'squad-break'; x: number; y: number; team: Team; byPlayer: boolean }
   | { type: 'muster'; x: number; y: number; count: number }
-  | { type: 'rally'; x: number; y: number; id: number }
+  /** A fresh rider joined a camp's garrison. */
+  | { type: 'garrison'; x: number; y: number; id: number }
+  /** The squadron rode into a camp: every rider healed to full. */
+  | { type: 'pit-stop'; x: number; y: number; healed: number }
   | { type: 'rout'; x: number; y: number; team: Team; byPlayer: boolean; type2: UnitType }
   | { type: 'combo'; count: number }
   | { type: 'wave'; index: number; battalions: number; x: number; y: number }
+  /** An army has lost heart (morale under ARMY_WAVER) — or broken and fled outright. */
+  | { type: 'army-waver'; team: Team }
+  | { type: 'army-break'; team: Team; x: number; y: number }
+  /** The red general has been cut down. */
+  | { type: 'general-down'; x: number; y: number; byPlayer: boolean; points: number }
   /** Hunting knights leave their muster and ride for the player's banner. */
   | { type: 'hunt'; x: number; y: number; count: number };
 
@@ -280,12 +298,23 @@ export class ChargeSim {
   outcome: Outcome = 'playing';
   outcomeReason = '';
   inCamp = false;
+  private musterCount = 0;
 
   /** Reinforcement waves not yet on the field. */
   pendingWaves: Wave[] = [];
+  /** Share of each army's foot dead or fled (plus the general's fall, for red). */
+  readonly armyLoss: Record<Team, number> = { blue: 0, red: 0 };
+  /** The army's morale has run out and it is collapsing, battalion by battalion. */
+  readonly armyBroken: Record<Team, boolean> = { blue: false, red: false };
+  /** Morale each battalion of a wavering army loses per second. */
+  private readonly armyDrain: Record<Team, number> = { blue: 0, red: 0 };
+  private readonly armyWavered: Record<Team, boolean> = { blue: false, red: false };
+  generalFallen = false;
+  generalKilledByPlayer = false;
   wavesArrived = 0;
   private comboTimer = 0;
-  private rallyTimer = 0;
+  /** Each camp's garrison troop (null when empty) and the timer to its next fresh rider. */
+  private readonly camps: { x: number; y: number; garrison: Squadron | null; timer: number }[] = [];
   private musterTimer: number = C.MUSTER_FIRST;
   private readonly muster: boolean;
   private redSquadsSpawned = 0;
@@ -306,14 +335,20 @@ export class ChargeSim {
     muster?: boolean;
   } = {}) {
     this.rand = mulberry32(opts.seed ?? 1);
+    this.muster = opts.muster ?? opts.squad !== null;
     for (const spec of specs) this.addBattalion(spec);
     this.pendingWaves = [...(opts.waves ?? [])].sort((a, b) => a.time - b.time);
     if (opts.squad !== null) {
-      const sq = opts.squad ?? { x: C.CAMP_X + 60, y: C.CAMP_Y - 80, facing: -Math.PI / 4 };
+      const sq = opts.squad ?? { x: C.CAMPS[0].x + 60, y: C.CAMPS[0].y - 80, facing: -Math.PI / 4 };
       this.player = this.addSquad({ team: 'blue', ai: 'player', x: sq.x, y: sq.y, facing: sq.facing, count: sq.count ?? C.SQUAD_SIZE });
     }
     for (const spec of opts.squads ?? []) this.addSquad(spec);
-    this.muster = opts.muster ?? opts.squad !== null;
+    // Each camp starts with a garrison waiting (only when camps are in play).
+    for (const c of C.CAMPS) {
+      const camp = { x: c.x, y: c.y, garrison: null as Squadron | null, timer: C.GARRISON_INTERVAL };
+      this.camps.push(camp);
+      if (this.muster) for (let i = 0; i < C.GARRISON_START; i++) this.growGarrison(camp);
+    }
   }
 
   /** Your squadron's riders in command order. */
@@ -342,6 +377,17 @@ export class ChargeSim {
       for (const sq of w.squads ?? []) if (sq.team === 'red') n += sq.count;
     }
     return n;
+  }
+
+  /** An army's heart, 1 = fresh, 0 = it breaks and flees. */
+  armyMorale(team: Team): number {
+    return clamp01(1 - this.armyLoss[team] / C.ARMY_BREAK[team]);
+  }
+
+  /** The red general on the field, or null once he has fallen (or there is none). */
+  get general(): Soldier | null {
+    for (const sq of this.squadrons) if (sq.ai === 'general' && sq.riders[0]) return sq.riders[0];
+    return null;
   }
 
   /** Red soldiers still standing in formation (not routed), plus those yet to arrive. */
@@ -392,6 +438,7 @@ export class ChargeSim {
       engagedTimer: 0,
       lastPlayerHit: -99,
       rotateTimer: this.rand() * C.ROTATE_INTERVAL,
+      breakAt: Infinity,
     };
     for (let i = 0; i < spec.count; i++) {
       const p = this.slotPos(bat, i);
@@ -455,6 +502,8 @@ export class ChargeSim {
       cohesion: 1,
       shock: 0,
       fleeFrom: null,
+      guardRadius: spec.guardRadius ?? C.GUARD_RADIUS,
+      ward: spec.ward ? this.squadrons.find(o => o.team === spec.team && o.ai === spec.ward) ?? null : null,
       trail: [],
       trailS: 0,
     };
@@ -464,6 +513,7 @@ export class ChargeSim {
       const p = rotate(slot, spec.facing);
       this.addRider(sq, spec.x + p.x, spec.y + p.y, spec.facing);
     }
+    if (spec.ai === 'general') for (const r of sq.riders) r.hp = r.maxHp = C.GENERAL_HP;
     if (spec.team === 'red') this.redSquadsSpawned += spec.count;
     this.squadrons.push(sq);
     return sq;
@@ -599,6 +649,8 @@ export class ChargeSim {
     // and little spare speed to regain its place. On a curve the outer lanes are
     // longer, so riders there fall behind; sharp turns string the squadron out.
     const maxFollow = Math.min(C.GALLOP_SPEED, Math.max(L.speed, C.CANTER_SPEED * 0.6)) * C.FOLLOW_CATCH_UP;
+    // Spare speed for stragglers: plenty at a walk, none at full gallop.
+    const spareMax = C.FOLLOW_CATCH_UP_SLOW * (1 - Math.min(1, L.speed / C.GALLOP_SPEED));
     let tight = 0;
     for (let i = 1; i < sq.riders.length; i++) {
       const f = sq.riders[i];
@@ -615,15 +667,20 @@ export class ChargeSim {
       f.facing = turnToward(f.facing, desired, this.turnRate(f.speed) * C.FOLLOWER_AGILITY * dt);
 
       // Close the gap along our own heading; ease off if the slot has swung behind us.
+      // The further out of place, the more spare speed (when the leader isn't flat out).
+      const spare = Math.min(spareMax, dist * C.FOLLOW_GAIN);
+      const maxF = Math.max(maxFollow, Math.min(C.GALLOP_SPEED, L.speed + spare));
       const along = dx * Math.cos(f.facing) + dy * Math.sin(f.facing);
-      let target = L.speed + clamp(along * C.FOLLOW_GAIN, -L.speed, maxFollow - L.speed);
+      let target = L.speed + clamp(along * C.FOLLOW_GAIN, -L.speed, maxF - L.speed);
       // A rider that needs a sharp turn reins in to turn tighter — so the inside of a
-      // wheel slows down while the outside has to ride hard to keep up.
+      // wheel slows down while the outside has to ride hard to keep up. A straggler
+      // paces that against his catch-up speed, not the leader's walk.
+      const pace = Math.max(L.speed, Math.min(maxF, L.speed + spare));
       const sharp = Math.abs(diff);
-      if (sharp > 0.35) target = Math.min(target, L.speed * Math.max(0.45, 1 - (sharp - 0.35) * 0.6));
-      if (sharp > 1.8) target = Math.min(target, Math.max(L.speed * 0.55, C.CANTER_SPEED * 0.45));
+      if (sharp > 0.35) target = Math.min(target, pace * Math.max(0.45, 1 - (sharp - 0.35) * 0.6));
+      if (sharp > 1.8) target = Math.min(target, Math.max(pace * 0.55, C.CANTER_SPEED * 0.45));
       if (dist < 4 && L.speed < 5) target = 0;
-      target = clamp(target, 0, maxFollow);
+      target = clamp(target, 0, maxF);
       if (f.speed < target) f.speed = Math.min(target, f.speed + C.GALLOP_ACCEL * 1.05 * dt);
       else f.speed = Math.max(target, f.speed - C.FOLLOW_BRAKE * dt);
 
@@ -751,9 +808,10 @@ export class ChargeSim {
     this.musterTimer -= dt;
     if (this.musterTimer > 0) return;
     this.musterTimer = C.MUSTER_INTERVAL;
-    const allied = this.squadrons.filter(sq => sq !== this.player && sq.team === 'blue' && sq.riders.length > 0).length;
+    const allied = this.squadrons.filter(sq => sq !== this.player && sq.team === 'blue' && sq.ai !== 'garrison' && sq.riders.length > 0).length;
     if (allied >= C.MAX_ALLIED_SQUADS) return;
-    const x = C.CAMP_X + 55, y = C.CAMP_Y - 45;
+    const camp = C.CAMPS[this.musterCount++ % C.CAMPS.length];
+    const x = camp.x + 55, y = camp.y - 45;
     this.addSquad({ team: 'blue', ai: 'raider', x, y, facing: -Math.PI / 4, count: C.MUSTER_SIZE, muster: C.MUSTER_WAIT });
     this.events.push({ type: 'muster', x, y, count: C.MUSTER_SIZE });
   }
@@ -787,6 +845,32 @@ export class ChargeSim {
     return { dirX: (dx / d) * mag, dirY: (dy / d) * mag, gallop };
   }
 
+  /**
+   * The general keeps to his post behind the red army and rides off from any enemy
+   * horseman that comes close — at a canter, so a galloping squadron can run him down.
+   */
+  private generalInput(sq: Squadron, L: Soldier): ChargeInput {
+    if (this.armyBroken.red || this.battalions.every(b => b.team !== 'red' || b.routed)) {
+      if (L.y < 20) for (const r of sq.riders) r.alive = false;
+      return this.rideTo(L, { x: L.x, y: -100 }, true);
+    }
+    let tx = 0, ty = 0, n = 0;
+    for (const o of this.squadrons) {
+      if (o.team === sq.team) continue;
+      for (const r of o.riders) {
+        const d = Math.hypot(r.x - L.x, r.y - L.y);
+        if (d < C.GENERAL_FLEE_RADIUS) { tx += r.x; ty += r.y; n++; }
+      }
+    }
+    if (n === 0) return this.rideTo(L, sq.home, false);
+    const dx = L.x - tx / n, dy = L.y - ty / n;
+    const d = Math.hypot(dx, dy) || 1;
+    const m = 80;
+    const fx = Math.max(m, Math.min(C.WORLD_W - m, L.x + (dx / d) * 150));
+    const fy = Math.max(m, Math.min(C.FRONT_Y - 220, L.y + (dy / d) * 150));
+    return this.rideTo(L, { x: fx, y: fy }, false);
+  }
+
   private pickTarget(sq: Squadron): void {
     const L = sq.riders[0];
     sq.targetBat = null;
@@ -806,7 +890,7 @@ export class ChargeSim {
     }
     if (sq.ai === 'guard') {
       let intruder: Squadron | null = null;
-      let best: number = C.GUARD_RADIUS;
+      let best: number = sq.guardRadius;
       for (const o of this.squadrons) {
         const OL = o.riders[0];
         if (o.team === sq.team || !OL) continue;
@@ -833,13 +917,21 @@ export class ChargeSim {
   private aiInput(sq: Squadron, dt: number): ChargeInput {
     const L = sq.riders[0];
     sq.phaseTimer -= dt;
+    if (sq.ai === 'general') return this.generalInput(sq, L);
+    if (sq.ai === 'garrison') return this.rideTo(L, sq.home, false); // waits in camp for you
+    // An escort's post moves with its ward, a little behind him.
+    const WL = sq.ward?.riders[0];
+    if (WL) {
+      sq.home.x = WL.x - Math.cos(WL.facing) * 30;
+      sq.home.y = WL.y - Math.sin(WL.facing) * 30;
+    } else if (sq.ward) sq.ward = null; // he has fallen: hold where he was
 
     if (sq.riders.length <= C.AI_RETREAT_AT && sq.phase !== 'retreat' && sq.phase !== 'idle' && sq.phase !== 'muster') {
       sq.phase = 'retreat';
     }
     // Once the red infantry has broken and no help is coming, its knights quit the field too.
-    if (sq.team === 'red' && sq.phase !== 'retreat' && this.pendingWaves.length === 0
-      && this.battalions.every(b => b.team !== 'red' || b.routed)) {
+    if (sq.team === 'red' && sq.phase !== 'retreat' && (this.armyBroken.red || (this.pendingWaves.length === 0
+      && this.battalions.every(b => b.team !== 'red' || b.routed)))) {
       sq.phase = 'retreat';
     }
 
@@ -856,8 +948,9 @@ export class ChargeSim {
           if (L.y < 20) for (const r of sq.riders) r.alive = false;
           return this.rideTo(L, { x: L.x, y: -100 }, true);
         }
-        if (Math.hypot(L.x - C.CAMP_X, L.y - C.CAMP_Y) < C.CAMP_R * 0.5) sq.phase = 'idle';
-        return this.rideTo(L, { x: C.CAMP_X, y: C.CAMP_Y }, false);
+        const camp = this.nearestCamp(L);
+        if (Math.hypot(L.x - camp.x, L.y - camp.y) < C.CAMP_R * 0.5) sq.phase = 'idle';
+        return this.rideTo(L, camp, false);
       case 'broken': {
         // Scattered: gallop away from whoever broke us, then regroup and come again.
         if (sq.phaseTimer <= 0) { sq.phase = 'approach'; sq.phaseTimer = 0; break; }
@@ -883,7 +976,7 @@ export class ChargeSim {
     // Guards return to their post when nothing threatens it.
     if (sq.ai === 'guard') {
       const t = sq.targetSquad?.riders[0];
-      if (!t || Math.hypot(L.x - sq.home.x, L.y - sq.home.y) > C.GUARD_LEASH) {
+      if (!t || Math.hypot(L.x - sq.home.x, L.y - sq.home.y) > sq.guardRadius + C.GUARD_LEASH - C.GUARD_RADIUS) {
         sq.targetSquad = null;
         return this.rideTo(L, sq.home, false);
       }
@@ -1436,7 +1529,22 @@ export class ChargeSim {
       this.lured++;
     }
     if (!mine && sq.riders.length > 0) this.shockSquad(sq, C.LOSS_SHOCK, r, byPlayer);
+    if (sq.ai === 'general') this.generalDown(r, byPlayer);
     this.events.push({ type: 'rider-down', x: r.x, y: r.y, angle, id: r.id, wasLeader, team: r.team, mine, byPlayer, points, lured });
+  }
+
+  /** The general falls: every red battalion is shaken and the whole army's heart sinks. */
+  private generalDown(r: Soldier, byPlayer: boolean): void {
+    this.generalFallen = true;
+    this.generalKilledByPlayer = byPlayer;
+    const points = byPlayer ? C.GENERAL_SCORE : 0;
+    this.score += points;
+    for (const b of this.battalions) {
+      if (b.team !== r.team || b.routed) continue;
+      b.morale -= C.GENERAL_MORALE_SHOCK;
+      b.sinceShock = 0;
+    }
+    this.events.push({ type: 'general-down', x: r.x, y: r.y, byPlayer, points });
   }
 
   /**
@@ -1670,40 +1778,129 @@ export class ChargeSim {
 
   // --- Camp, morale, outcome --------------------------------------------------------
 
+  private nearestCamp(p: Vec2): { x: number; y: number } {
+    let best = C.CAMPS[0], bestD = Infinity;
+    for (const c of C.CAMPS) {
+      const d = Math.hypot(c.x - p.x, c.y - p.y);
+      if (d < bestD) { bestD = d; best = c; }
+    }
+    return best;
+  }
+
+  /** A fresh rider joins the camp's garrison troop (forming one if it is empty). */
+  private growGarrison(camp: { x: number; y: number; garrison: Squadron | null }): void {
+    const g = camp.garrison;
+    let r: Soldier;
+    if (!g || g.riders.length === 0 || !this.squadrons.includes(g)) {
+      camp.garrison = this.addSquad({ team: 'blue', ai: 'garrison', x: camp.x, y: camp.y, facing: -Math.PI / 2, count: 1 });
+      r = camp.garrison.riders[0];
+    } else {
+      if (g.riders.length >= C.GARRISON_MAX) return;
+      r = this.addRider(g, camp.x + (this.rand() - 0.5) * 30, camp.y + 24 + this.rand() * 10, -Math.PI / 2);
+    }
+    this.events.push({ type: 'garrison', x: r.x, y: r.y, id: r.id });
+  }
+
+  /**
+   * Camps are pit stops. Garrisons fill up while you are away; ride into one and the
+   * whole troop falls in behind you (see checkJoins). Entering a camp heals every
+   * rider to full at once — no waiting about.
+   */
   private updateCamp(dt: number): void {
-    // Allied troops resting in camp tend their wounds too.
+    for (const camp of this.camps) {
+      if (!this.muster || this.outcome !== 'playing') break;
+      const g = camp.garrison;
+      if (g && g.riders.length >= C.GARRISON_MAX && this.squadrons.includes(g)) continue;
+      camp.timer -= dt;
+      if (camp.timer <= 0) {
+        camp.timer = C.GARRISON_INTERVAL;
+        this.growGarrison(camp);
+      }
+    }
+    // Allied troops resting in a camp tend their wounds too.
     for (const sq of this.squadrons) {
       const AL = sq.riders[0];
       if (sq === this.player || sq.team !== 'blue' || !AL) continue;
-      if (Math.hypot(AL.x - C.CAMP_X, AL.y - C.CAMP_Y) < C.CAMP_R) {
+      const c = this.nearestCamp(AL);
+      if (Math.hypot(AL.x - c.x, AL.y - c.y) < C.CAMP_R) {
         for (const r of sq.riders) r.hp = Math.min(r.maxHp, r.hp + C.CAMP_HEAL * dt);
       }
     }
     const L = this.leader;
-    this.inCamp = !!L && Math.hypot(L.x - C.CAMP_X, L.y - C.CAMP_Y) < C.CAMP_R;
-    if (!this.inCamp || !L) { this.rallyTimer = 0; return; }
-    for (const r of this.riders) r.hp = Math.min(r.maxHp, r.hp + C.CAMP_HEAL * dt);
-    if (this.riders.length >= C.SQUAD_SIZE) { this.rallyTimer = 0; return; }
-    this.rallyTimer += dt;
-    if (this.rallyTimer >= C.RALLY_INTERVAL) {
-      this.rallyTimer = 0;
-      const r = this.addRider(this.player!, C.CAMP_X + (this.rand() - 0.5) * 30, C.CAMP_Y + 30, L.facing);
-      r.speed = L.speed;
-      this.events.push({ type: 'rally', x: r.x, y: r.y, id: r.id });
+    const camp = L ? this.nearestCamp(L) : null;
+    // Leaving counts only well clear of the ring, so weaving along its edge can't re-heal.
+    const reach = this.inCamp ? C.CAMP_R * 1.3 : C.CAMP_R;
+    const inCamp = !!L && !!camp && Math.hypot(L.x - camp.x, L.y - camp.y) < reach;
+    if (inCamp && !this.inCamp) {
+      let healed = 0;
+      for (const r of this.riders) {
+        if (r.hp < r.maxHp) { healed++; r.hp = r.maxHp; }
+      }
+      this.events.push({ type: 'pit-stop', x: L!.x, y: L!.y, healed });
     }
+    this.inCamp = inCamp;
   }
 
   private updateMorale(dt: number): void {
+    const lost = { blue: 0, red: 0 }, total = { blue: 0, red: 0 };
     for (const b of this.battalions) {
-      if (b.routed) continue;
+      total[b.team] += b.initial;
+      if (b.routed) { lost[b.team] += b.initial; continue; }
       const alive = this.members(b).length;
+      lost[b.team] += b.initial - alive;
       if (alive === 0) { b.routed = true; continue; }
-      if (b.sinceShock > C.MORALE_RECOVERY_DELAY) {
+      const drain = this.outcome === 'playing' ? this.armyDrain[b.team] : 0;
+      if (drain > 0) b.morale -= drain * dt; // a wavering army: heart drains, nothing recovers
+      else if (b.sinceShock > C.MORALE_RECOVERY_DELAY) {
         const cap = C.MORALE_CAP_BASE + (100 - C.MORALE_CAP_BASE) * (alive / b.initial);
         if (b.morale < cap) b.morale = Math.min(cap, b.morale + C.MORALE_RECOVERY * dt);
       }
-      if (b.morale <= 0 || alive < b.initial * C.ROUT_STRENGTH) this.rout(b);
+      if (b.morale <= 0 || alive < b.initial * C.ROUT_STRENGTH || this.time >= b.breakAt) {
+        this.rout(b);
+        lost[b.team] += alive; // the men still standing now run too
+      }
     }
+    this.updateArmies(lost, total);
+  }
+
+  /**
+   * Each army's heart follows how much of it is dead or fled. Low, the army wavers
+   * and its battalions slowly lose heart; out, it collapses — the rest break one by
+   * one, the shakiest first. One giant battle, and when it's won it's won.
+   */
+  private updateArmies(lost: Record<Team, number>, total: Record<Team, number>): void {
+    if (this.outcome !== 'playing') return;
+    for (const team of ['red', 'blue'] as const) {
+      if (this.armyBroken[team] || total[team] === 0) continue;
+      let loss = lost[team] / total[team];
+      if (team === 'red' && this.generalFallen) loss += C.GENERAL_ARMY_SHOCK;
+      this.armyLoss[team] = loss;
+      // Reinforcements still on the way keep an army in the fight.
+      if (team === 'red' && this.pendingWaves.length > 0) continue;
+      const morale = this.armyMorale(team);
+      if (!this.armyWavered[team] && morale < C.ARMY_WAVER) {
+        this.armyWavered[team] = true;
+        this.events.push({ type: 'army-waver', team });
+      }
+      this.armyDrain[team] = morale < C.ARMY_WAVER ? C.ARMY_DRAIN * (1 - morale / C.ARMY_WAVER) : 0;
+      if (loss >= C.ARMY_BREAK[team]) this.breakArmy(team);
+    }
+  }
+
+  /** Morale is gone: the remaining battalions give up one after another, shakiest first. */
+  private breakArmy(team: Team): void {
+    this.armyBroken[team] = true;
+    this.armyLoss[team] = C.ARMY_BREAK[team];
+    const standing = this.battalions.filter(b => b.team === team && !b.routed).sort((a, b) => a.morale - b.morale);
+    let x = 0, y = 0;
+    standing.forEach((b, i) => {
+      const k = standing.length > 1 ? i / (standing.length - 1) : 0;
+      b.breakAt = this.time + C.ARMY_COLLAPSE_MIN + k * C.ARMY_COLLAPSE_TIME + this.rand() * 0.8;
+      x += b.x; y += b.y;
+    });
+    const n = Math.max(1, standing.length);
+    if (standing.length === 0) { x = C.WORLD_W / 2; y = C.FRONT_Y; }
+    this.events.push({ type: 'army-break', team, x: x / n, y: y / n });
   }
 
   private rout(b: Battalion): void {
@@ -1742,13 +1939,15 @@ export class ChargeSim {
 
   private checkOutcome(): void {
     if (this.outcome !== 'playing') return;
-    if (this.pendingWaves.length === 0 && this.battalions.every(b => b.team !== 'red' || b.routed)
-      && this.squadrons.every(sq => sq.team !== 'red' || sq.riders.length === 0)) {
+    const redGone = this.battalions.every(b => b.team !== 'red' || b.routed);
+    if (this.pendingWaves.length === 0 && redGone
+      && (this.armyBroken.red || this.squadrons.every(sq => sq.team !== 'red' || sq.riders.length === 0))) {
+      // Every battalion has run (the knights quit the field with them).
       this.outcome = 'victory';
-      this.outcomeReason = 'The enemy army has broken!';
+      this.outcomeReason = this.generalFallen ? 'Their general is dead and the enemy army flees!' : 'The enemy army breaks and flees!';
     } else if (this.battalions.every(b => b.team !== 'blue' || b.role !== 'front' || b.routed)) {
       this.outcome = 'defeat';
-      this.outcomeReason = 'Our battle line has collapsed.';
+      this.outcomeReason = this.armyBroken.blue ? 'Our army has lost heart and flees.' : 'Our battle line has collapsed.';
     } else if (this.riders.length === 0 && this.leader === null && this.ridersLost > 0) {
       this.outcome = 'defeat';
       this.outcomeReason = 'Your squadron has fallen.';

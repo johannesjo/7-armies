@@ -36,8 +36,12 @@ export const CHARGE = {
   FOLLOW_BRAKE: 420,
   /** Followers turn a little more nimbly than the leader at the same speed. */
   FOLLOWER_AGILITY: 1.15,
-  /** Largest squadron you can command (allied troops join up to this). */
-  MAX_SQUAD: 30,
+  /**
+   * Largest squadron you can command (allied troops join up to this). The leader rides
+   * at the point and each row behind holds one more, so a full squadron makes a
+   * complete wedge: 1 + 2 + ... + 9 = 45 (eight rows behind the leader).
+   */
+  MAX_SQUAD: 45,
   /** Ride this close to an allied troop to take it under command. */
   JOIN_RADIUS: 34,
   MUSTER_FIRST: 20,

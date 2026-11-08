@@ -1,11 +1,11 @@
-import { Application, BitmapFont, BitmapText, Container, Graphics, Rectangle, RenderTexture, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
+import { Application, BitmapFont, BitmapText, CanvasSource, Container, Graphics, Rectangle, RenderTexture, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
 import { paintGrassTile, paintGroundOverlay } from '../ground';
 import { Team, UnitType, Vec2 } from '../types';
 import { Theme } from '../theme';
 import { drawUnitArt, HORSE_VARIANTS, attackPose, attackDuration } from '../unit-art';
 import { CHARGE as C } from './config';
 import { ArtStyle, drawStyledUnit, paintFeltTile, paintPaperTile } from './art-styles';
-import { FRAMES, DRAWN_DIRS, IDLE_FRAME, attackFrame, buildFigure, dirAngle, facingFrame, walkFrame } from './figure-art';
+import { CORPSE_FRAME, FRAMES, DRAWN_DIRS, IDLE_FRAME, INFANTRY_LOOKS, attackFrame, buildFigure, canvasPainter, deathFrame, dirAngle, facingFrame, fleeFrame, walkFrame } from './figure-art';
 import { Battalion, ChargeSim, SimEvent, Soldier, Squadron, angleDiff, attackSide, mulberry32 } from './sim';
 import { PathPoint } from './path';
 import { DirectZones } from './direct';
@@ -37,6 +37,9 @@ interface FigureSheet {
   ay: number[];
 }
 
+/** Baked figure sheets live for the whole session: only the first battle pays to draw them. */
+const figureSheets = new Map<string, FigureSheet>();
+
 interface Dying {
   root: Container;
   vx: number;
@@ -45,6 +48,8 @@ interface Dying {
   age: number;
   /** How high the body is thrown (0 = slumps, 1 = launched). */
   lift: number;
+  /** Upright figures play their falling frames from this facing. */
+  fig: { u: UnitGfx; dir: number } | null;
 }
 
 /** A charge connecting: slash, shockwave and (against pikes) sparks. */
@@ -130,6 +135,52 @@ export function mixColor(a: number, b: number, t: number): number {
   return (r << 16) | (g << 8) | bl;
 }
 
+/** A rotated oval as polygon points (Pixi ellipses can't be rotated in place). */
+function ovalPoints(x: number, y: number, rx: number, ry: number, angle: number): number[] {
+  const c = Math.cos(angle), s = Math.sin(angle), pts: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2, ex = Math.cos(a) * rx, ey = Math.sin(a) * ry;
+    pts.push(x + ex * c - ey * s, y + ex * s + ey * c);
+  }
+  return pts;
+}
+
+/**
+ * A painted standard: a wooden staff with a gilt finial and a crossbar, from which a
+ * swallow-tailed banner hangs in three folds that catch the light as it stirs.
+ */
+function paintStandard(g: Graphics, x: number, y: number, h: number, color: number, trim: number, wave: number, s = 1, gilt = false): void {
+  const top = y - h;
+  const bar = top + 1.6 * s, bw = 7.5 * s, len = 10 * s, rows = 5;
+  g.moveTo(x + 0.35 * s, y).lineTo(x + 0.35 * s, top).stroke({ width: 1.5 * s, color: 0x24180c });
+  g.moveTo(x - 0.1 * s, y).lineTo(x - 0.1 * s, top).stroke({ width: 0.7 * s, color: 0x9a7244 });
+  // Three vertical folds, each a strip of the banner shaded by how it faces the sun.
+  const edge = (u: number, i: number): [number, number] => {
+    const k = i / rows;
+    return [x + u * bw + Math.sin(wave + i * 0.9 + u * 2.2) * 1.1 * s * k, bar + len * k + (u === 0.5 && i === rows ? -2.6 * s : 0)];
+  };
+  const folds = [0, 1 / 3, 2 / 3, 1];
+  g.poly([...Array.from({ length: rows + 1 }, (_, i) => edge(0, i)).flat(), ...edge(0.5, rows), ...Array.from({ length: rows + 1 }, (_, i) => edge(1, rows - i)).flat()].map((v, i) => v + (i % 2 ? 0.6 : 0.4) * s))
+    .fill({ color: 0x000000, alpha: 0.35 });
+  for (let j = 0; j < 3; j++) {
+    const u0 = folds[j], u1 = folds[j + 1];
+    const k = 0.78 + 0.32 * Math.cos(wave * 0.8 + j * 2.1);
+    const c = k >= 1 ? mixColor(color, 0xfff4dc, k - 1) : mixColor(color, 0x0c0e18, 1 - k);
+    const left = Array.from({ length: rows + 1 }, (_, i) => edge(u0, i)).flat();
+    const right = Array.from({ length: rows + 1 }, (_, i) => edge(u1, rows - i)).flat();
+    // The swallowtail notch dips into the middle fold's hem.
+    const notch = j === 1 ? [...edge(0.5, rows)] : [];
+    g.poly([...left, ...notch, ...right]).fill(c);
+  }
+  // A pale band across the banner.
+  const b0 = 0.28, b1 = 0.4;
+  const band = [...[0, 1].flatMap(u => edge(u, rows * b0)), ...[1, 0].flatMap(u => edge(u, rows * b1))];
+  g.poly([band[0], band[1], band[2], band[3], band[4], band[5], band[6], band[7]]).fill({ color: trim, alpha: 0.85 });
+  g.moveTo(x - 0.5 * s, bar).lineTo(x + bw + 0.6 * s, bar).stroke({ width: 1 * s, color: 0x24180c });
+  g.circle(x, top - 0.9 * s, (gilt ? 1.7 : 1.2) * s).fill(0xc8a040);
+  g.circle(x - 0.35 * s, top - 1.3 * s, 0.5 * s).fill({ color: 0xfff0b0, alpha: 0.8 });
+}
+
 /** Arc as its own sub-path — Pixi otherwise joins it to the previous path's last point. */
 function arcPath(g: Graphics, x: number, y: number, r: number, a0: number, a1: number): Graphics {
   return g.moveTo(x + Math.cos(a0) * r, y + Math.sin(a0) * r).arc(x, y, r, a0, a1);
@@ -186,7 +237,6 @@ export class ChargeView {
   private readonly style: ArtStyle;
   /** Upright three-quarter-view figures (the classic RTS style) instead of top-down art. */
   private readonly upright: boolean;
-  private readonly figureSheets = new Map<string, FigureSheet>();
 
   constructor(private readonly app: Application, private readonly theme: Theme) {
     this.style = theme.artStyle ?? 'classic';
@@ -221,8 +271,6 @@ export class ChargeView {
     this.grassTexture?.destroy(true);
     for (const c of this.unitTextures.values()) { c.body.destroy(true); c.weapon.destroy(true); }
     this.unitTextures.clear();
-    for (const sh of this.figureSheets.values()) sh.frames[0].destroy(true);
-    this.figureSheets.clear();
     for (const tex of this.ownedTextures) tex.destroy(true);
     this.ownedTextures.length = 0;
     this.units.clear();
@@ -452,7 +500,26 @@ export class ChargeView {
         g.circle(x - br * 0.38, y - br * 0.45, br * 0.25).fill({ color: mixColor(t.grassLight, 0xfff0a0, 0.3), alpha: 0.6 });
       }
     }, 2));
-    const treeTex = this.upright ? [0, 1, 2, 3, 4].map(v => uprightTree(v, 15 + v * 1.5, 9 + (v % 2) * 4))
+    // Pines: tiers of dark boughs, lit on the sunward side, over a short trunk.
+    const uprightPine = (v: number, r: number, h: number) => keep(this.bake(g => {
+      const r2 = mulberry32(91 + v * 7);
+      const dark = mixColor(t.grassDark, 0x0a1a10, 0.55 + 0.05 * v), lit = mixColor(dark, t.grassLight, 0.35);
+      g.ellipse(r * 0.3, 0, r * 0.9, r * 0.36).fill({ color: 0x000000, alpha: 0.3 });
+      g.moveTo(0, 0).lineTo(0, -h * 0.3).stroke({ width: Math.max(1.4, r * 0.18), color: 0x4a3420, cap: 'round' });
+      const tiers = 4 + (v % 2);
+      for (let i = 0; i < tiers; i++) {
+        const k = i / tiers;
+        const base = -h * (0.18 + k * 0.62), w = r * (1 - k * 0.72) * (0.9 + r2() * 0.2), th = h * 0.36;
+        g.poly([-w - 0.8, base + 0.8, 0, base - th - 0.8, w + 0.8, base + 0.8]).fill(mixColor(dark, 0x000000, 0.45));
+        g.poly([-w, base, 0, base - th, w, base]).fill(dark);
+        g.poly([-w, base, 0, base - th, -w * 0.15, base]).fill(lit);
+        g.poly([-w * 0.15, base, 0, base - th, w * 0.25, base]).fill({ color: lit, alpha: 0.35 });
+      }
+    }, 2));
+    const treeTex = this.upright ? [
+      ...[0, 1, 2, 3, 4].map(v => uprightTree(v, 15 + v * 1.5, 9 + (v % 2) * 4)),
+      ...[0, 1, 2].map(v => uprightPine(v, 11 + v * 1.5, 38 + v * 6)),
+    ]
       : this.style === 'ink' ? [0, 1, 2].map(v => inkTree(v, 24)) : [0, 1, 2].map(v => keep(this.bake(g => {
       const r = 26;
       g.circle(r * 0.28, r * 0.34, r).fill({ color: 0x000000, alpha: 0.28 });
@@ -663,7 +730,7 @@ export class ChargeView {
     this.dotTextures();
     for (const team of ['blue', 'red'] as const) {
       for (const type of ['swordsman', 'pikeman', 'archer'] as const) {
-        if (this.upright) this.sheetFor(type, team, C.INFANTRY_RADIUS[type], 0);
+        if (this.upright) for (let v = 0; v < INFANTRY_LOOKS; v++) this.sheetFor(type, team, C.INFANTRY_RADIUS[type], v);
         else this.texturesFor(type, team, C.INFANTRY_RADIUS[type], 0);
       }
       for (let v = 0; v < HORSE_VARIANTS; v++) {
@@ -678,33 +745,45 @@ export class ChargeView {
    * facings, columns of frames. Frames are sub-rectangles anchored at the feet.
    */
   private sheetFor(type: UnitType, team: Team, r: number, variant: number): FigureSheet {
-    const key = `${type}:${team}:${r}:${variant}`;
-    const hit = this.figureSheets.get(key);
+    const res = Math.min(2.5, this.artResolution);
+    const t = this.theme;
+    const key = `${type}:${team}:${r}:${variant}:${res}:${t.blue}:${t.red}:${t.steel}:${t.wood}`;
+    const hit = figureSheets.get(key);
     if (hit) return hit;
-    const g = new Graphics();
+    // Shelf-pack every facing and frame into one canvas no wider than a safe texture.
+    // Sheets are many and large, so their resolution is capped: units are small on screen.
+    const maxW = Math.floor(4096 / res);
     const PAD = 1;
-    const cells: { x: number; y: number; w: number; h: number; ax: number; ay: number }[] = [];
-    let y = 0, width = 0;
+    const figs = [];
     for (let d = 0; d < DRAWN_DIRS; d++) {
-      const row = [];
-      for (let f = 0; f < FRAMES; f++) row.push(buildFigure(type, team, r, this.theme, variant, dirAngle(d), f));
-      const h = Math.ceil(Math.max(...row.map(fr => fr.maxY - fr.minY)) + PAD * 2);
-      let x = 0;
-      for (const fr of row) {
-        const w = Math.ceil(fr.maxX - fr.minX + PAD * 2);
-        const ox = x + PAD - fr.minX, oy = y + PAD - fr.minY;
-        fr.draw(g, ox, oy);
-        cells.push({ x, y, w, h, ax: (ox - x) / w, ay: (oy - y) / h });
-        x += w;
-      }
-      width = Math.max(width, x);
-      y += h;
+      for (let f = 0; f < FRAMES; f++) figs.push(buildFigure(type, team, r, this.theme, variant, dirAngle(d), f));
     }
-    const tex = this.app.renderer.generateTexture({ target: g, frame: new Rectangle(0, 0, width, y), resolution: this.artResolution, antialias: true });
-    g.destroy();
-    const frames = cells.map(c => new Texture({ source: tex.source, frame: new Rectangle(c.x, c.y, c.w, c.h) }));
-    const sheet = { frames, ax: cells.map(c => c.ax), ay: cells.map(c => c.ay) };
-    this.figureSheets.set(key, sheet);
+    const cells: { x: number; y: number; w: number; h: number }[] = [];
+    let x = 0, y = 0, rowH = 0, width = 0;
+    for (const fr of figs) {
+      const w = Math.ceil(fr.maxX - fr.minX + PAD * 2), h = Math.ceil(fr.maxY - fr.minY + PAD * 2);
+      if (x + w > maxW) { x = 0; y += rowH; rowH = 0; }
+      cells.push({ x, y, w, h });
+      x += w;
+      rowH = Math.max(rowH, h);
+      width = Math.max(width, x);
+    }
+    const height = y + rowH;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(width * res);
+    canvas.height = Math.ceil(height * res);
+    const ctx = canvas.getContext('2d')!;
+    ctx.scale(res, res);
+    const painter = canvasPainter(ctx);
+    figs.forEach((fr, i) => fr.draw(painter, cells[i].x + PAD - fr.minX, cells[i].y + PAD - fr.minY));
+    const source = new CanvasSource({ resource: canvas, resolution: res });
+    const frames = cells.map(c => new Texture({ source, frame: new Rectangle(c.x, c.y, c.w, c.h) }));
+    const sheet = {
+      frames,
+      ax: figs.map((fr, i) => (PAD - fr.minX) / cells[i].w),
+      ay: figs.map((fr, i) => (PAD - fr.minY) / cells[i].h),
+    };
+    figureSheets.set(key, sheet);
     return sheet;
   }
 
@@ -727,7 +806,7 @@ export class ChargeView {
   private gfxFor(s: Soldier): UnitGfx {
     let u = this.units.get(s.id);
     if (u) return u;
-    const variant = s.type === 'cavalry' ? s.id % HORSE_VARIANTS : 0;
+    const variant = s.type === 'cavalry' ? s.id % HORSE_VARIANTS : this.upright ? s.id % INFANTRY_LOOKS : 0;
     const root = new Container();
     let body: Sprite, weapon: Sprite, sheet: FigureSheet | null = null;
     if (this.upright) {
@@ -735,6 +814,9 @@ export class ChargeView {
       sheet = this.sheetFor(s.type, s.team, s.radius, variant);
       body = new Sprite(sheet.frames[0]);
       body.anchor.set(sheet.ax[0], sheet.ay[0]);
+      // No two men quite alike: a touch lighter or darker each (plus the size jitter).
+      const tone = 0xe4 + ((s.id * 37) % 28);
+      body.tint = (tone << 16) | (tone << 8) | tone;
       weapon = new Sprite(Texture.EMPTY);
       weapon.visible = false;
     } else {
@@ -759,7 +841,15 @@ export class ChargeView {
     const body = root.children[0] as Sprite | undefined;
     const weapon = root.children[1] as Sprite | undefined;
     if (body) body.tint = 0x8c8c8c;
-    if (this.upright && body) body.position.set(0, 0);
+    if (this.upright) {
+      // The fall ended on the lying pose; he stays where he fell, a little darker.
+      root.alpha = 1;
+      root.scale.set(1);
+      if (body) { body.position.set(0, 0); body.tint = 0xa8a8a8; }
+      this.bakeRoot.addChild(root);
+      this.stainDirty = true;
+      return;
+    }
     if (this.style === 'mini') {
       // A toppled miniature: knocked flat on its side, paint intact.
       root.alpha = 1;
@@ -792,6 +882,7 @@ export class ChargeView {
       spin: (this.rand() - 0.5) * (6 + lift * 14),
       age: 0,
       lift,
+      fig: u.sheet && u.frame >= 0 ? { u, dir: Math.floor(u.frame / FRAMES) } : null,
     });
   }
 
@@ -993,7 +1084,8 @@ export class ChargeView {
       const down = !s.rider && s.down > 0;
       if (this.upright) {
         // Upright figures turn by showing another facing; the sprite itself stays upright.
-        u.root.rotation = down ? (s.id % 2 === 0 ? 1 : -1) * 1.45 : 0;
+        // Knocked down, he lies on the ground (the corpse pose) until he gets up.
+        u.root.rotation = 0;
         u.root.zIndex = s.y;
       } else if (down) u.root.rotation += (s.id % 2 === 0 ? 1 : -1) * 1.35;
       u.fleeing = s.fleeing;
@@ -1042,8 +1134,8 @@ export class ChargeView {
       const air = Math.sin(k * Math.PI) * d.lift;
       d.root.alpha = 1;
       if (this.upright) {
-        // Toppling: he tips over onto his side, thrown up and along by the blow.
-        d.root.rotation = Math.sign(d.spin || 1) * 1.5 * Math.min(1, k * 2.2);
+        // Falling: play the fall from the way he faced, thrown up and along by the blow.
+        if (d.fig) this.showFrame(d.fig.u, d.fig.dir * FRAMES + deathFrame(Math.min(1, k * 1.6)));
         const body = d.root.children[0];
         if (body) body.y = -air * 9;
         return true;
@@ -1111,16 +1203,21 @@ export class ChargeView {
     const { dir, mirror } = facingFrame(s.facing + (s.rider || s.fleeing ? 0 : quirk * 0.28));
     const since = time - s.lastAttack;
     const dur = attackDuration(s.type);
+    const moving = u.speed > (s.type === 'cavalry' ? 10 : 5);
     let frame = IDLE_FRAME;
-    if (!down && !s.fleeing && since >= 0 && since < dur) frame = attackFrame(since / dur);
-    else if (!down && u.speed > (s.type === 'cavalry' ? 10 : 5)) frame = walkFrame(u.phase);
-    const i = dir * FRAMES + frame;
-    if (i !== u.frame) {
-      u.frame = i;
-      u.body.texture = sheet.frames[i];
-      u.body.anchor.set(sheet.ax[i], sheet.ay[i]);
-    }
+    if (down) frame = CORPSE_FRAME;
+    else if (s.fleeing) frame = moving ? fleeFrame(u.phase) : IDLE_FRAME;
+    else if (since >= 0 && since < dur) frame = attackFrame(since / dur);
+    else if (moving) frame = walkFrame(u.phase);
+    this.showFrame(u, dir * FRAMES + frame);
     u.body.scale.x = mirror ? -1 : 1;
+  }
+
+  private showFrame(u: UnitGfx, i: number): void {
+    if (!u.sheet || i === u.frame) return;
+    u.frame = i;
+    u.body.texture = u.sheet.frames[i];
+    u.body.anchor.set(u.sheet.ax[i], u.sheet.ay[i]);
   }
 
   /**
@@ -1195,6 +1292,12 @@ export class ChargeView {
       const men = b.grid;
       const s = men[Math.floor(this.rand() * Math.min(men.length, b.cols * 2))];
       if (!s || !s.alive) continue;
+      if (this.upright) {
+        // The press of the line tramples the turf to earth.
+        this.stainBatch.poly(ovalPoints(s.x + (this.rand() - 0.5) * 10, s.y + (this.rand() - 0.5) * 6, 3 + this.rand() * 4, 2 + this.rand() * 2, this.rand() * Math.PI))
+          .fill({ color: this.theme.dirt, alpha: 0.07 });
+        this.stainDirty = true;
+      }
       this.addParticle({
         x: s.x + (this.rand() - 0.5) * 8, y: s.y + (this.rand() - 0.5) * 8,
         vx: 6 + (this.rand() - 0.5) * 6, vy: (this.rand() - 0.5) * 6, age: 0,
@@ -1234,7 +1337,20 @@ export class ChargeView {
           color: this.dust, alpha: 0.32 * k, stain: false,
         });
       }
-      if (stamp) {
+      if (stamp && this.upright) {
+        // Paired hoof prints, and now and then a clod of turf torn up at the gallop.
+        const c = Math.cos(r.facing), sn = Math.sin(r.facing);
+        for (const side of [-1.6, 1.6]) {
+          const px = r.x - sn * side + (this.rand() - 0.5) * 2 - c * (side > 0 ? 2 : 0);
+          const py = r.y + c * side + (this.rand() - 0.5) * 2 - sn * (side > 0 ? 2 : 0);
+          this.stainBatch.poly(ovalPoints(px, py, 1.1, 0.7, r.facing)).fill({ color: mixColor(this.theme.dirt, 0x2a2010, 0.35), alpha: 0.24 * k });
+        }
+        if (this.rand() < 0.3 * k) {
+          this.stainBatch.poly(ovalPoints(r.x - c * 6, r.y - sn * 6, 2.6 + this.rand() * 1.5, 1.4, r.facing + (this.rand() - 0.5)))
+            .fill({ color: this.theme.dirt, alpha: 0.1 });
+        }
+        this.stainDirty = true;
+      } else if (stamp) {
         // Hoof prints baked into the ground: the field remembers your charges.
         const side = this.rand() < 0.5 ? 2 : -2;
         const jx = (this.rand() - 0.5) * 3, jy = (this.rand() - 0.5) * 3;
@@ -1382,8 +1498,19 @@ export class ChargeView {
       const dark = b.team === 'blue' ? t.blueDark : t.redDark;
       const px = b.x - Math.cos(b.facing) * b.spacing * 0.6;
       const py = b.y - Math.sin(b.facing) * b.spacing * 0.6;
-      const top = py - 18;
       const wave = sim.time * 5 + b.id;
+      if (this.upright) {
+        paintStandard(g, px, py, 24, color, mixColor(color, t.trim, 0.75), wave);
+        if (b.team !== 'red' || !L || Math.hypot(b.x - L.x, b.y - L.y) > 200) continue;
+        // A slim morale bar at the foot of the staff.
+        const w = 16, h = 1.6, x = px - w / 2, y = py + 2.5;
+        const m = Math.max(0, Math.min(1, b.morale / 100));
+        const mc = m > 0.6 ? t.hpHigh : m > 0.3 ? t.hpMid : t.hpLow;
+        g.rect(x - 0.6, y - 0.6, w + 1.2, h + 1.2).fill({ color: 0x1a140a, alpha: 0.45 });
+        g.rect(x, y, w * m, h).fill({ color: mc, alpha: 0.8 });
+        continue;
+      }
+      const top = py - 18;
       g.moveTo(px, py).lineTo(px, top).stroke({ width: 1.1, color: t.wood });
       const pts: number[] = [px, top];
       for (let i = 1; i <= 4; i++) pts.push(px + i * 3, top + Math.sin(wave - i * 0.9) * 1.3 * (i / 4));
@@ -1410,6 +1537,21 @@ export class ChargeView {
       const color = sq.team === 'blue' ? t.blue : t.red;
       const bx = SL.x - Math.cos(SL.facing) * 3, by = SL.y - Math.sin(SL.facing) * 3;
       const wave = Math.sin(sim.time * 9 + sq.id) * 1.2;
+      if (this.upright) {
+        // Standards over riding squadrons: the general's tall and gilt, ringed in gold.
+        const general = sq.ai === 'general';
+        if (general) {
+          const pulse = 0.5 + 0.3 * Math.sin(sim.time * 5);
+          g.ellipse(SL.x, SL.y, 12, 7).stroke({ width: 1.2, color: t.hpMid, alpha: pulse });
+        }
+        paintStandard(g, bx, by, general ? 30 : 22, color, general ? 0xd8b050 : mixColor(color, t.trim, 0.75), sim.time * 9 + sq.id, general ? 1.15 : 0.8, general);
+        if (sq.team === 'blue') {
+          const c = sim.squadCenter(sq);
+          const pulse = 0.35 + 0.2 * Math.sin(sim.time * 4 + sq.id);
+          g.ellipse(c.x, c.y, 14 + sq.riders.length * 1.3, (14 + sq.riders.length * 1.3) * 0.6).stroke({ width: 1, color, alpha: pulse });
+        }
+        continue;
+      }
       if (sq.ai === 'general') {
         // The general: a tall gold-edged standard and a pulsing ring — hunt him down.
         const pulse = 0.65 + 0.35 * Math.sin(sim.time * 5);
@@ -1442,6 +1584,10 @@ export class ChargeView {
     ]).fill({ color: t.trim, alpha: 0.45 });
     // Banner on the leader.
     const bx = L.x - Math.cos(L.facing) * 3, by = L.y - Math.sin(L.facing) * 3;
+    if (this.upright) {
+      paintStandard(g, bx, by, 26, t.blue, mixColor(t.blue, t.trim, 0.75), sim.time * 10, 0.9);
+      return;
+    }
     const wave = Math.sin(sim.time * 10) * 1.5;
     g.moveTo(bx, by).lineTo(bx, by - 14).stroke({ width: 1, color: t.obstacleBorder });
     g.poly([bx, by - 14, bx + 9, by - 12 + wave, bx, by - 9]).fill(t.blue);

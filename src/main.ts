@@ -37,6 +37,7 @@ function teamCss(team: 'blue' | 'red'): string {
 function applyBodyTheme(): void {
   document.body.classList.toggle('day-mode', themeSelect.value === 'parchment' || themeSelect.value === 'ink');
   document.body.classList.toggle('style-rts', themeSelect.value === 'rts');
+  document.body.classList.toggle('style-3d', themeSelect.value === '3d');
 }
 
 let gameFailed = false;

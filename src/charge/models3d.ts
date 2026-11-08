@@ -350,15 +350,86 @@ function speckle(g: THREE.BufferGeometry, seed: number) {
   return g;
 }
 
-export function oakGeometry(v: number): THREE.BufferGeometry {
-  const leaves = [0x355a1c, 0x44702a, 0x2c4a16, 0x5a8434];
-  const parts = [P(cyl(0.2, 0.32, 2.8, 6), 0x5a3c22, 0, 1.4, 0, 0, 0, 0, { mat: WOOD })];
-  for (let k = 0; k < 6; k++) {
-    const a = (k / 6) * Math.PI * 2 + v, rr = 1.4;
-    parts.push(speckle(P(new THREE.IcosahedronGeometry(1.35, 1), leaves[(k + v) % 4], Math.cos(a) * rr, 3.7 + (k % 2) * 0.6, Math.sin(a) * rr), k + v * 10));
+/** Canopies are lit from above: darker underneath, sunlit on top. */
+function skyShade(g: THREE.BufferGeometry, y0: number, y1: number): THREE.BufferGeometry {
+  const p = g.attributes.position, c = g.attributes.color;
+  for (let i = 0; i < p.count; i++) {
+    const k = 0.72 + 0.48 * Math.min(1, Math.max(0, (p.getY(i) - y0) / (y1 - y0)));
+    c.setXYZ(i, c.getX(i) * k, c.getY(i) * k, c.getZ(i) * k);
   }
-  parts.push(speckle(P(new THREE.IcosahedronGeometry(1.9, 1), leaves[(v + 1) % 4], 0, 4.5, 0), v));
-  return mergeGeometries(parts);
+  return g;
+}
+
+/** Broadleaf trees: v 0-2 are oaks of different shapes, 3 is a birch. */
+export function oakGeometry(v: number): THREE.BufferGeometry {
+  if (v === 3) return birchGeometry();
+  const leaves = [[0x3a5e1e, 0x46702a, 0x2e4c18], [0x40641f, 0x507a2c, 0x34541a], [0x365a1c, 0x4a7428, 0x2c4816]][v % 3];
+  const trunk = 0x5a3c22;
+  const h = [2.6, 3.2, 2.2][v % 3], spread = [1.5, 1.2, 1.8][v % 3];
+  const parts = [P(cyl(0.18, 0.32, h, 6), trunk, 0, h / 2, 0, 0, 0, 0, { mat: WOOD })];
+  // Two forked limbs.
+  parts.push(limb(1.3, 0.13, 0.08, trunk, 0, h - 0.3, 0, 2.4, 0.5, undefined, { mat: WOOD }), limb(1.2, 0.12, 0.07, trunk, 0, h - 0.4, 0, -2.3, -0.6, undefined, { mat: WOOD }));
+  const lobes = 9 + v * 2;
+  for (let k = 0; k < lobes; k++) {
+    const a = (k / lobes) * Math.PI * 2 * 1.618 + v, rr = spread * (0.45 + ((k * 37) % 10) / 14);
+    const y = h + 0.6 + ((k * 53) % 10) / 10 * 1.6;
+    const r = 0.95 + ((k * 29) % 10) / 18;
+    parts.push(speckle(P(new THREE.IcosahedronGeometry(r, 1), leaves[k % 3], Math.cos(a) * rr, y, Math.sin(a) * rr), k + v * 10));
+  }
+  parts.push(speckle(P(new THREE.IcosahedronGeometry(1.5, 1), leaves[1], 0, h + 1.9, 0), v + 50));
+  return skyShade(mergeGeometries(parts), h, h + 3.2);
+}
+
+/** A slender birch: pale trunk with dark marks, light airy canopy. */
+function birchGeometry(): THREE.BufferGeometry {
+  const parts = [P(cyl(0.11, 0.17, 4.2, 6), 0xe8e4d8, 0, 2.1, 0, 0, 0, 0, { mat: WOOD })];
+  for (let k = 0; k < 6; k++) parts.push(P(box(0.24, 0.06, 0.24), 0x2a2622, 0, 0.6 + k * 0.6, 0, 0, k, 0));
+  const leaves = [0x6a8a32, 0x7a983a, 0x5c7c2c];
+  for (let k = 0; k < 8; k++) {
+    const a = k * 2.4, rr = 0.5 + (k % 3) * 0.25;
+    parts.push(speckle(P(new THREE.IcosahedronGeometry(0.75 + (k % 2) * 0.2, 1), leaves[k % 3], Math.cos(a) * rr, 3.8 + (k % 4) * 0.45, Math.sin(a) * rr), k + 90));
+  }
+  return skyShade(mergeGeometries(parts), 3.4, 5.6);
+}
+
+/** A mossy boulder. */
+export function rockGeometry(v: number): THREE.BufferGeometry {
+  const g = new THREE.IcosahedronGeometry(1, v % 2);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const n = Math.sin(p.getX(i) * 3.1 + v) * Math.cos(p.getZ(i) * 2.7 + v * 2) * 0.22;
+    p.setXYZ(i, p.getX(i) * (1.3 + n), Math.max(-0.2, p.getY(i)) * (0.75 + n), p.getZ(i) * (1 + n));
+  }
+  g.computeVertexNormals();
+  const rock = P(g, [0x8a867a, 0x7a776e, 0x969080][v % 3], 0, 0.15, 0);
+  // Moss on the top faces.
+  const c = rock.attributes.color, nrm = rock.attributes.normal;
+  for (let i = 0; i < c.count; i++) if (nrm.getY(i) > 0.75) c.setXYZ(i, 0.36, 0.44, 0.2);
+  return rock;
+}
+
+/** An arrow stuck in the ground (shaft and fletching), pointing along -Y from its tip at the origin. */
+export function stuckArrowGeometry(): THREE.BufferGeometry {
+  return mergeGeometries([
+    P(cyl(0.012, 0.012, 0.75, 4), 0x8a6a40, 0, 0.375, 0, 0, 0, 0, { mat: WOOD }),
+    P(box(0.008, 0.14, 0.07), 0xe8e0cc, 0, 0.68, 0), P(box(0.07, 0.14, 0.008), 0xe8e0cc, 0, 0.68, 0),
+  ]);
+}
+
+/** A broken lance or pike shaft lying on the ground. */
+export function brokenShaftGeometry(): THREE.BufferGeometry {
+  return mergeGeometries([
+    P(cyl(0.026, 0.026, 1.3, 5), PAL.wood, 0, 0.03, 0, 0, 0, Math.PI / 2, { mat: WOOD }),
+    P(cone(0.035, 0.12, 4), 0xd8c8a0, 0.7, 0.03, 0, 0, 0, -Math.PI / 2, { mat: WOOD }), // splintered end
+  ]);
+}
+
+/** A standard dropped on the ground when its battalion broke. */
+export function fallenStandardGeometry(team: Team): THREE.BufferGeometry {
+  const g = standardGeometry(team);
+  g.rotateZ(-Math.PI / 2 + 0.06);
+  g.translate(0, 0.06, 0);
+  return g;
 }
 
 export function pineGeometry(): THREE.BufferGeometry {

@@ -5,6 +5,9 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { HorizontalTiltShiftShader } from 'three/examples/jsm/shaders/HorizontalTiltShiftShader.js';
+import { VerticalTiltShiftShader } from 'three/examples/jsm/shaders/VerticalTiltShiftShader.js';
 import { Theme } from '../theme';
 import { Vec2 } from '../types';
 import { attackDuration } from '../unit-art';
@@ -14,7 +17,7 @@ import { Battalion, ChargeSim, SimEvent, Soldier, Squadron, angleDiff, attackSid
 import { PathPoint } from './path';
 import { DirectZones } from './direct';
 import {
-  COATS, bushGeometry, fenceGeometry, haystackGeometry, houseGeometry, oakGeometry, pennantGeometry, pineGeometry,
+  COATS, brokenShaftGeometry, bushGeometry, fallenStandardGeometry, fenceGeometry, rockGeometry, stuckArrowGeometry, haystackGeometry, houseGeometry, oakGeometry, pennantGeometry, pineGeometry,
   setModelDetail, standardGeometry, tentGeometry, unitGeometry,
 } from './models3d';
 import { paintDirtTile, paintMeadowTile, paintScorch } from './ground3d';
@@ -56,8 +59,21 @@ const TRAMPLE_W = Math.round(FIELD_W), TRAMPLE_H = Math.round(FIELD_H);
 const GROUND_GAIN = new THREE.Color().setRGB(1.45, 1.76, 2.9, THREE.LinearSRGBColorSpace);
 
 /** Gentle, visual-only rolling ground (metres). The simulation stays flat. */
+/** The river beyond the left edge of the field (metres). */
+const RIVER_X = -12, RIVER_HALF = 4.5, WATER_Y = -0.35;
+/** The river's centre line meanders gently. */
+const riverX = (z: number) => RIVER_X + 3.2 * Math.sin(z * 0.035) + 1.2 * Math.sin(z * 0.09 + 1.7);
+const smooth01 = (e0: number, e1: number, x: number) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+
 export function heightAt(x: number, z: number): number {
-  return 0.75 * Math.sin(x * 0.045 + 0.4) * Math.cos(z * 0.06) + 0.35 * Math.sin(x * 0.11 + 1.3) * Math.sin(z * 0.09 + 0.7);
+  let h = 0.75 * Math.sin(x * 0.045 + 0.4) * Math.cos(z * 0.06) + 0.35 * Math.sin(x * 0.11 + 1.3) * Math.sin(z * 0.09 + 0.7);
+  // Hills rise beyond the left, right and far edges (the farm side stays flat).
+  const out = Math.max(-x, x - FIELD_W, -z, 0);
+  if (out > 0) h += smooth01(3, 42, out) * (6 + 3 * Math.sin(x * 0.07) * Math.cos(z * 0.05) + 2 * Math.sin(x * 0.13 + z * 0.11));
+  // The river cuts through beyond the left edge.
+  const r = 1 - smooth01(RIVER_HALF, RIVER_HALF + 3.5, Math.abs(x - riverX(z)));
+  if (r > 0) h = h * (1 - r) - 0.9 * r;
+  return h;
 }
 const HEIGHT_GLSL = /* glsl */`
   float heightAt(vec2 p) { return 0.75 * sin(p.x * 0.045 + 0.4) * cos(p.y * 0.06) + 0.35 * sin(p.x * 0.11 + 1.3) * sin(p.y * 0.09 + 0.7); }
@@ -72,7 +88,7 @@ const CLOUD_GLSL = /* glsl */`
   }
 `;
 
-interface Fx { rig?: boolean; tint?: boolean; matAttr?: boolean; rim?: boolean; clouds?: boolean; wind?: boolean; skin?: boolean }
+interface Fx { rig?: boolean; tint?: boolean; matAttr?: boolean; rim?: boolean; clouds?: boolean; wind?: boolean; skin?: boolean; flag?: boolean }
 
 interface Kind {
   mesh: THREE.InstancedMesh;
@@ -95,6 +111,8 @@ interface Dying {
   x: number; y: number; z: number;
   vx: number; vy: number; vz: number;
   yaw: number; spin: number; roll: number;
+  /** How fast the body tips over (rad/s): thrown men spin, men struck down topple. */
+  rollRate: number;
   age: number;
 }
 
@@ -151,9 +169,11 @@ export class ChargeView3D implements ChargeRenderer {
   private readonly quality: Quality;
   private readonly renderer: THREE.WebGLRenderer;
   private composer: EffectComposer | null = null;
+  private tiltH: ShaderPass | null = null;
+  private tiltV: ShaderPass | null = null;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(FOV, 16 / 9, 1, 600);
-  private readonly sun = new THREE.DirectionalLight(0xffe4bc, 2.7);
+  private readonly sun = new THREE.DirectionalLight(0xffd8a4, 2.85);
   private readonly uTime = { value: 0 };
   private readonly uRim = { value: new THREE.Color(0xfff2d8).multiplyScalar(0.18) };
   private readonly kinds: Kind[] = [];
@@ -164,6 +184,8 @@ export class ChargeView3D implements ChargeRenderer {
   private readonly decals: THREE.InstancedMesh;
   private decalNext = 0;
   private decalCount = 0;
+  private readonly litter: { arrows: THREE.InstancedMesh; shafts: THREE.InstancedMesh; arrowNext: number; shaftNext: number };
+  private readonly fallenStandards: THREE.Mesh[] = [];
   private readonly scorches: THREE.InstancedMesh;
   private scorchNext = 0;
   private scorchCount = 0;
@@ -175,7 +197,9 @@ export class ChargeView3D implements ChargeRenderer {
   private readonly pennants = new Map<number, THREE.Mesh>();
   private readonly standardGeo: Record<'blue' | 'red', THREE.BufferGeometry>;
   private readonly pennantGeo: Record<'blue' | 'red', THREE.BufferGeometry>;
+  private readonly fallenGeo: Record<'blue' | 'red', THREE.BufferGeometry> = { blue: fallenStandardGeometry('blue'), red: fallenStandardGeometry('red') };
   private readonly plainMat: THREE.Material;
+  private readonly flagMat: THREE.Material;
   private readonly leaderRing: THREE.Mesh;
   private readonly generalRing: THREE.Mesh;
   private readonly exposeEdge: THREE.Mesh;
@@ -255,9 +279,9 @@ export class ChargeView3D implements ChargeRenderer {
     host.appendChild(this.vignette);
 
     this.scene.background = new THREE.Color(0x26341c);
-    this.scene.fog = new THREE.Fog(0x9aa88c, 110, 300);
-    // Cool sky fill and a low, warm sun: long shadows, golden light.
-    this.scene.add(new THREE.HemisphereLight(0xdce6ff, 0x5e6040, 1.2));
+    this.scene.fog = new THREE.Fog(0xb2ae8c, 100, 290);
+    // Cool sky fill and a low, golden sun: long shadows, warm light, warm haze far off.
+    this.scene.add(new THREE.HemisphereLight(0xd4e0ff, 0x5e5a3c, 1.2));
     this.sun.castShadow = high;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.0004;
@@ -271,6 +295,7 @@ export class ChargeView3D implements ChargeRenderer {
     this.trampleTex.needsUpdate = true;
 
     this.plainMat = this.unitMaterial({ clouds: high });
+    this.flagMat = this.unitMaterial({ clouds: high, flag: true });
     this.buildGround();
     this.buildScenery();
     this.buildUnits();
@@ -285,6 +310,13 @@ export class ChargeView3D implements ChargeRenderer {
     this.decals.frustumCulled = false;
     this.scene.add(this.decals);
 
+    const nArrows = high ? 1600 : 600;
+    this.litter = {
+      arrows: new THREE.InstancedMesh(stuckArrowGeometry(), this.plainMat, nArrows),
+      shafts: new THREE.InstancedMesh(brokenShaftGeometry(), this.plainMat, 300),
+      arrowNext: 0, shaftNext: 0,
+    };
+    for (const m of [this.litter.arrows, this.litter.shafts]) { m.count = 0; m.frustumCulled = false; m.castShadow = high; this.scene.add(m); }
     const scorchTex = new THREE.CanvasTexture(paintScorch());
     scorchTex.colorSpace = THREE.SRGBColorSpace;
     this.scorches = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
@@ -360,9 +392,17 @@ export class ChargeView3D implements ChargeRenderer {
 
   setCombatText(on: boolean): void { void on; }
 
+  /** Tilt-shift strength scales with the screen (in texels). */
+  private updateTilt(): void {
+    if (!this.tiltH || !this.tiltV) return;
+    this.tiltH.uniforms.h.value = 1.4 / Math.max(1, this.viewW);
+    this.tiltV.uniforms.v.value = 1.4 / Math.max(1, this.viewH);
+  }
+
   resize(w: number, h: number): void {
     this.viewW = w;
     this.viewH = h;
+    this.updateTilt();
     this.renderer.setSize(w, h, false);
     this.composer?.setSize(w, h);
     this.camera.aspect = w / Math.max(1, h);
@@ -587,8 +627,20 @@ export class ChargeView3D implements ChargeRenderer {
           transformed.z += cos(uTime * 1.1 + wb.x * 0.2 + wb.z * 0.35) * wy * 0.025;
         `;
       }
-      if (fx.clouds) {
+      if (fx.flag) {
         if (!fx.wind) vHead += 'uniform float uTime;\n';
+        // Cloth on standards and pennants waves, more toward its free end.
+        begin += `
+          if (transformed.y > 2.9 && abs(transformed.x) > 0.04) {
+            float fx0 = abs(transformed.x);
+            float ph = uTime * 6.5 - fx0 * 4.5 + modelMatrix[3].x * 0.7 + modelMatrix[3].z * 0.3;
+            transformed.z += sin(ph) * 0.11 * fx0 + sin(ph * 1.7 + 1.3) * 0.03 * fx0;
+            transformed.y += sin(ph + 1.1) * 0.025 * fx0;
+          }
+        `;
+      }
+      if (fx.clouds) {
+        if (!fx.wind && !fx.flag) vHead += 'uniform float uTime;\n';
         vHead += 'varying vec2 vCloudXZ;\n';
         fHead += CLOUD_GLSL;
         begin += `
@@ -675,7 +727,9 @@ export class ChargeView3D implements ChargeRenderer {
       const out = Math.min(1, Math.max(0, Math.max(-x, x - W, -z, z - H)) / 6);
       r *= 1 - out * 0.55; g *= 1 - out * 0.45; bl *= 1 - out * 0.55;
       tint.push(r, g, bl);
-      dirt.push(Math.min(1, Math.max(0, (this.earthAt(x, z) * (0.6 + b * 0.8) - 0.12) * 1.8)));
+      // Worn ground, plus muddy banks along the river.
+      const bank = 1 - smooth01(RIVER_HALF + 1, RIVER_HALF + 4.5, Math.abs(x - riverX(z)));
+      dirt.push(Math.min(1, Math.max(bank * 0.85, (this.earthAt(x, z) * (0.6 + b * 0.8) - 0.12) * 1.8)));
       uv.setXY(i, x / 8, z / 8);
     }
     geo.computeVertexNormals();
@@ -742,18 +796,40 @@ export class ChargeView3D implements ChargeRenderer {
     type It = { x: number; z: number; s: number; r: number };
     const farm = (x: number, z: number) => z > H && z < H + 26 && x > 20 && x < W - 20;
     // Forest round the field, leaving room for a farm below our camps.
-    const oaks: It[][] = [[], [], []], pines: It[] = [];
-    for (let i = 0; i < 900; i++) {
-      const sideN = Math.floor(rnd() * 4), along = rnd(), depth = 3 + rnd() * 30;
-      const x = sideN % 2 === 0 ? along * (W + 60) - 30 : sideN === 1 ? W + depth : -depth;
-      const z = sideN % 2 === 1 ? along * (H + 60) - 30 : sideN === 0 ? -depth : H + depth;
-      if (farm(x, z)) continue;
+    const river = (x: number, z = 0) => Math.abs(x - riverX(z)) < RIVER_HALF + 3.5;
+    const oaks: It[][] = [[], [], [], []], pines: It[] = [], under: It[][] = [[], [], []], rocks: It[][] = [[], [], []];
+    for (let i = 0; i < 1100; i++) {
+      const sideN = Math.floor(rnd() * 4), along = rnd(), depth = 3 + rnd() * 34;
+      const x = sideN % 2 === 0 ? along * (W + 70) - 35 : sideN === 1 ? W + depth : -depth;
+      const z = sideN % 2 === 1 ? along * (H + 70) - 35 : sideN === 0 ? -depth : H + depth;
+      if (farm(x, z) || river(x, z)) continue;
       const t = { x, z, s: 0.85 + rnd() * 0.55, r: rnd() * 6.28 };
-      if (rnd() < 0.62) oaks[Math.floor(rnd() * 3)].push(t); else pines.push(t);
+      const p = rnd();
+      if (p < 0.5) oaks[Math.floor(rnd() * 3)].push(t); else if (p < 0.66) oaks[3].push(t); else pines.push(t);
+    }
+    // Undergrowth along the forest edge, and boulders out on the hills.
+    for (let i = 0; i < 700; i++) {
+      const sideN = Math.floor(rnd() * 4), along = rnd(), depth = 1 + rnd() * 7;
+      const x = sideN % 2 === 0 ? along * (W + 20) - 10 : sideN === 1 ? W + depth : -depth;
+      const z = sideN % 2 === 1 ? along * (H + 20) - 10 : sideN === 0 ? -depth : H + depth;
+      if (farm(x, z) || river(x, z)) continue;
+      under[Math.floor(rnd() * 3)].push({ x, z, s: 0.6 + rnd() * 0.8, r: rnd() * 6.28 });
+    }
+    for (let i = 0; i < 260; i++) {
+      const sideN = Math.floor(rnd() * 3), along = rnd(), depth = 6 + rnd() * 34;
+      const x = sideN === 0 ? along * (W + 70) - 35 : sideN === 1 ? W + depth : -depth;
+      const z = sideN === 0 ? -depth : along * (H + 30) - 15;
+      if (river(x, z)) continue;
+      const big = rnd() < 0.3;
+      rocks[Math.floor(rnd() * 3)].push({ x, z, s: big ? 1.6 + rnd() * 2.2 : 0.5 + rnd() * 0.9, r: rnd() * 6.28 });
     }
     const trees = this.unitMaterial({ wind: true, clouds: this.quality === 'high' });
     oaks.forEach((list, v) => this.scatter(oakGeometry(v), list, trees));
     this.scatter(pineGeometry(), pines, trees);
+    under.forEach((list, v) => this.scatter(bushGeometry(v + 3), list, trees));
+    const stone = this.unitMaterial({ clouds: this.quality === 'high' });
+    rocks.forEach((list, v) => this.scatter(rockGeometry(v), list, stone));
+    this.buildRiver();
     // Low dark shrubs dotted about the open field (the fighting rolls over them).
     const bushes: It[][] = [[], [], []];
     for (let i = 0; i < 170; i++) {
@@ -763,9 +839,9 @@ export class ChargeView3D implements ChargeRenderer {
     }
     bushes.forEach((list, v) => this.scatter(bushGeometry(v), list, trees));
     // Stones in the open field.
-    const rocks: It[] = [];
-    for (let i = 0; i < 160; i++) rocks.push({ x: rnd() * W, z: rnd() * H, s: 0.3 + rnd() * 0.5, r: rnd() * 6.28 });
-    this.scatter(new THREE.IcosahedronGeometry(0.5, 0).scale(1.3, 0.6, 1), rocks, new THREE.MeshLambertMaterial({ color: 0x8a867a, flatShading: true }));
+    const stones: It[] = [];
+    for (let i = 0; i < 160; i++) stones.push({ x: rnd() * W, z: rnd() * H, s: 0.3 + rnd() * 0.5, r: rnd() * 6.28 });
+    this.scatter(new THREE.IcosahedronGeometry(0.5, 0).scale(1.3, 0.6, 1), stones, new THREE.MeshLambertMaterial({ color: 0x8a867a, flatShading: true }));
     // Camps: blue tents round each rally ring, red tents along the far edge.
     const blueTents: It[] = [], redTents: It[] = [];
     for (const c of C.CAMPS) {
@@ -815,6 +891,38 @@ export class ChargeView3D implements ChargeRenderer {
     this.scatter(fenceGeometry(), fences, this.plainMat);
     this.scatter(houseGeometry(), houses, this.plainMat);
     this.scatter(haystackGeometry(), hay, this.plainMat);
+  }
+
+  /** The river: a calm, moving surface following the meander, deeper and darker mid-stream. */
+  private buildRiver(): void {
+    const len = FIELD_H + 90, wide = RIVER_HALF * 2 + 7;
+    const geo = new THREE.PlaneGeometry(wide, len, 6, 90).rotateX(-Math.PI / 2);
+    const p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const z = p.getZ(i) + FIELD_H / 2;
+      p.setX(i, p.getX(i) + riverX(z));
+    }
+    const mat = new THREE.MeshPhongMaterial({ color: 0x2c5658, specular: 0x5a6a60, shininess: 45, transparent: true, opacity: 0.92, depthWrite: false });
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uTime = this.uTime;
+      sh.vertexShader = 'varying vec3 vWPos;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = 'uniform float uTime;\nvarying vec3 vWPos;\n' + sh.fragmentShader
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+          vec2 q = vWPos.xz;
+          float t = uTime;
+          vec2 rip = vec2(
+            sin(q.y * 1.3 - t * 1.6 + sin(q.x * 1.9)) * 0.5 + sin(q.y * 3.1 + q.x * 1.1 - t * 2.3) * 0.2,
+            cos(q.x * 1.7 + t * 0.9 + sin(q.y * 1.5)) * 0.5 + cos(q.y * 2.6 - t * 2.0) * 0.2);
+          normal = normalize(normal + (viewMatrix * vec4(rip.x * 0.07, 0.0, rip.y * 0.07, 0.0)).xyz);`)
+        .replace('#include <color_fragment>', `#include <color_fragment>
+          float cx = ${RIVER_X.toFixed(1)} + 3.2 * sin(vWPos.z * 0.035) + 1.2 * sin(vWPos.z * 0.09 + 1.7);
+          float mid = 1.0 - smoothstep(0.0, ${(RIVER_HALF + 1.5).toFixed(1)}, abs(vWPos.x - cx));
+          diffuseColor.rgb = mix(vec3(0.07, 0.11, 0.07), diffuseColor.rgb, mid);`);
+    };
+    const water = new THREE.Mesh(geo, mat);
+    water.position.set(0, WATER_Y, FIELD_H / 2);
+    water.renderOrder = 1;
+    this.scene.add(water);
   }
 
   /** Lay a flat marker on the rolling ground. */
@@ -975,12 +1083,14 @@ export class ChargeView3D implements ChargeRenderer {
           k.deadCount = Math.min(MAX_DEAD, k.deadCount + 1);
           for (let i = this.dying.length - 1; i >= 0; i--) if (this.dying[i].kind === ki && this.dying[i].slot === slot) this.dying.splice(i, 1);
           const hard = e.byPlayer;
-          const a = e.angle + (Math.random() - 0.5) * 0.9, sp = hard ? 7 + Math.random() * 4 : 1.5;
+          const a = e.angle + (Math.random() - 0.5) * 0.9, sp = hard ? 7 + Math.random() * 4 : 0.6;
           const x = e.x * S, z = e.y * S;
           this.dying.push({
             kind: ki, slot, x, y: heightAt(x, z) + 0.1, z,
-            vx: Math.cos(a) * sp, vz: Math.sin(a) * sp, vy: hard ? 3.5 + Math.random() * 2.5 : 0.8,
-            yaw: -a + (Math.random() - 0.5), spin: (Math.random() - 0.5) * (hard ? 14 : 3), roll: 0, age: 0,
+            vx: Math.cos(a) * sp, vz: Math.sin(a) * sp, vy: hard ? 3.5 + Math.random() * 2.5 : 0.25,
+            yaw: -a + (Math.random() - 0.5), spin: (Math.random() - 0.5) * (hard ? 14 : 1), roll: 0, age: 0,
+            // Struck down in the press: sag, then keel over.
+            rollRate: hard ? 6 : 2.4 + Math.random() * 1.2,
           });
           this.blood(x, z, e.angle, hard ? 9 : 5);
           break;
@@ -988,9 +1098,18 @@ export class ChargeView3D implements ChargeRenderer {
         case 'impact':
           this.burst(e.x * S, e.y * S, e.angle, e.side === 'rear' ? 9 : e.side === 'flank' ? 6 : 4, e.pike);
           if (Math.random() < 0.45) this.scorch(e.x * S, e.y * S);
+          if (e.pike && Math.random() < 0.6) this.dropShaft(e.x * S, e.y * S);
+          this.sparks(e.x * S, e.y * S, e.pike ? 8 : 4);
+          break;
+        case 'arrow-land':
+          if (!e.hit) this.stickArrow(e.x * S, e.y * S, e.angle);
+          break;
+        case 'rout':
+          this.dropStandard(e.x * S, e.y * S, e.team);
           break;
         case 'hit':
           if (Math.random() < 0.5) this.blood(e.x * S, e.y * S, e.angle, 2);
+          if (Math.random() < 0.3) this.sparks(e.x * S, e.y * S, 3);
           break;
       }
     }
@@ -1003,9 +1122,10 @@ export class ChargeView3D implements ChargeRenderer {
       d.vy -= 18 * dt;
       d.x += d.vx * dt; d.z += d.vz * dt; d.y += d.vy * dt;
       d.yaw += d.spin * dt;
-      d.roll = Math.min(Math.PI / 2, d.roll + dt * 6);
+      d.roll = Math.min(Math.PI / 2, d.roll + dt * d.rollRate * (0.4 + d.roll));
       const ground = heightAt(d.x, d.z);
-      const landed = d.y <= ground && d.age > 0.12;
+      // A toppling man has landed once he's down; a thrown one when he hits the ground.
+      const landed = d.y <= ground && d.age > 0.12 && (d.rollRate > 5 || d.roll >= Math.PI / 2 - 0.01);
       if (landed) {
         d.y = ground;
         this.decal(d.x, d.z);
@@ -1032,6 +1152,39 @@ export class ChargeView3D implements ChargeRenderer {
       k.dead.count = n;
       k.dead.instanceMatrix.needsUpdate = true;
     }
+  }
+
+  /** Arrows that miss stay stuck in the ground, leaning back the way they came. */
+  private stickArrow(x: number, z: number, angle: number): void {
+    const L = this.litter, m = L.arrows, i = L.arrowNext;
+    L.arrowNext = (i + 1) % m.instanceMatrix.count;
+    m.count = Math.min(m.instanceMatrix.count, m.count + 1);
+    this.tmpQ.setFromAxisAngle(this.up, -angle + (Math.random() - 0.5) * 0.3)
+      .multiply(this.tmpQ2.setFromAxisAngle(this.side, 0.45 + Math.random() * 0.4));
+    m.setMatrixAt(i, this.tmpM.compose(this.tmpP.set(x, heightAt(x, z) - 0.16, z), this.tmpQ, this.tmpS));
+    m.instanceMatrix.needsUpdate = true;
+  }
+
+  /** A splintered pike or lance left lying where a charge met the pikes. */
+  private dropShaft(x: number, z: number): void {
+    const L = this.litter, m = L.shafts, i = L.shaftNext;
+    L.shaftNext = (i + 1) % m.instanceMatrix.count;
+    m.count = Math.min(m.instanceMatrix.count, m.count + 1);
+    const px = x + (Math.random() - 0.5) * 1.5, pz = z + (Math.random() - 0.5) * 1.5;
+    this.tmpQ.setFromAxisAngle(this.up, Math.random() * 6.28);
+    m.setMatrixAt(i, this.tmpM.compose(this.tmpP.set(px, heightAt(px, pz), pz), this.tmpQ, this.tmpS));
+    m.instanceMatrix.needsUpdate = true;
+  }
+
+  /** A broken battalion drops its standard. */
+  private dropStandard(x: number, z: number, team: 'blue' | 'red'): void {
+    if (this.fallenStandards.length >= 40) return;
+    const m = new THREE.Mesh(this.fallenGeo[team], this.plainMat);
+    m.position.set(x, heightAt(x, z), z);
+    m.rotation.y = Math.random() * 6.28;
+    m.castShadow = this.quality === 'high';
+    this.scene.add(m);
+    this.fallenStandards.push(m);
   }
 
   /** A spiky patch of churned earth where a charge struck; they build up over the battle. */
@@ -1141,7 +1294,7 @@ export class ChargeView3D implements ChargeRenderer {
       if (bat.routed) continue;
       let m = this.standards.get(bat.id);
       if (!m) {
-        m = new THREE.Mesh(this.standardGeo[bat.team], this.plainMat);
+        m = new THREE.Mesh(this.standardGeo[bat.team], this.flagMat);
         m.castShadow = this.quality === 'high';
         this.scene.add(m);
         this.standards.set(bat.id, m);
@@ -1157,7 +1310,7 @@ export class ChargeView3D implements ChargeRenderer {
       if (!L) continue;
       let m = this.pennants.get(sq.id);
       if (!m) {
-        m = new THREE.Mesh(this.pennantGeo[sq.team], this.plainMat);
+        m = new THREE.Mesh(this.pennantGeo[sq.team], this.flagMat);
         m.castShadow = this.quality === 'high';
         this.scene.add(m);
         this.pennants.set(sq.id, m);
@@ -1267,9 +1420,17 @@ export class ChargeView3D implements ChargeRenderer {
           gl_FragColor = vec4(max(col, 0.0), c.a);
         }`,
     }));
+    // A soft glow on the brightest highlights (sunlit steel, sparks), at half resolution.
+    composer.addPass(new UnrealBloomPass(new THREE.Vector2(this.viewW / 2, this.viewH / 2), 0.22, 0.45, 0.88));
+    // Tilt-shift: sharp across the middle of the view, softly blurred toward the top and
+    // bottom edges — the battlefield reads like a diorama.
+    this.tiltH = new ShaderPass(HorizontalTiltShiftShader);
+    this.tiltV = new ShaderPass(VerticalTiltShiftShader);
+    for (const t of [this.tiltH, this.tiltV]) { t.uniforms.r.value = 0.5; composer.addPass(t); }
     composer.addPass(new OutputPass());
     composer.setPixelRatio(this.resScale);
     this.composer = composer;
+    this.updateTilt();
   }
 
   // --- Particles ---------------------------------------------------------------------------
@@ -1318,6 +1479,17 @@ export class ChargeView3D implements ChargeRenderer {
       const a = angle + (Math.random() - 0.5) * 1.4, sp = 1 + Math.random() * 3.5;
       this.add({ x, y: y0 + 0.9 + Math.random() * 0.6, z, vx: Math.cos(a) * sp, vy: 1 + Math.random() * 2, vz: Math.sin(a) * sp,
         age: 0, life: 0.5 + Math.random() * 0.3, size: 0.16 + Math.random() * 0.12, grow: 0, r: 0.45, g: 0.07, b: 0.05, a: 0.95, gravity: 14 });
+    }
+  }
+
+  /** Bright sparks where steel meets steel. */
+  private sparks(x: number, z: number, n: number): void {
+    const y0 = heightAt(x, z) + 1.1;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * 6.28, sp = 2 + Math.random() * 4;
+      this.add({ x, y: y0 + (Math.random() - 0.5) * 0.4, z, vx: Math.cos(a) * sp, vy: 1.5 + Math.random() * 2.5, vz: Math.sin(a) * sp,
+        age: 0, life: 0.18 + Math.random() * 0.18, size: 0.07 + Math.random() * 0.05, grow: -0.05,
+        r: 1.6, g: 1.25, b: 0.6, a: 1, gravity: 9 });
     }
   }
 

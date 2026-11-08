@@ -1,4 +1,9 @@
+/** How the cavalry mode draws units, ground and effects (prototype styles besides classic). */
+export type ArtStyle = 'classic' | 'mini' | 'ink' | 'rts';
+
 export interface Theme {
+  /** Cavalry-mode art style (default classic). */
+  artStyle?: ArtStyle;
   bg: number;
   grid: number;
   gridAlpha: number;
@@ -280,10 +285,48 @@ export const FIELD_THEME: Theme = {
   textOutline: 0x1c2412,
 };
 
-export type ThemeName = 'field' | 'parchment' | 'night';
+/** Prototype: painted tabletop miniatures on a felt table. */
+export const MINI_THEME: Theme = {
+  ...FIELD_THEME,
+  artStyle: 'mini',
+  blue: 0x2a5bc4, blueDark: 0x13306f, red: 0xc42a1f, redDark: 0x6a120c,
+  steel: 0xc8c8c4, steelDark: 0x55534e, wood: 0x9a7448, trim: 0xf4ecd6,
+  grassDark: 0x3d6230, grassLight: 0x5a8240, grassDry: 0x8e9450, dirt: 0xa88f60,
+  // No gore on the table: knocks chip paint and scuff the felt.
+  blueBlood: [0x3a3226, 0x5a4a36, 0x2a241c], redBlood: [0x3a3226, 0x5a4a36, 0x2a241c],
+  blueStain: 0x3a3424, redStain: 0x3a3424, bloodAlpha: 0.6, bloodFade: 0.3,
+};
+
+/** Prototype: ink and watercolour on paper. */
+export const INK_THEME: Theme = {
+  ...DAY_THEME,
+  artStyle: 'ink',
+  grass: true,
+  bg: 0xefe5ca,
+  blue: 0x2c5596, blueDark: 0x1a3460, red: 0xb03a2c, redDark: 0x6a1e16,
+  grassDark: 0xa9b783, grassLight: 0xd6d6a6, grassDry: 0xddcb9c, dirt: 0xb39a72,
+  obstacleFill: 0xb8ab90, wood: 0x6a5238, steel: 0x6a6660, steelDark: 0x2a2620, trim: 0xf6efdc,
+  blueBlood: [0xa8322a, 0x8a2a22, 0xc0453a], redBlood: [0xa8322a, 0x8a2a22, 0xc0453a],
+  blueStain: 0x8a2a22, redStain: 0x8a2a22, bloodAlpha: 0.55, bloodFade: 0.6,
+  textOutline: 0xefe5ca,
+};
+
+/** Prototype: classic painted-RTS look — vivid, chunky, sunlit. */
+export const RTS_THEME: Theme = {
+  ...FIELD_THEME,
+  artStyle: 'rts',
+  blue: 0x1f55e0, blueDark: 0x0d2a80, red: 0xd8261c, redDark: 0x7a0f0b,
+  steel: 0xd8d8de, steelDark: 0x55555e, wood: 0x9a6a38, leather: 0x7a5030, trim: 0xfff2c4,
+  grassDark: 0x3d7a22, grassLight: 0x86b84a, grassDry: 0xc0b25e, dirt: 0xa07848,
+};
+
+export type ThemeName = 'field' | 'parchment' | 'night' | 'mini' | 'ink' | 'rts';
 
 export const THEMES: Record<ThemeName, Theme> = {
   field: FIELD_THEME,
   parchment: DAY_THEME,
   night: NIGHT_THEME,
+  mini: MINI_THEME,
+  ink: INK_THEME,
+  rts: RTS_THEME,
 };

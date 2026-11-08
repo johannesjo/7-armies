@@ -98,18 +98,23 @@ export const LANES = {
   /** However high a commander's level, he is back in the saddle within this long (s). */
   RESPAWN_MAX: 28,
 
-  // --- Abilities ---
-  /** Charge!: the horn sounds — faster, harder-hitting and more terrifying for a few seconds. */
-  CHARGE_TIME: 5,
-  CHARGE_COOLDOWN: 26,
-  CHARGE_SPEED: 1.2,
-  CHARGE_IMPACT: 1.5,
-  CHARGE_SHOCK: 1.6,
-  /** Rally: our foot near the commander take heart (full morale) and fight harder for a while. */
-  RALLY_RADIUS: 320,
-  RALLY_TIME: 9,
-  RALLY_COOLDOWN: 40,
-  RALLY_MELEE: 1.6,
+  // --- Abilities: one per kind of horse ---
+  /** Knights' Thunder Charge: a few seconds of more speed, far heavier trampling and terror. */
+  THUNDER_TIME: 4,
+  THUNDER_COOLDOWN: 24,
+  THUNDER_SPEED: 1.25,
+  THUNDER_IMPACT: 2,
+  THUNDER_SHOCK: 2,
+  THUNDER_STRIKE: 1.6,
+  /** Hussars' Wheel: the squadron turns far tighter at full gallop for a few seconds. */
+  WHEEL_TIME: 4,
+  WHEEL_COOLDOWN: 18,
+  WHEEL_TURN: 2.2,
+  WHEEL_SPEED: 1.12,
+  /** Horse archers' Arrow Storm: every rider looses this many arrows at once, this far. */
+  STORM_ARROWS: 3,
+  STORM_RANGE: 320,
+  STORM_COOLDOWN: 16,
 
   // --- Horse archers ---
   HA_RANGE: 230,

@@ -196,29 +196,40 @@ describe('lanes commanders, abilities and fog', () => {
     expect(sim.rival.sq.riders[0].maxHp).toBeCloseTo(30 * k.hp);
   });
 
-  it('Charge! boosts the squadron for a few seconds, then cools down', () => {
-    const sim = new LaneSim({ seed: 2 });
-    const base = sim.mods(sim.player).speed;
-    expect(sim.useAbility('blue', 'charge')).toBe(true);
-    expect(sim.mods(sim.player).speed).toBeCloseTo(base * L.CHARGE_SPEED);
-    expect(sim.useAbility('blue', 'charge')).toBe(false);
-    for (let i = 0; i < 60 * (L.CHARGE_TIME + 0.2); i++) sim.step(1 / 60, NO_INPUT);
-    expect(sim.mods(sim.player).speed).toBeCloseTo(base);
-    expect(sim.cooldown('blue', 'charge')).toBeGreaterThan(0);
+  it('Thunder Charge boosts knights for a few seconds, then cools down', () => {
+    const sim = new LaneSim({ seed: 2, commander: 'knights' });
+    const base = sim.mods(sim.player);
+    const speed = base.speed, impact = base.impact;
+    expect(sim.useAbility('blue')).toBe(true);
+    expect(sim.mods(sim.player).speed).toBeCloseTo(speed * L.THUNDER_SPEED);
+    expect(sim.mods(sim.player).impact).toBeCloseTo(impact * L.THUNDER_IMPACT);
+    expect(sim.useAbility('blue')).toBe(false);
+    sim.step(1 / 60, NO_INPUT);
+    expect(sim.laneEvents.some(e => e.type === 'ability' && e.ability === 'thunder')).toBe(true);
+    for (let i = 0; i < 60 * (L.THUNDER_TIME + 0.2); i++) sim.step(1 / 60, NO_INPUT);
+    expect(sim.mods(sim.player).speed).toBeCloseTo(speed);
+    expect(sim.cooldown('blue')).toBeGreaterThan(0);
   });
 
-  it('Rally puts heart into our foot nearby', () => {
-    const sim = new LaneSim({ seed: 3 });
+  it('Wheel makes hussars turn far tighter', () => {
+    const sim = new LaneSim({ seed: 2, commander: 'hussars' });
+    const turn = sim.mods(sim.player).turn;
+    expect(sim.useAbility('blue')).toBe(true);
+    expect(sim.mods(sim.player).turn).toBeCloseTo(turn * L.WHEEL_TURN);
+  });
+
+  it('Arrow Storm needs foes in bowshot, then every rider looses at once', () => {
+    const sim = new LaneSim({ seed: 3, commander: 'archers' });
+    bench(sim, 'red');
+    expect(sim.useAbility('blue')).toBe(false); // nobody in range at the keep
     for (let i = 0; i < 70; i++) sim.step(1 / 60, NO_INPUT);
-    const b = sim.battalions.find(x => x.team === 'blue' && sim.laneEvents !== null && Math.abs(x.y - L.LANE_Y[1]) < 50)!;
-    teleport(sim, 'blue', b.x - 40, b.y);
-    b.morale = 30;
-    expect(sim.useAbility('blue', 'rally')).toBe(true);
-    expect(b.morale).toBe(100);
-    expect(sim.isRallied(b)).toBe(true);
-    // Used between steps (from the UI): its event arrives with the next step.
+    const foe = sim.battalions.find(x => x.team === 'red')!;
+    teleport(sim, 'blue', foe.x - 200, foe.y);
     sim.step(1 / 60, NO_INPUT);
-    expect(sim.laneEvents.some(e => e.type === 'ability' && e.ability === 'rally' && e.count >= 1)).toBe(true);
+    const before = sim.arrows.filter(a => a.team === 'blue').length;
+    expect(sim.useAbility('blue')).toBe(true);
+    const after = sim.arrows.filter(a => a.team === 'blue').length;
+    expect(after - before).toBe(sim.riders.length * L.STORM_ARROWS);
   });
 
   it('a card picked between steps is reported with the next step', () => {

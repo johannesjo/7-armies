@@ -26,28 +26,49 @@ export interface HeroMods extends RiderMods {
 /** What kind of horse a commander leads, chosen before the match. */
 export type CommanderKind = 'knights' | 'hussars' | 'archers';
 
+/** Each kind of horse has one ability of its own. */
+export type AbilityId = 'thunder' | 'wheel' | 'storm';
+
+export interface Ability {
+  id: AbilityId;
+  title: string;
+  icon: string;
+  text: string;
+  /** Seconds before it can be used again. */
+  cooldown: number;
+  /** Seconds it lasts (0 = instant). */
+  duration: number;
+}
+
+export const ABILITIES: Record<AbilityId, Ability> = {
+  thunder: { id: 'thunder', title: 'Thunder Charge', icon: '📯', text: '4 s: faster, trample twice as hard, terrify', cooldown: L.THUNDER_COOLDOWN, duration: L.THUNDER_TIME },
+  wheel: { id: 'wheel', title: 'Wheel', icon: '↻', text: '4 s: turn twice as tight at full gallop', cooldown: L.WHEEL_COOLDOWN, duration: L.WHEEL_TIME },
+  storm: { id: 'storm', title: 'Arrow Storm', icon: '🏹', text: `Every rider looses ${L.STORM_ARROWS} arrows at once`, cooldown: L.STORM_COOLDOWN, duration: 0 },
+};
+
 export interface Commander {
   kind: CommanderKind;
   title: string;
   text: string;
   icon: string;
+  ability: AbilityId;
   /** Strengths and weaknesses on top of the plain kit. */
   apply(m: HeroMods): void;
 }
 
 export const COMMANDERS: Record<CommanderKind, Commander> = {
   knights: {
-    kind: 'knights', title: 'Knights', icon: '🛡',
+    kind: 'knights', title: 'Knights', icon: '🛡', ability: 'thunder',
     text: 'Heavy horse: tough, hit hardest, win the joust. Fewer riders, a little slower.',
     apply: m => { m.maxRiders = 8; m.hp = 1.35; m.mass = 1.15; m.strike = 1.25; m.impact = 1.15; m.speed = 0.94; m.turn = 0.9; },
   },
   hussars: {
-    kind: 'hussars', title: 'Hussars', icon: '⚔',
+    kind: 'hussars', title: 'Hussars', icon: '⚔', ability: 'wheel',
     text: 'Light horse: fast and nimble, more riders. Lighter, so a frontal clash costs more.',
     apply: m => { m.maxRiders = 12; m.hp = 0.85; m.mass = 0.9; m.speed = 1.08; m.turn = 1.18; m.impact = 0.95; },
   },
   archers: {
-    kind: 'archers', title: 'Horse Archers', icon: '🏹',
+    kind: 'archers', title: 'Horse Archers', icon: '🏹', ability: 'storm',
     text: 'Shoot on the move at anything near. Weak in a charge — circle, don\'t crash.',
     apply: m => { m.maxRiders = 10; m.hp = 0.8; m.impact = 0.55; m.strike = 0.7; m.archery = 0.42; },
   },

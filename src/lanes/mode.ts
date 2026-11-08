@@ -5,9 +5,9 @@ import { CHARGE as C } from '../charge/config';
 import { ChargeSim, SimEvent } from '../charge/sim';
 import type { ChargeRenderer } from '../charge/view3d';
 import { LANES as L, xpToNext } from './config';
-import { CARDS, COMMANDERS, CommanderKind } from './cards';
+import { ABILITIES, CARDS, COMMANDERS, CommanderKind } from './cards';
 import { WOODS } from './map';
-import { AbilityId, LaneEvent, LaneSim } from './sim';
+import { LaneEvent, LaneSim } from './sim';
 import { LaneView } from './view';
 
 export interface LaneResult {
@@ -54,10 +54,8 @@ export class LaneMode extends ChargeMode {
   private readonly xpEl = $('ln-xp');
   private readonly rivalEl = $('ln-rival');
   private readonly respawnEl = $('ln-respawn');
-  private readonly abilityBtns: Record<AbilityId, HTMLButtonElement> = {
-    charge: $('ln-ab-charge') as HTMLButtonElement,
-    rally: $('ln-ab-rally') as HTMLButtonElement,
-  };
+  /** Your commander's one ability. */
+  private readonly abilityBtn = $('ln-ability') as HTMLButtonElement;
   /** The kind of horse you lead next match (set from the menu). */
   commander: CommanderKind = 'knights';
   /** Sim time each teaching hint last showed (so they don't nag). */
@@ -71,46 +69,52 @@ export class LaneMode extends ChargeMode {
     this.laneEnd = cb.onEnd;
     this.laneQuit = cb.onQuit;
     this.cardBtns.forEach((btn, i) => btn.addEventListener('click', () => this.pick(i)));
-    for (const id of ['charge', 'rally'] as const) {
-      // pointerdown, not click: a thumb on the stick shouldn't have to let go first.
-      this.abilityBtns[id].addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.ability(id); });
-      // Enter / Space and assistive tech send a click with no pointer behind it.
-      this.abilityBtns[id].addEventListener('click', e => { if (e.detail === 0) this.ability(id); });
-    }
+    // pointerdown, not click: a thumb on the stick shouldn't have to let go first.
+    this.abilityBtn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.ability(); });
+    // Enter / Space and assistive tech send a click with no pointer behind it.
+    this.abilityBtn.addEventListener('click', e => { if (e.detail === 0) this.ability(); });
     window.addEventListener('keydown', e => {
       if (!this.active || this.paused) return;
       const i = ['Digit1', 'Digit2', 'Digit3'].indexOf(e.code);
       if (i >= 0) { this.pick(i); e.preventDefault(); }
-      if (e.code === 'KeyQ') { this.ability('charge'); e.preventDefault(); }
-      if (e.code === 'KeyE') { this.ability('rally'); e.preventDefault(); }
+      if (e.code === 'KeyQ' || e.code === 'KeyE') { this.ability(); e.preventDefault(); }
     });
   }
 
-  private ability(id: AbilityId): void {
+  private ability(): void {
     const sim = this.lanes;
     if (!sim || this.endTimer >= 0 || this.paused) return;
-    if (!sim.useAbility('blue', id)) {
-      const btn = this.abilityBtns[id];
+    if (!sim.useAbility('blue')) {
+      const btn = this.abilityBtn;
       btn.classList.remove('denied');
       void btn.offsetWidth;
       btn.classList.add('denied');
+      // Arrow Storm needs someone in bowshot.
+      if (sim.me.ability === 'storm' && sim.cooldown('blue') <= 0 && !sim.me.dead) this.teach('storm', 'No enemy in bowshot — ride closer', 4);
     }
     this.updateAbilities();
+  }
+
+  /** Dress the button for this commander's ability. */
+  private setupAbility(): void {
+    const a = ABILITIES[COMMANDERS[this.commander].ability];
+    this.abilityBtn.querySelector('.ln-ab-icon')!.textContent = a.icon;
+    this.abilityBtn.querySelector('.ln-ab-name')!.textContent = a.title;
+    this.abilityBtn.title = `${a.title} (Q) — ${a.text}`;
+    this.abilityBtn.setAttribute('aria-label', `${a.title}: ${a.text}`);
   }
 
   private updateAbilities(): void {
     const sim = this.lanes;
     if (!sim) return;
-    const total: Record<AbilityId, number> = { charge: L.CHARGE_COOLDOWN, rally: L.RALLY_COOLDOWN };
-    for (const id of ['charge', 'rally'] as const) {
-      const btn = this.abilityBtns[id];
-      const cd = sim.me.dead ? total[id] : sim.cooldown('blue', id);
-      btn.style.setProperty('--cd', String(cd / total[id]));
-      btn.classList.toggle('ready', cd <= 0 && !sim.me.dead);
-      btn.classList.toggle('on', id === 'charge' && sim.charging('blue'));
-      const t = btn.querySelector('.ln-cd');
-      if (t) t.textContent = cd > 0 && !sim.me.dead ? String(Math.ceil(cd)) : '';
-    }
+    const a = ABILITIES[sim.me.ability];
+    const btn = this.abilityBtn;
+    const cd = sim.me.dead ? a.cooldown : sim.cooldown('blue');
+    btn.style.setProperty('--cd', String(cd / a.cooldown));
+    btn.classList.toggle('ready', cd <= 0 && !sim.me.dead);
+    btn.classList.toggle('on', sim.abilityActive('blue'));
+    const t = btn.querySelector('.ln-cd');
+    if (t) t.textContent = cd > 0 && !sim.me.dead ? String(Math.ceil(cd)) : '';
   }
 
   /** A short teaching banner, at most once every `gap` seconds of play. */
@@ -143,6 +147,9 @@ export class LaneMode extends ChargeMode {
 
   protected override intro(): void {
     this.shownHand = '';
+    this.setupAbility();
+    const a = ABILITIES[COMMANDERS[this.commander].ability];
+    setTimeout(() => { if (this.lanes && this.lanes.time < 20) this.teach('ability', `${a.icon} ${a.title} (Q / button): ${a.text}`, 999); }, 3200);
     this.updateAbilities();
     this.cardsEl.classList.remove('active');
     this.respawnEl.classList.remove('active');
@@ -200,7 +207,8 @@ export class LaneMode extends ChargeMode {
         this.hackedOnce = true;
         break;
       case 'ability':
-        if (e.team === 'red' && sim.visible('blue', e.x, e.y)) this.banner(e.ability === 'charge' ? 'The rival sounds the charge!' : 'The rival rallies his foot!', 1600, true);
+        if (e.team === 'blue') this.banner(`${ABILITIES[e.ability].icon} ${ABILITIES[e.ability].title}!`, 1300, true);
+        else if (sim.visible('blue', e.x, e.y)) this.banner(`Rival: ${ABILITIES[e.ability].title}!`, 1600, true);
         break;
     }
   }

@@ -6,6 +6,7 @@ import { Team } from '../types';
 import { LANES as L } from './config';
 import { WOODS } from './map';
 import { LaneEvent, LaneSim, Structure } from './sim';
+import { ABILITIES } from './cards';
 
 export const LANE_FIELD: FieldLayout = { w: L.WORLD_W, h: L.WORLD_H, woods: [...WOODS], battle: false, key: 'lanes' };
 
@@ -31,8 +32,6 @@ export class LaneView extends ChargeView {
   private readonly fogSprite: Sprite;
   private fogTimer = 0;
   private sim: LaneSim | null = null;
-  /** Rings spreading from a commander's rally. */
-  private rings: { x: number; y: number; age: number; life: number; r: number; color: number }[] = [];
 
   constructor(app: Application, theme: Theme) {
     super(app, theme, LANE_FIELD);
@@ -176,14 +175,11 @@ export class LaneView extends ChargeView {
       } else if (e.type === 'ability') {
         if (e.team !== 'blue' && this.hiddenAt(e.team, e.x, e.y)) continue;
         const color = e.team === 'blue' ? t.blue : t.red;
-        if (e.ability === 'charge') {
-          this.impacts.push({ x: e.x, y: e.y, angle: 0, age: 0, strength: 2.2, rear: false, pike: false });
-          this.burstDust(e.x, e.y, 0, 8);
-          this.popup(e.x, e.y - 26, e.team === 'blue' ? 'CHARGE!' : 'Their horn sounds!', e.team === 'blue' ? t.hpMid : t.labelWarn, 20, 1.3);
-        } else {
-          this.rings.push({ x: e.x, y: e.y, age: 0, life: 0.9, r: L.RALLY_RADIUS, color });
-          this.popup(e.x, e.y - 26, e.count > 0 ? `RALLY! (${e.count})` : 'Rally — no foot near', color, 18, 1.4);
-        }
+        const a = ABILITIES[e.ability];
+        const mine = e.team === 'blue';
+        this.burstDust(e.x, e.y, 0, e.ability === 'storm' ? 3 : 8);
+        if (e.ability === 'thunder') this.impacts.push({ x: e.x, y: e.y, angle: 0, age: 0, strength: 2.2, rear: false, pike: false });
+        this.popup(e.x, e.y - 26, `${a.title.toUpperCase()}!`, mine ? t.hpMid : t.labelWarn, 20, 1.3);
       } else if (e.type === 'tower-down') {
         this.impacts.push({ x: e.x, y: e.y, angle: 0, age: 0, strength: 3.4, rear: true, pike: false });
         for (let i = 0; i < 4; i++) this.burstDust(e.x + (this.rand() - 0.5) * 30, e.y + (this.rand() - 0.5) * 20, this.rand() * 6.28, 8);
@@ -339,22 +335,10 @@ export class LaneView extends ChargeView {
     const Ld = sim.leader;
     const vp = this.viewport;
 
-    // Rallies: a ring spreading over the foot that took heart; those battalions glow gold.
-    this.rings = this.rings.filter(r => (r.age += dt) < r.life);
-    for (const r of this.rings) {
-      const k = r.age / r.life;
-      g.circle(r.x, r.y, r.r * (0.3 + 0.7 * k)).stroke({ width: 3, color: r.color, alpha: 0.7 * (1 - k) });
-    }
-    for (const b of sim.battalions) {
-      if (b.routed || !sim.isRallied(b) || this.hiddenAt(b.team, b.x, b.y)) continue;
-      const rows = Math.ceil(b.grid.length / b.cols);
-      const rad = Math.max(b.cols, rows) * b.spacing * 0.62;
-      g.circle(b.x, b.y, rad).stroke({ width: 2, color: t.hpMid, alpha: 0.35 + 0.2 * Math.sin(sim.time * 6 + b.id) });
-    }
-    // The horn sounding: a gold halo round the commander's leader.
+    // An ability running: a gold halo round the commander's leader.
     for (const team of ['blue', 'red'] as const) {
       const HL = sim.heroes[team].sq.riders[0];
-      if (!HL || !sim.charging(team) || this.hiddenAt(team, HL.x, HL.y)) continue;
+      if (!HL || !sim.abilityActive(team) || this.hiddenAt(team, HL.x, HL.y)) continue;
       g.circle(HL.x, HL.y, 16 + 2 * Math.sin(sim.time * 14)).stroke({ width: 2.5, color: t.hpMid, alpha: 0.7 });
     }
     for (const st of sim.structures) {

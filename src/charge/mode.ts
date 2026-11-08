@@ -92,68 +92,74 @@ function hex(c: number): string {
 
 /** Owns the cavalry action mode: its own Pixi app, the simulation loop, HUD and controls. */
 export class ChargeMode {
-  private app: Application | null = null;
-  private appReady: Promise<void> | null = null;
-  private view: ChargeView | null = null;
-  private sim: ChargeSim | null = null;
-  private controls: ChargeControls;
-  private paused = false;
-  private endTimer = -1;
+  protected app: Application | null = null;
+  protected appReady: Promise<void> | null = null;
+  protected view: ChargeView | null = null;
+  protected sim: ChargeSim | null = null;
+  protected controls: ChargeControls;
+  protected paused = false;
+  protected endTimer = -1;
   /** Seconds since victory — the pursuit, when you ride down the fleeing army (-1 = not won yet). */
-  private pursuitTimer = -1;
+  protected pursuitTimer = -1;
   /** Your kill count and riders at the moment of victory. */
-  private pursuitKills = -1;
-  private victoryRiders = 0;
-  private readonly endBtn = $('ch-end-btn');
-  private hudTimer = 0;
-  private frameEvents: SimEvent[] = [];
-  private theme: Theme | null = null;
-  private lastRiders = -1;
-  private readonly path = new RiderPath();
-  private scheme: ControlScheme = readScheme();
+  protected pursuitKills = -1;
+  protected victoryRiders = 0;
+  protected readonly endBtn = $('ch-end-btn');
+  protected hudTimer = 0;
+  protected frameEvents: SimEvent[] = [];
+  protected theme: Theme | null = null;
+  protected lastRiders = -1;
+  protected readonly path = new RiderPath();
+  protected scheme: ControlScheme = readScheme();
   /** Pointer position (surface px) while held down in point-and-ride mode. */
-  private aim: Vec2 | null = null;
-  private readonly controlsBtn = $('ch-controls-btn');
-  private readonly joystick = new Joystick($('ch-joy-zone'), $('ch-joy'), $('ch-joy-knob'));
-  private readonly textBtn = $('ch-text-btn');
+  protected aim: Vec2 | null = null;
+  protected readonly controlsBtn = $('ch-controls-btn');
+  protected readonly joystick = new Joystick($('ch-joy-zone'), $('ch-joy'), $('ch-joy-knob'));
+  protected readonly textBtn = $('ch-text-btn');
   /** Floating combat text, combo counter and banners — off by default for a cleaner screen. */
-  private combatText = readFlag(TEXT_KEY, false);
-  private readonly pace = new StrokePace(800);
-  private movedOnce = false;
+  protected combatText = readFlag(TEXT_KEY, false);
+  protected readonly pace = new StrokePace(800);
+  protected movedOnce = false;
   /** How long you've been steering the squadron without a break (s); the help text goes at 0.5 s. */
-  private steeringFor = 0;
-  private bannerTimeout: ReturnType<typeof setTimeout> | null = null;
-  private hintTimeout: ReturnType<typeof setTimeout> | null = null;
-  private readonly onResize = () => this.resize();
+  protected steeringFor = 0;
+  protected bannerTimeout: ReturnType<typeof setTimeout> | null = null;
+  protected hintTimeout: ReturnType<typeof setTimeout> | null = null;
+  protected readonly onResize = () => this.resize();
 
-  private readonly screen = $('charge-screen');
-  private readonly host = $('charge-canvas');
-  private readonly ridersEl = $('ch-riders');
-  private readonly speedEl = $('ch-speed');
-  private readonly formEl = $('ch-form');
-  private readonly scoreEl = $('ch-score');
-  private readonly comboEl = $('ch-combo');
-  private readonly redBar = $('ch-red');
-  private readonly blueBar = $('ch-blue');
-  private readonly timeEl = $('ch-time');
-  private readonly bannerEl = $('ch-banner');
-  private readonly hintEl = $('ch-hint');
-  private readonly pauseEl = $('ch-pause');
-  private readonly damageEl = $('ch-damage');
-  private readonly minimap = $('ch-minimap') as HTMLCanvasElement;
-  private readonly muteBtn = $('ch-mute-btn');
-  private readonly audio = new ChargeAudio();
+  protected readonly screen = $('charge-screen');
+  protected readonly host = $('charge-canvas');
+  protected readonly ridersEl = $('ch-riders');
+  protected readonly speedEl = $('ch-speed');
+  protected readonly formEl = $('ch-form');
+  protected readonly scoreEl = $('ch-score');
+  protected readonly comboEl = $('ch-combo');
+  protected readonly redBar = $('ch-red');
+  protected readonly blueBar = $('ch-blue');
+  protected readonly timeEl = $('ch-time');
+  protected readonly bannerEl = $('ch-banner');
+  protected readonly hintEl = $('ch-hint');
+  protected readonly pauseEl = $('ch-pause');
+  protected readonly damageEl = $('ch-damage');
+  protected readonly minimap = $('ch-minimap') as HTMLCanvasElement;
+  protected readonly muteBtn = $('ch-mute-btn');
+  protected readonly audio = new ChargeAudio();
+
+  /** Sound is on or off for every mode alike. */
+  protected static muted = false;
 
   constructor(private readonly cb: { onEnd(result: ChargeResult): void; onQuit(): void }) {
     this.controls = new ChargeControls(this.host);
     this.controls.onInteract = () => this.audio.start();
+    // Each mode shares the screen's buttons: only the one running answers them.
     this.muteBtn.addEventListener('click', () => {
-      this.audio.muted = !this.audio.muted;
+      if (!this.active) return;
+      ChargeMode.muted = this.audio.muted = !this.audio.muted;
       this.audio.start();
       this.updateMuteBtn();
     });
     this.updateMuteBtn();
     this.controlsBtn.addEventListener('click', () => {
+      if (!this.active) return;
       this.scheme = SCHEME_ORDER[(SCHEME_ORDER.indexOf(this.scheme) + 1) % SCHEME_ORDER.length];
       try { localStorage.setItem(SCHEME_KEY, this.scheme); } catch { /* storage unavailable */ }
       this.path.clear();
@@ -162,6 +168,7 @@ export class ChargeMode {
     });
     this.applyScheme();
     this.textBtn.addEventListener('click', () => {
+      if (!this.active) return;
       this.combatText = !this.combatText;
       writeFlag(TEXT_KEY, this.combatText);
       this.view?.setCombatText(this.combatText);
@@ -173,14 +180,34 @@ export class ChargeMode {
     $('ch-pause-btn').addEventListener('click', () => this.togglePause());
     this.endBtn.addEventListener('click', () => { if (this.pursuitTimer >= 0) this.finish(); });
     $('ch-resume-btn').addEventListener('click', () => this.togglePause(false));
-    $('ch-quit-btn').addEventListener('click', () => this.cb.onQuit());
+    $('ch-quit-btn').addEventListener('click', () => { if (this.active) this.quit(); });
   }
 
   get active(): boolean {
     return this.sim !== null;
   }
 
-  private async ensureApp(): Promise<void> {
+  protected quit(): void {
+    this.cb.onQuit();
+  }
+
+  /** Which mode the shared screen is showing (styles pick the right HUD). */
+  protected readonly modeName: string = 'battle';
+
+  protected createSim(seed: number): ChargeSim {
+    return new ChargeSim(createBattleSpecs(), { seed, squads: createSquadSpecs() });
+  }
+
+  protected createView(app: Application, theme: Theme): ChargeView {
+    return new ChargeView(app, theme);
+  }
+
+  /** Called once a run is set up (banners, help). */
+  protected intro(): void {
+    this.banner('Break the enemy army!', 2600);
+  }
+
+  protected async ensureApp(): Promise<void> {
     if (this.appReady) return this.appReady;
     const app = new Application();
     this.appReady = app.init({
@@ -206,18 +233,25 @@ export class ChargeMode {
     await this.ensureApp();
     const app = this.app!;
     this.teardownRun();
+    // Each mode has its own canvas on the shared screen: show only the running one.
+    app.canvas.style.display = '';
 
     this.theme = theme;
-    this.sim = new ChargeSim(createBattleSpecs(), {
-      // Dev builds can pin the seed (window.chargeSeed) so recordings replay the same battle.
-      seed: import.meta.env.DEV && typeof (window as { chargeSeed?: number }).chargeSeed === 'number'
-        ? (window as { chargeSeed?: number }).chargeSeed! : (Math.random() * 1e9) | 0,
-      squads: createSquadSpecs(),
-    });
+    this.screen.dataset.mode = this.modeName;
+    // Settings may have been changed while another mode was running.
+    this.scheme = readScheme();
+    this.applyScheme();
+    this.combatText = readFlag(TEXT_KEY, false);
+    this.updateTextBtn();
+    this.audio.muted = ChargeMode.muted;
+    this.updateMuteBtn();
+    // Dev builds can pin the seed (window.chargeSeed) so recordings replay the same battle.
+    this.sim = this.createSim(import.meta.env.DEV && typeof (window as { chargeSeed?: number }).chargeSeed === 'number'
+      ? (window as { chargeSeed?: number }).chargeSeed! : (Math.random() * 1e9) | 0);
     // Dev builds expose the sim for scripted screenshots and debugging.
     if (import.meta.env.DEV) Object.assign(window, { chargeSim: this.sim, chargeMode: this });
     this.audio.start();
-    this.view = new ChargeView(app, theme);
+    this.view = this.createView(app, theme);
     this.view.setCombatText(this.combatText);
     app.resize();
     this.resize();
@@ -245,17 +279,18 @@ export class ChargeMode {
     this.hintEl.classList.add('active');
     if (this.hintTimeout) clearTimeout(this.hintTimeout);
     this.hintTimeout = setTimeout(() => this.hintEl.classList.remove('active'), 9000);
-    this.banner('Break the enemy army!', 2600);
+    this.intro();
     this.updateHud();
   }
 
   /** Stop the current run and hide the screen. */
   stop(): void {
     this.teardownRun();
+    if (this.app) this.app.canvas.style.display = 'none';
     this.screen.classList.remove('active');
   }
 
-  private teardownRun(): void {
+  protected teardownRun(): void {
     if (this.app) {
       this.app.ticker.remove(this.tick, this);
       this.app.stop();
@@ -283,7 +318,7 @@ export class ChargeMode {
   }
 
   /** Route drawing: mouse, pen or finger strokes become the squadron's path. */
-  private readonly strokes: StrokeHandler = {
+  protected readonly strokes: StrokeHandler = {
     strokeStart: (p: Vec2) => {
       const view = this.view;
       if (!view || !this.sim || this.paused || this.endTimer >= 0) return;
@@ -319,7 +354,7 @@ export class ChargeMode {
     },
   };
 
-  private noteMoved(): void {
+  protected noteMoved(): void {
     if (this.movedOnce) return;
     this.movedOnce = true;
     if (this.hintTimeout) clearTimeout(this.hintTimeout);
@@ -342,7 +377,7 @@ export class ChargeMode {
     app.renderer.render(app.stage);
   }
 
-  private stepInput(sim: ChargeSim): ChargeInput {
+  protected stepInput(sim: ChargeSim): ChargeInput {
     if (this.endTimer >= 0) return NO_INPUT;
     if (this.devInput) return this.devInput;
     const keys = this.controls.read();
@@ -379,58 +414,58 @@ export class ChargeMode {
   }
 
   /** Speed zones for point-and-ride, cached (reading layout sizes every step is costly). */
-  private cachedZones: ReturnType<typeof directZones> | null = null;
+  protected cachedZones: ReturnType<typeof directZones> | null = null;
 
-  private zones() {
+  protected zones() {
     return this.cachedZones ??= directZones(this.host.clientWidth, this.host.clientHeight);
   }
 
-  private updateTextBtn(): void {
+  protected updateTextBtn(): void {
     this.textBtn.textContent = `Combat text: ${this.combatText ? 'on' : 'off'}`;
     this.textBtn.setAttribute('aria-pressed', String(this.combatText));
   }
 
-  private applyScheme(): void {
+  protected applyScheme(): void {
     this.screen.dataset.controls = this.scheme;
     this.controlsBtn.textContent = `Controls: ${SCHEME_LABEL[this.scheme]}`;
     const next = SCHEME_ORDER[(SCHEME_ORDER.indexOf(this.scheme) + 1) % SCHEME_ORDER.length];
     this.controlsBtn.title = `Switch to ${SCHEME_LABEL[next]}`;
   }
 
-  private updateMuteBtn(): void {
+  protected updateMuteBtn(): void {
     const m = this.audio.muted;
     this.muteBtn.textContent = m ? '🔇' : '🔊';
     this.muteBtn.title = m ? 'Unmute sound' : 'Mute sound';
     this.muteBtn.setAttribute('aria-label', this.muteBtn.title);
   }
 
-  private resize(): void {
+  protected resize(): void {
     this.cachedZones = null;
     if (!this.app || !this.view) return;
     this.view.resize(this.host.clientWidth, this.host.clientHeight);
   }
 
   /** Real seconds of hit-stop left, and how slow the battle runs during it. */
-  private hitStop = 0;
-  private hitStopSlow = 1;
+  protected hitStop = 0;
+  protected hitStopSlow = 1;
 
   /**
    * The big moments land with weight: time briefly slows (hit-stop) when your charge
    * crashes home, longer when you break a squadron or cut down the general. Eases back
    * to full speed rather than snapping.
    */
-  private hitStopScale(rawDt: number): number {
+  protected hitStopScale(rawDt: number): number {
     if (this.hitStop <= 0) return 1;
     this.hitStop -= rawDt;
     const k = Math.min(1, Math.max(0, this.hitStop / 0.08));
     return 1 - (1 - this.hitStopSlow) * k;
   }
 
-  private triggerHitStop(seconds: number, slow: number): void {
+  protected triggerHitStop(seconds: number, slow: number): void {
     if (seconds > this.hitStop) { this.hitStop = seconds; this.hitStopSlow = slow; }
   }
 
-  private tick(ticker: Ticker): void {
+  protected tick(ticker: Ticker): void {
     const sim = this.sim, view = this.view;
     if (!sim || !view) return;
     // Game time always follows real time: a slow frame is caught up with extra
@@ -453,6 +488,7 @@ export class ChargeMode {
       if (Math.hypot(input.dirX, input.dirY) > 0.2) steering = true;
       sim.step(h, input);
       for (const e of sim.events) this.frameEvents.push(e);
+      this.afterStep(sim);
     }
     // Riding for real (steering, and the horses moving) for half a second: the help
     // text has done its job and gets out of the way.
@@ -475,7 +511,7 @@ export class ChargeMode {
       view.drawAim(null, null, this.zones());
       view.drawRoute(this.path.points, sim.leader, drawing);
     }
-    view.render(sim, this.frameEvents, dt);
+    this.renderFrame(sim, view, dt);
     this.screen.classList.toggle('drawing', drawing && this.scheme === 'route');
     this.handleHudEvents(this.frameEvents);
     const L = sim.leader;
@@ -489,6 +525,19 @@ export class ChargeMode {
       this.drawMinimap();
     }
 
+    this.checkEnd(sim, rawDt);
+  }
+
+  /** Draw the frame (the lanes mode adds its own events). */
+  protected renderFrame(sim: ChargeSim, view: ChargeView, dt: number): void {
+    view.render(sim, this.frameEvents, dt);
+  }
+
+  /** Called after every simulation step of a frame, for modes that collect more events. */
+  protected afterStep(_sim: ChargeSim): void { /* nothing more in the battle */ }
+
+  /** Victory leads into the pursuit; defeat ends the run after a moment. */
+  protected checkEnd(sim: ChargeSim, rawDt: number): void {
     if (sim.outcome === 'victory') {
       // The pursuit: no cut to the results — ride down the fleeing army for as long as
       // you like, until it has left the field or you end the battle.
@@ -518,7 +567,7 @@ export class ChargeMode {
     }
   }
 
-  private finish(): void {
+  protected finish(): void {
     const sim = this.sim!;
     this.endBtn.classList.remove('active');
     this.pursuitTimer = -1;
@@ -552,10 +601,11 @@ export class ChargeMode {
 
   // --- HUD -------------------------------------------------------------------------
 
-  private applyHudTheme(theme: Theme): void {
+  protected applyHudTheme(theme: Theme): void {
     this.screen.style.setProperty('--ch-blue', hex(theme.blue));
     this.screen.style.setProperty('--ch-blue-light', hex(mixColor(theme.blue, 0xffffff, 0.45)));
     this.screen.style.setProperty('--ch-red', hex(theme.red));
+    this.screen.style.setProperty('--ch-red-light', hex(mixColor(theme.red, 0xffffff, 0.45)));
     this.screen.style.setProperty('--ch-warn', hex(theme.labelWarn));
     this.screen.style.setProperty('--ch-good', hex(theme.elevationBonus));
     this.screen.style.setProperty('--ch-gallop', hex(theme.hpMid));
@@ -567,7 +617,7 @@ export class ChargeMode {
    * Show a banner. Most sit near the top, out of the way of the riding (just below
    * the help text while that's still up); `center` puts the big endings mid-screen.
    */
-  private banner(text: string, ms: number, force = false, center = false): void {
+  protected banner(text: string, ms: number, force = false, center = false): void {
     if (!this.combatText && !force) return;
     this.bannerEl.textContent = text;
     this.bannerEl.classList.toggle('center', center);
@@ -581,7 +631,7 @@ export class ChargeMode {
     this.bannerTimeout = setTimeout(() => this.bannerEl.classList.remove('active'), ms);
   }
 
-  private handleHudEvents(events: SimEvent[]): void {
+  protected handleHudEvents(events: SimEvent[]): void {
     let hurt = false;
     for (const e of events) {
       if (e.type === 'rider-hit' && e.mine) hurt = true;
@@ -625,7 +675,7 @@ export class ChargeMode {
     }
   }
 
-  private updateHud(): void {
+  protected updateHud(): void {
     const sim = this.sim;
     if (!sim) return;
     if (sim.riders.length !== this.lastRiders) {
@@ -654,7 +704,7 @@ export class ChargeMode {
     this.timeEl.textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
   }
 
-  private drawMinimap(): void {
+  protected drawMinimap(): void {
     const sim = this.sim, view = this.view, theme = this.theme;
     if (!sim || !view || !theme) return;
     const cv = this.minimap;

@@ -429,6 +429,115 @@
     body.day-mode #ch-pause { background: rgba(245,240,224,0.85); color: #443322; }
     body.day-mode #ch-pause button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
     body.day-mode #charge-btn { background: #ead2c4; color: #5a2222; border-color: #aa5544; }
+
+    /* Lanes mode (1v1): the same screen, its own HUD pieces */
+    #lanes-btn {
+      padding: 14px 36px;
+      font-size: 18px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      background: #2a344a;
+      color: #eee;
+      border: 2px solid #5a7ab0;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #lanes-btn:hover { background: #34405a; border-color: #7a9ad0; }
+    #lanes-btn small { display: block; font-size: 11px; letter-spacing: 1px; text-transform: none; font-weight: normal; opacity: 0.75; margin-top: 4px; }
+    body.day-mode #lanes-btn { background: #d4dcea; color: #22324a; border-color: #5a7ab0; }
+    #charge-screen[data-mode="lanes"] .ch-only,
+    #charge-screen:not([data-mode="lanes"]) .ln-only { display: none !important; }
+    #ln-level { font-size: 20px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    #ln-xp { background: var(--ch-gallop, #e6b03a); }
+    #ln-xp-bar { width: 100px; margin: 3px auto 2px; }
+    #ln-rival { font-size: 12px; font-weight: 700; color: var(--ch-red-light, #ff8a8a); }
+    body.day-mode #ln-rival { color: var(--ch-red); }
+    #ln-respawn {
+      position: absolute;
+      top: 42%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 12px 22px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.55);
+      color: #f6f0dc;
+      font-size: clamp(16px, 3vw, 26px);
+      font-weight: 800;
+      letter-spacing: 1px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    #ln-respawn.active { opacity: 1; }
+    #ln-cards {
+      position: absolute;
+      left: 50%;
+      bottom: max(12px, env(safe-area-inset-bottom, 0px));
+      transform: translate(-50%, 20px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      max-width: calc(100% - 460px);
+      min-width: 300px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s, transform 0.2s;
+    }
+    #ln-cards.active { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+    #ln-cards-title {
+      font-size: 12px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
+      color: #f6f0dc; text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    }
+    #ln-cards .ln-row { display: flex; gap: 8px; width: 100%; justify-content: center; }
+    #ln-cards .ln-card {
+      position: relative;
+      flex: 1 1 0;
+      max-width: 170px;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      padding: 8px 8px 9px;
+      border-radius: 8px;
+      border: 1px solid rgba(232, 214, 170, 0.45);
+      background: linear-gradient(180deg, rgba(58, 44, 24, 0.92), rgba(30, 22, 12, 0.92));
+      color: #f4ead2;
+      font: inherit;
+      font-size: 12px;
+      line-height: 1.25;
+      text-align: center;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+    }
+    #ln-cards .ln-card:hover { border-color: #e6b03a; transform: translateY(-2px); }
+    #ln-cards .ln-card b { font-size: 13px; letter-spacing: 0.5px; }
+    #ln-cards .ln-icon { font-size: 22px; line-height: 1.1; }
+    #ln-cards .ln-text { opacity: 0.8; font-size: 11px; }
+    #ln-cards .ln-key {
+      position: absolute; top: 4px; left: 6px; font-size: 10px; opacity: 0.55;
+      border: 1px solid rgba(255,255,255,0.35); border-radius: 3px; padding: 0 4px;
+    }
+    #ln-cards .ln-taken { position: absolute; top: 4px; right: 6px; font-size: 10px; color: #e6b03a; }
+    @media (pointer: coarse) { #ln-cards .ln-key { display: none; } }
+    @media (max-width: 700px), (max-height: 500px) {
+      #ln-cards { max-width: calc(100% - 300px); min-width: 260px; }
+      #ln-cards .ln-card { padding: 6px 5px 7px; font-size: 11px; }
+      #ln-cards .ln-card b { font-size: 11px; }
+      #ln-cards .ln-text { font-size: 10px; }
+      #ln-cards .ln-icon { font-size: 17px; }
+      #ln-level { font-size: 16px; }
+      #ln-xp-bar { width: 80px; }
+    }
+    #charge-screen[data-mode="lanes"][data-controls="joystick"] #ln-cards { max-width: calc(100% - 2 * 236px); }
+    /* The lanes HUD's right panel has an extra line: the buttons sit lower. */
+    #charge-screen[data-mode="lanes"] #ch-buttons { top: calc(92px + env(safe-area-inset-top, 0px)); }
+    body.style-rts #charge-screen[data-mode="lanes"] #ch-buttons { top: calc(76px + env(safe-area-inset-top, 0px)); }
+    @media (max-width: 700px) {
+      #charge-screen[data-mode="lanes"] #ch-buttons { top: calc(100px + env(safe-area-inset-top, 0px)); }
+    }
   </style>
 </head>
 <body>
@@ -437,6 +546,7 @@
     <p>Lead a cavalry squadron through a raging battle. Ride into their flanks and rear, break their morale, and cut down their general.</p>
     <div class="btn-row" style="display:flex;flex-direction:column;align-items:center;gap:12px">
       <button id="charge-btn">Ride</button>
+      <button id="lanes-btn">Lanes<small>1v1 against a rival commander: push three lanes, break their keep</small></button>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
       <label style="display:flex;align-items:center;gap:8px;font-size:14px;opacity:0.8;cursor:pointer">
@@ -466,18 +576,30 @@
         <div class="ch-bar"><div id="ch-form"></div></div>
       </div>
       <div class="ch-center">
-        <div id="ch-score">0</div>
-        <div id="ch-combo"></div>
+        <div id="ch-score" class="ch-only">0</div>
+        <div id="ch-combo" class="ch-only"></div>
+        <div id="ln-level" class="ln-only">Level 1</div>
+        <div id="ln-xp-bar" class="ch-bar ln-only"><div id="ln-xp"></div></div>
         <div id="ch-time">0:00</div>
       </div>
       <div class="ch-col right">
-        <span class="ch-label">Enemy morale</span>
+        <span id="ln-rival" class="ln-only">Rival Lv 1</span>
+        <span class="ch-label"><span class="ch-only">Enemy morale</span><span class="ln-only">Their keep</span></span>
         <div class="ch-bar"><div id="ch-red"></div></div>
-        <span class="ch-label">Our morale</span>
+        <span class="ch-label"><span class="ch-only">Our morale</span><span class="ln-only">Our keep</span></span>
         <div class="ch-bar"><div id="ch-blue"></div></div>
       </div>
     </div>
     <canvas id="ch-minimap" aria-hidden="true"></canvas>
+    <div id="ln-respawn" class="ln-only" aria-live="polite"></div>
+    <div id="ln-cards" class="ln-only" role="group" aria-label="Level up: choose a card">
+      <div id="ln-cards-title">Choose a card</div>
+      <div class="ln-row">
+        <button class="ln-card" type="button"></button>
+        <button class="ln-card" type="button"></button>
+        <button class="ln-card" type="button"></button>
+      </div>
+    </div>
     <div id="ch-banner" aria-live="polite"></div>
     <button id="ch-end-btn" type="button">End battle ▸</button>
     <div id="ch-hint">
@@ -485,7 +607,8 @@
       <span class="ctl-direct"><b>Point where to ride</b> — keep <span class="touch-only">your finger</span><span class="mouse-only">the mouse button held</span> on the field and your squadron rides toward it. Closer = slower, further = faster, far out = <b>gallop</b>.<br></span>
       <span class="ctl-route"><b>Draw your route</b> — <span class="mouse-only">drag with the mouse</span><span class="touch-only">drag your finger</span> and your squadron rides it.<br>
       <span class="legend canter"></span> draw slowly to canter · <span class="legend gallop"></span> flick quickly to gallop<br></span>
-      <span class="hint-more">Hit flanks <b>×2</b> and rears <b>×3</b> — <b>glowing edges</b> show an open side · dodge the red circles · ride into <b>allied troops</b> to take command of them<br>
+      <span class="hint-more ln-only">Ride with your <b>foot</b> down the lanes: break their battalions, then help your foot pull down the <b>towers</b> — alone, the walls shrug you off. Stay out of an enemy tower's <b>red ring</b> unless it has your foot to shoot at. Ride home to the keep to <b>heal and remount</b>. Each level, <b>choose a card</b>. Break their <b>keep</b> to win.<br></span>
+      <span class="hint-more ch-only">Hit flanks <b>×2</b> and rears <b>×3</b> — <b>glowing edges</b> show an open side · dodge the red circles · ride into <b>allied troops</b> to take command of them<br>
       Break the enemy's <b>morale</b> and their whole army flees · cut down their <b>general</b> (gold on the map) to shake it</span>
       <span class="mouse-only"><br>Keyboard reins: <kbd>W</kbd> ride on · <kbd>A</kbd>/<kbd>D</kbd> turn · <kbd>S</kbd> rein in · <kbd>Space</kbd> gallop</span>
     </div>
@@ -497,6 +620,7 @@
     </div>
     <div id="ch-pause" role="dialog" aria-modal="true" aria-label="Paused">
       <h2>Paused</h2>
+      <p class="ch-help ln-only">Lanes: one commander a side. Waves of foot march down all three lanes every 30 seconds. Charge enemy battalions in the flank (×2) or rear (×3) to break them, and help your own foot pull down the enemy towers — outer, then inner, then the keep. Towers shoot your foot first, but they turn on you if you ride in alone or attack their commander under the walls: dodge the red circles. Ride home into the ring round your keep to heal and to fill your squadron back up. Every enemy that falls near you gives experience; each level, choose one of three cards (keys 1–3). Lose all your riders and you're out until you can ride again. Break their keep to win.</p>
       <p class="ch-help"><span class="ctl-joystick">Steer with the stick at the bottom right — push further to ride faster, into the outer ring to gallop.</span><span class="ctl-direct">Hold your finger or the mouse button where you want to ride — the further from your squadron, the faster it goes, and far out it gallops.</span><span class="ctl-route">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it.</span> Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Wheel wide: on a sharp turn the riders on the outside of your wedge fall behind, and a loose wedge loses to a tight one. Hit enemy horsemen in the flank or rear to scatter them — or lead pursuing knights onto our pikes and archers. Pikes facing you will stop a charge, and enemy knights will hunt you. Keep moving — riders that stall in the crowd get pulled down. Ride into allied cavalry troops to take them under your command (up to 45 riders, a full wedge); the two blue camps behind our wings are pit stops — ride through one and its waiting riders fall in behind you, and your wounded are healed at once. The longer you stay away, the more riders gather there. A full gallop hits hardest but turns wide; slow down to turn tight.</p>
       <button id="ch-resume-btn">Resume</button>
       <button id="ch-controls-btn">Controls: point &amp; ride</button>

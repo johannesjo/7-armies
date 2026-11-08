@@ -1,10 +1,12 @@
 import { THEMES, Theme, ThemeName } from './theme';
 import { ChargeMode, ChargeResult } from './charge/mode';
+import { LaneMode, LaneResult } from './lanes/mode';
 
 // DOM elements
 const promptScreen = document.getElementById('prompt-screen')!;
 const resultScreen = document.getElementById('result-screen')!;
 const chargeBtn = document.getElementById('charge-btn')!;
+const lanesBtn = document.getElementById('lanes-btn')!;
 
 const winnerTextEl = document.getElementById('winner-text')!;
 const resultStatsEl = document.getElementById('result-stats')!;
@@ -41,6 +43,9 @@ function applyBodyTheme(): void {
 
 let gameFailed = false;
 let chargeMode: ChargeMode | null = null;
+let laneMode: LaneMode | null = null;
+/** The mode the result screen's "ride again" restarts. */
+let lastMode: 'charge' | 'lanes' = 'charge';
 
 function showScreen(screen: 'prompt' | 'charge' | 'result') {
   promptScreen.classList.toggle('active', screen === 'prompt');
@@ -62,12 +67,14 @@ function showGameError(): void {
   reloadBtn.focus();
 
   chargeMode?.stop();
+  laneMode?.stop();
 }
 
 function returnToMenu(): void {
   chargeMode?.stop();
+  laneMode?.stop();
   showScreen('prompt');
-  chargeBtn.focus();
+  (lastMode === 'lanes' ? lanesBtn : chargeBtn).focus();
 }
 
 function onChargeEnd(result: ChargeResult): void {
@@ -92,8 +99,39 @@ function onChargeEnd(result: ChargeResult): void {
   rematchBtn.focus();
 }
 
+function onLanesEnd(result: LaneResult): void {
+  if (gameFailed) return;
+  const won = result.outcome === 'victory';
+  winnerTextEl.innerHTML = `${won ? 'Victory!' : 'Defeat'}<br><span style="font-size:0.4em;opacity:0.7;letter-spacing:1px">${result.reason}</span>`;
+  winnerTextEl.style.color = teamCss(won ? 'blue' : 'red');
+  const mins = Math.floor(result.time / 60);
+  const secs = String(Math.floor(result.time % 60)).padStart(2, '0');
+  resultStatsEl.innerHTML = [
+    `<b style="font-size:1.4em">Level ${result.level}</b> · rival level ${result.rivalLevel}`,
+    `Enemy towers destroyed: ${result.towers}`,
+    `Rival commander slain: ${result.heroKills} · your squadron lost: ${result.deaths}`,
+    `Enemies ridden down: ${result.kills}`,
+    ...(result.cards.length > 0 ? [`<span style="font-size:0.85em;opacity:0.8">Cards: ${result.cards.join(', ')}</span>`] : []),
+    `Time: ${mins}:${secs}`,
+  ].join('<br>');
+  showScreen('result');
+  rematchBtn.focus();
+}
+
+async function startLanes(): Promise<void> {
+  if (gameFailed) return;
+  lastMode = 'lanes';
+  chargeMode?.stop();
+  applyBodyTheme();
+  showScreen('charge');
+  laneMode ??= new LaneMode({ onEnd: onLanesEnd, onQuit: returnToMenu });
+  await laneMode.start(currentTheme());
+}
+
 async function startCharge(): Promise<void> {
   if (gameFailed) return;
+  lastMode = 'charge';
+  laneMode?.stop();
   applyBodyTheme();
   showScreen('charge');
   chargeMode ??= new ChargeMode({
@@ -112,7 +150,8 @@ window.addEventListener('error', showGameError);
 window.addEventListener('unhandledrejection', showGameError);
 reloadBtn.addEventListener('click', () => window.location.reload());
 chargeBtn.addEventListener('click', startCharge);
-rematchBtn.addEventListener('click', startCharge);
+lanesBtn.addEventListener('click', startLanes);
+rematchBtn.addEventListener('click', () => (lastMode === 'lanes' ? startLanes() : startCharge()));
 newBattleBtn.addEventListener('click', returnToMenu);
 
 applyBodyTheme();

@@ -207,11 +207,13 @@ export class ChargeMode {
 
     this.theme = theme;
     this.sim = new ChargeSim(createBattleSpecs(), {
-      seed: (Math.random() * 1e9) | 0,
+      // Dev builds can pin the seed (window.chargeSeed) so recordings replay the same battle.
+      seed: import.meta.env.DEV && typeof (window as { chargeSeed?: number }).chargeSeed === 'number'
+        ? (window as { chargeSeed?: number }).chargeSeed! : (Math.random() * 1e9) | 0,
       squads: createSquadSpecs(),
     });
     // Dev builds expose the sim for scripted screenshots and debugging.
-    if (import.meta.env.DEV) (window as unknown as { chargeSim?: ChargeSim }).chargeSim = this.sim;
+    if (import.meta.env.DEV) Object.assign(window, { chargeSim: this.sim, chargeMode: this });
     this.audio.start();
     this.view = new ChargeView(app, theme);
     this.view.setCombatText(this.combatText);
@@ -322,8 +324,24 @@ export class ChargeMode {
   }
 
   /** Input for one simulation step: keyboard overrides the drawn route. */
+  /** Dev builds: scripted input for recordings (overrides the player's controls). */
+  devInput: ChargeInput | null = null;
+
+  /**
+   * Dev builds: stop the real-time loop and advance exactly `dt` per call, rendering
+   * each frame — for deterministic recordings regardless of how slow the machine is.
+   */
+  devFrame(dt: number): void {
+    const app = this.app;
+    if (!app) return;
+    app.ticker.stop();
+    this.tick({ deltaMS: dt * 1000 } as Ticker);
+    app.renderer.render(app.stage);
+  }
+
   private stepInput(sim: ChargeSim): ChargeInput {
     if (this.endTimer >= 0) return NO_INPUT;
+    if (this.devInput) return this.devInput;
     const keys = this.controls.read();
     const L = sim.leader;
     // Keyboard reins steer relative to the horses and override the pointer.

@@ -4,6 +4,7 @@ import { Team, UnitType, Vec2 } from '../types';
 import { Theme } from '../theme';
 import { drawUnitArt, HORSE_VARIANTS, attackPose, attackDuration } from '../unit-art';
 import { CHARGE as C } from './config';
+import { ArtStyle, drawStyledUnit, paintFeltTile, paintPaperTile } from './art-styles';
 import { Battalion, ChargeSim, SimEvent, Soldier, Squadron, angleDiff, attackSide, mulberry32 } from './sim';
 import { PathPoint } from './path';
 import { DirectZones } from './direct';
@@ -18,6 +19,10 @@ interface UnitGfx {
   aimRot: number;
   /** Frame on which this unit was last seen alive (avoids a Set per frame). */
   stamp: number;
+  /** Last position and gait phase (advances with distance travelled), for walk/gallop motion. */
+  px: number;
+  py: number;
+  phase: number;
 }
 
 interface Dying {
@@ -166,11 +171,16 @@ export class ChargeView {
   private hoofTimer = 0;
   private readonly rand = mulberry32(99);
 
+  private readonly style: ArtStyle;
+
   constructor(private readonly app: Application, private readonly theme: Theme) {
+    this.style = theme.artStyle ?? 'classic';
     this.ink = theme.labelFill;
     this.dust = theme.grass ? mixColor(theme.dirt, theme.trim, 0.45) : mixColor(theme.bg, theme.obstacleBorder, 0.35);
     // Beyond the field: forest floor on grass, a darker margin otherwise.
-    app.renderer.background.color = theme.grass ? 0x33441f : mixColor(theme.bg, this.ink, 0.18);
+    app.renderer.background.color = this.style === 'mini' ? 0x4e3420 // the wooden table under the felt
+      : this.style === 'ink' ? 0xd6c7a2
+      : theme.grass ? 0x33441f : mixColor(theme.bg, this.ink, 0.18);
 
     this.stainRT = RenderTexture.create({ width: C.WORLD_W, height: C.WORLD_H, resolution: 1.25 });
     this.bakeRoot.addChild(this.stainBatch);
@@ -208,7 +218,9 @@ export class ChargeView {
     let zoom = long / 740;
     // Phones: frame ~260 world units across the short side so units aren't tiny.
     if (short < 600) zoom = Math.max(zoom, short / 260);
-    return Math.max(0.8, Math.min(3, zoom));
+    // Dev builds: window.chargeZoom scales the camera (for close-up recordings).
+    const devZoom = import.meta.env.DEV ? (window as { chargeZoom?: number }).chargeZoom ?? 1 : 1;
+    return Math.max(0.8, Math.min(3, zoom)) * devZoom;
   }
 
   /** Snap the camera to the squadron (on start). */
@@ -353,18 +365,57 @@ export class ChargeView {
     const t = this.theme;
     const rand = mulberry32(4321);
     // The grass tile and its texture live for the whole session (shared by every battle).
-    const grass = new TilingSprite({ texture: sharedTexture(paintGrassTile(t, 768, 3)), width: C.WORLD_W, height: C.WORLD_H });
-    grass.tileScale.set(0.5);
+    const tile = this.style === 'mini' ? paintFeltTile(t) : this.style === 'ink' ? paintPaperTile(t) : paintGrassTile(t, 768, 3);
+    const grass = new TilingSprite({ texture: sharedTexture(tile), width: C.WORLD_W, height: C.WORLD_H });
+    grass.tileScale.set(this.style === 'mini' || this.style === 'ink' ? 0.75 : 0.5);
     const overlay = new Sprite(sharedTexture(paintGroundOverlay(C.WORLD_W, C.WORLD_H, t, this.earthAt, 4, 11, 'charge')));
     overlay.width = C.WORLD_W;
     overlay.height = C.WORLD_H;
+    if (this.style === 'ink') overlay.alpha = 0.6; // pale washes over the paper
     this.world.addChild(grass, overlay);
+    if (this.style === 'mini') {
+      // Scatter-flock patches, the way terrain is dressed on a wargames table.
+      const flock = new Graphics();
+      const fr = mulberry32(77);
+      const tones = [t.grassLight, t.grassDry, mixColor(t.grassDark, 0x1a2a10, 0.4), t.dirt];
+      for (let i = 0; i < 420; i++) {
+        const x = fr() * C.WORLD_W, y = fr() * C.WORLD_H;
+        const color = tones[Math.floor(fr() * tones.length)];
+        const spread = 8 + fr() * 22;
+        // A patch is a drift of fine grains, denser in the middle.
+        for (let k = 0; k < 40; k++) {
+          const a = fr() * Math.PI * 2, d = Math.pow(fr(), 1.6) * spread;
+          flock.circle(x + Math.cos(a) * d * 1.4, y + Math.sin(a) * d, 0.5 + fr() * 1.1)
+            .fill({ color, alpha: 0.35 + fr() * 0.3 });
+        }
+      }
+      this.world.addChild(flock);
+      // The felt's cut edge, with the table showing beyond.
+      const edge = new Graphics();
+      edge.rect(-6, -6, C.WORLD_W + 12, C.WORLD_H + 12).stroke({ width: 10, color: 0x000000, alpha: 0.25 });
+      this.world.addChild(edge);
+    }
 
     // Scenery as sprites baked from a handful of drawings.
     const deco = new Container();
     this.world.addChild(deco);
     const keep = (b: { tex: Texture; ax: number; ay: number }) => { this.ownedTextures.push(b.tex); return b; };
-    const treeTex = [0, 1, 2].map(v => keep(this.bake(g => {
+    const INK = 0x2a2018;
+    const inkTree = (v: number, r: number) => keep(this.bake(g => {
+      g.circle(r * 0.12, r * 0.1, r).fill({ color: t.grassDark, alpha: 0.55 });
+      g.circle(-r * 0.15, -r * 0.15, r * 0.7).fill({ color: t.grassLight, alpha: 0.4 });
+      const r2 = mulberry32(31 + v);
+      for (let i = 0; i < 7; i++) {
+        const a0 = (i / 7) * Math.PI * 2 + r2() * 0.3, a1 = a0 + 0.7 + r2() * 0.3;
+        const rr = r * (0.85 + r2() * 0.2);
+        g.moveTo(Math.cos(a0) * rr, Math.sin(a0) * rr).arc(0, 0, rr, a0, a1).stroke({ width: 1.1, color: INK, alpha: 0.75 });
+      }
+      for (let i = 0; i < 5; i++) {
+        const o = r * (0.15 + i * 0.13);
+        g.moveTo(o, r * 0.55).lineTo(r * 0.55, o).stroke({ width: 0.7, color: INK, alpha: 0.45 });
+      }
+    }, 2));
+    const treeTex = this.style === 'ink' ? [0, 1, 2].map(v => inkTree(v, 24)) : [0, 1, 2].map(v => keep(this.bake(g => {
       const r = 26;
       g.circle(r * 0.28, r * 0.34, r).fill({ color: 0x000000, alpha: 0.28 });
       const lobes = 6 + v;
@@ -375,7 +426,7 @@ export class ChargeView {
       g.circle(-r * 0.12, -r * 0.12, r * 0.62).fill(mixColor(t.grassDark, 0x1c2a10, 0.15));
       g.circle(-r * 0.32, -r * 0.34, r * 0.3).fill({ color: t.grassLight, alpha: 0.32 });
     }, 2)));
-    const bushTex = [0, 1, 2].map(v => keep(this.bake(g => {
+    const bushTex = this.style === 'ink' ? [0, 1, 2].map(v => inkTree(v + 5, 8)) : [0, 1, 2].map(v => keep(this.bake(g => {
       const r = 8;
       g.ellipse(r * 0.3, r * 0.4, r * 1.3, r * 0.9).fill({ color: 0x000000, alpha: 0.25 });
       for (let i = 0; i < 4 + v; i++) {
@@ -404,9 +455,9 @@ export class ChargeView {
       deco.addChild(sp);
     };
 
-    // Forest beyond the field edge.
+    // Forest beyond the field edge (on the table: just the felt's edge).
     const band = 170;
-    for (let i = 0; i < 300; i++) {
+    for (let i = 0; i < (this.style === 'mini' ? 0 : 300); i++) {
       const side = Math.floor(rand() * 4);
       const along = rand();
       const depth = 14 + rand() * band;
@@ -426,7 +477,7 @@ export class ChargeView {
       const x = rand() * C.WORLD_W, y = rand() * C.WORLD_H;
       place(stoneTex[Math.floor(rand() * stoneTex.length)], x, y, 0.7 + rand() * 0.6);
     }
-    for (let i = 0; i < 170; i++) {
+    for (let i = 0; i < (this.style === 'classic' || this.style === 'rts' ? 170 : 0); i++) {
       const x = rand() * C.WORLD_W, y = rand() * C.WORLD_H;
       if (this.earthAt(x, y) > 0.3) continue;
       place(flowerTex[Math.floor(rand() * flowerTex.length)], x, y, 0.8 + rand() * 0.5);
@@ -558,9 +609,9 @@ export class ChargeView {
     if (!t) {
       // Body and weapon are baked separately so the weapon can still swing and thrust.
       const scratch = new Graphics();
-      const body = this.bake(g => drawUnitArt(g, scratch, type, team, r, this.theme, variant));
+      const body = this.bake(g => drawStyledUnit(this.style, g, scratch, type, team, r, this.theme, variant));
       scratch.clear();
-      const weapon = this.bake(g => drawUnitArt(scratch, g, type, team, r, this.theme, variant));
+      const weapon = this.bake(g => drawStyledUnit(this.style, scratch, g, type, team, r, this.theme, variant));
       scratch.destroy();
       t = { body: body.tex, weapon: weapon.tex, bx: body.ax, by: body.ay, wx: weapon.ax, wy: weapon.ay };
       this.unitTextures.set(key, t);
@@ -579,7 +630,7 @@ export class ChargeView {
     weapon.anchor.set(t.wx, t.wy);
     root.addChild(body, weapon);
     this.unitLayer.addChild(root);
-    u = { root, body, weapon, pulse: 0, fleeing: false, aimRot: 0, stamp: this.unitStamp };
+    u = { root, body, weapon, pulse: 0, fleeing: false, aimRot: 0, stamp: this.unitStamp, px: s.x, py: s.y, phase: (s.id * 1.7) % 6.28 };
     this.units.set(s.id, u);
     return u;
   }
@@ -592,6 +643,15 @@ export class ChargeView {
     const body = root.children[0] as Sprite | undefined;
     const weapon = root.children[1] as Sprite | undefined;
     if (body) body.tint = 0x8c8c8c;
+    if (this.style === 'mini') {
+      // A toppled miniature: knocked flat on its side, paint intact.
+      root.alpha = 1;
+      root.scale.set(1, 0.62);
+      if (body) body.tint = 0xd6d6d6;
+    } else if (this.style === 'ink') {
+      root.alpha = 0.55;
+      if (body) body.tint = 0xffffff;
+    }
     if (weapon) {
       weapon.visible = true;
       weapon.tint = 0x9a9a9a;
@@ -834,6 +894,7 @@ export class ChargeView {
         scale *= 1 + 0.06 * Math.sin(sim.time * 18 + s.id);
       }
       if (down) { sx *= 1.12; sy *= 0.7; }
+      if (this.style !== 'classic') ({ scale, sx, sy } = this.styleMotion(u, s, sim.time, dt, scale, sx, sy, down));
       u.root.scale.set(scale * sx, scale * sy);
     }
     for (const [id, u] of this.units) {
@@ -863,6 +924,59 @@ export class ChargeView {
       d.root.alpha = 1;
       return true;
     });
+  }
+
+  /**
+   * Motion that sells each prototype style: toy hops and rocking-horse gallops for
+   * miniatures, hand-drawn line boil for ink, sprite bobbing for the painted RTS look.
+   */
+  private styleMotion(u: UnitGfx, s: Soldier, time: number, dt: number, scale: number, sx: number, sy: number, down: boolean) {
+    const dist = Math.hypot(s.x - u.px, s.y - u.py);
+    u.px = s.x;
+    u.py = s.y;
+    const speed = dt > 0 ? dist / dt : 0;
+    u.phase += Math.min(dist, 12) * (s.rider ? 0.32 : 0.75);
+    const moving = speed > 6 && !down;
+    if (this.style === 'mini') {
+      if (down) {
+        // Knocked flat: the figure lies on its side, base and all.
+        u.root.rotation += (s.id % 2 === 0 ? 0.25 : -0.25);
+        sy *= 0.8;
+      } else if (s.rider) {
+        // Rocking horse: pitch fore and aft (seen from above it lengthens and shortens)
+        // and a lift on every stride.
+        const rock = Math.sin(u.phase);
+        const k = Math.min(1, speed / C.CANTER_SPEED);
+        sx *= 1 + 0.08 * rock * k;
+        u.root.x += Math.cos(s.facing) * rock * 0.9 * k;
+        u.root.y -= Math.abs(rock) * 1.6 * k;
+        scale *= 1 + Math.abs(rock) * 0.05 * k;
+      } else if (moving) {
+        // Hopping across the table as if moved by hand, with a little wobble.
+        const hop = Math.abs(Math.sin(u.phase));
+        u.root.y -= hop * 1.5;
+        scale *= 1 + hop * 0.06;
+        u.root.rotation += Math.sin(u.phase) * 0.09;
+      }
+    } else if (this.style === 'ink') {
+      // Line boil: every few frames each figure is "redrawn" a hair differently.
+      const k = Math.floor(time * 8);
+      const h = (n: number) => { const x = Math.sin((s.id * 12.9898 + k * 78.233 + n * 37.719)) * 43758.5453; return x - Math.floor(x); };
+      u.root.x += (h(1) - 0.5) * 0.6;
+      u.root.y += (h(2) - 0.5) * 0.6;
+      u.root.rotation += (h(3) - 0.5) * 0.08;
+      sx *= 1 + (h(4) - 0.5) * 0.06;
+    } else if (this.style === 'rts') {
+      if (s.rider && speed > 20) {
+        const k = Math.min(1, speed / C.CANTER_SPEED);
+        u.root.y -= Math.abs(Math.sin(u.phase)) * 1.5 * k;
+        sx *= 1 + 0.05 * Math.sin(u.phase) * k;
+      } else if (moving) {
+        u.root.y -= Math.abs(Math.sin(u.phase)) * 0.9;
+        u.root.rotation += Math.sin(u.phase) * 0.05;
+      }
+    }
+    return { scale, sx, sy };
   }
 
   /**
@@ -941,6 +1055,20 @@ export class ChargeView {
   }
 
   private spawnTrail(sim: ChargeSim, dt: number): void {
+    if (this.style === 'ink') {
+      // Every rider at speed leaves a dry-brush stroke: the page records the charges.
+      for (const sq of sim.squadrons) {
+        const color = sq.team === 'blue' ? this.theme.blue : this.theme.red;
+        for (const r of sq.riders) {
+          if (r.speed < 70) continue;
+          const back = r.speed * dt * 1.6;
+          this.stainBatch.moveTo(r.x - Math.cos(r.facing) * (6 + back), r.y - Math.sin(r.facing) * (6 + back))
+            .lineTo(r.x - Math.cos(r.facing) * 6, r.y - Math.sin(r.facing) * 6)
+            .stroke({ width: 1.8, color, alpha: 0.07 * Math.min(1, r.speed / C.GALLOP_SPEED), cap: 'round' });
+          this.stainDirty = true;
+        }
+      }
+    }
     this.hoofTimer += dt;
     const stamp = this.hoofTimer >= 0.16;
     if (stamp) this.hoofTimer = 0;

@@ -44,7 +44,7 @@ const THEME_KEY = 'theme';
 function loadThemeName(): ThemeName {
   let stored: string | null = null;
   try { stored = localStorage.getItem(THEME_KEY); } catch { /* storage unavailable */ }
-  return stored === 'parchment' || stored === 'night' ? stored : 'field';
+  return stored && stored in THEMES ? stored as ThemeName : 'field';
 }
 
 themeSelect.value = loadThemeName();
@@ -60,7 +60,7 @@ function teamCss(team: 'blue' | 'red'): string {
 
 /** Parchment uses the light page styling; field and night use the dark overlays. */
 function applyBodyTheme(): void {
-  document.body.classList.toggle('day-mode', themeSelect.value === 'parchment');
+  document.body.classList.toggle('day-mode', themeSelect.value === 'parchment' || themeSelect.value === 'ink');
 }
 const pixiContainer = document.getElementById('pixi-container')!;
 

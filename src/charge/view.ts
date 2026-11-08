@@ -5,7 +5,7 @@ import { Theme } from '../theme';
 import { drawUnitArt, HORSE_VARIANTS, attackPose, attackDuration } from '../unit-art';
 import { CHARGE as C } from './config';
 import { ArtStyle, drawStyledUnit, paintPaperTile } from './art-styles';
-import { CORPSE_FRAME, FRAMES, DRAWN_DIRS, IDLE_FRAME, INFANTRY_LOOKS, WeaponSegment, attackFrame, buildFigure, canvasPainter, deathFrame, dirAngle, facingFrame, fleeFrame, paintLongWeapon, projectLocal, walkFrame } from './figure-art';
+import { RiderGear, CORPSE_FRAME, FRAMES, DRAWN_DIRS, IDLE_FRAME, INFANTRY_LOOKS, WeaponSegment, attackFrame, buildFigure, canvasPainter, deathFrame, dirAngle, facingFrame, fleeFrame, paintLongWeapon, projectLocal, walkFrame } from './figure-art';
 import { Battalion, ChargeSim, SimEvent, Soldier, Squadron, angleDiff, attackSide, mulberry32 } from './sim';
 import { PathPoint } from './path';
 import { DirectZones } from './direct';
@@ -948,20 +948,21 @@ export class ChargeView {
    * Bake every facing and frame of an upright unit design into one texture: rows of
    * facings, columns of frames. Frames are sub-rectangles anchored at the feet.
    */
-  protected sheetFor(type: UnitType, team: Team, r: number, variant: number): FigureSheet {
+  protected sheetFor(type: UnitType, team: Team, r: number, variant: number, gear: RiderGear = 'lance'): FigureSheet {
     const res = Math.min(2.5, this.artResolution);
     const t = this.theme;
-    const key = `${type}:${team}:${r}:${variant}:${res}:${t.blue}:${t.red}:${t.steel}:${t.wood}`;
+    const key = `${type}:${team}:${r}:${variant}:${gear}:${res}:${t.blue}:${t.red}:${t.steel}:${t.wood}`;
     const hit = figureSheets.get(key);
     if (hit) return hit;
     // Shelf-pack every facing and frame into one canvas no wider than a safe texture.
     // Sheets are many and large, so their resolution is capped: units are small on screen.
     const maxW = Math.floor(4096 / res);
     const PAD = 1;
-    const detach = type === 'pikeman' || type === 'cavalry';
+    // Levelled pikes and couched lances are drawn apart; a bow stays in the frames.
+    const detach = type === 'pikeman' || (type === 'cavalry' && gear === 'lance');
     const figs = [];
     for (let d = 0; d < DRAWN_DIRS; d++) {
-      for (let f = 0; f < FRAMES; f++) figs.push(buildFigure(type, team, r, this.theme, variant, dirAngle(d), f, detach));
+      for (let f = 0; f < FRAMES; f++) figs.push(buildFigure(type, team, r, this.theme, variant, dirAngle(d), f, detach, gear));
     }
     const cells: { x: number; y: number; w: number; h: number }[] = [];
     let x = 0, y = 0, rowH = 0, width = 0;
@@ -1016,15 +1017,15 @@ export class ChargeView {
     return sheet;
   }
 
-  protected texturesFor(type: UnitType, team: Team, r: number, variant: number) {
-    const key = `${type}:${team}:${r}:${variant}`;
+  protected texturesFor(type: UnitType, team: Team, r: number, variant: number, gear: RiderGear = 'lance') {
+    const key = `${type}:${team}:${r}:${variant}:${gear}`;
     let t = this.unitTextures.get(key);
     if (!t) {
       // Body and weapon are baked separately so the weapon can still swing and thrust.
       const scratch = new Graphics();
-      const body = this.bake(g => drawStyledUnit(this.style, g, scratch, type, team, r, this.theme, variant));
+      const body = this.bake(g => drawStyledUnit(this.style, g, scratch, type, team, r, this.theme, variant, gear));
       scratch.clear();
-      const weapon = this.bake(g => drawStyledUnit(this.style, scratch, g, type, team, r, this.theme, variant));
+      const weapon = this.bake(g => drawStyledUnit(this.style, scratch, g, type, team, r, this.theme, variant, gear));
       scratch.destroy();
       t = { body: body.tex, weapon: weapon.tex, bx: body.ax, by: body.ay, wx: weapon.ax, wy: weapon.ay };
       this.unitTextures.set(key, t);
@@ -1032,15 +1033,21 @@ export class ChargeView {
     return t;
   }
 
+  /** What a horseman carries (in the battle, every rider has a lance). */
+  protected riderGear(_s: Soldier): RiderGear {
+    return 'lance';
+  }
+
   protected gfxFor(s: Soldier): UnitGfx {
     let u = this.units.get(s.id);
     if (u) return u;
     const variant = s.type === 'cavalry' ? s.id % HORSE_VARIANTS : this.upright ? s.id % INFANTRY_LOOKS : 0;
+    const gear = s.type === 'cavalry' ? this.riderGear(s) : 'lance';
     const root = new Container();
     let body: Sprite, weapon: Sprite, sheet: FigureSheet | null = null;
     if (this.upright) {
       // The weapon is part of each frame; the spare sprite stays hidden.
-      sheet = this.sheetFor(s.type, s.team, s.radius, variant);
+      sheet = this.sheetFor(s.type, s.team, s.radius, variant, gear);
       body = new Sprite(sheet.frames[0]);
       body.anchor.set(sheet.ax[0], sheet.ay[0]);
       // No two men quite alike: a touch lighter or darker each (plus the size jitter).
@@ -1052,7 +1059,7 @@ export class ChargeView {
       // The weapon goes in front of the body or behind it, depending on where it points.
       root.sortableChildren = true;
     } else {
-      const t = this.texturesFor(s.type, s.team, s.radius, variant);
+      const t = this.texturesFor(s.type, s.team, s.radius, variant, gear);
       body = new Sprite(t.body);
       body.anchor.set(t.bx, t.by);
       weapon = new Sprite(t.weapon);

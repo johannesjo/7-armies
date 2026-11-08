@@ -33,9 +33,9 @@ function darken(c: number, k: number): number {
 }
 
 /** Draw a unit in the given style. Local +X is the facing, +Y the unit's right. */
-export function drawStyledUnit(style: ArtStyle, shape: Canvas, weapon: Canvas, type: UnitType, team: Team, r: number, theme: Theme, variant = 0): void {
-  if (style === 'ink') drawInk(shape, weapon, type, team, r, theme, variant);
-  else drawUnitArt(shape, weapon, type, team, r, theme, variant);
+export function drawStyledUnit(style: ArtStyle, shape: Canvas, weapon: Canvas, type: UnitType, team: Team, r: number, theme: Theme, variant = 0, gear: 'lance' | 'bow' = 'lance'): void {
+  if (style === 'ink') drawInk(shape, weapon, type, team, r, theme, variant, gear);
+  else drawUnitArt(shape, weapon, type, team, r, theme, variant, gear);
 }
 
 // --- Ink & watercolour -------------------------------------------------------------------
@@ -43,7 +43,7 @@ export function drawStyledUnit(style: ArtStyle, shape: Canvas, weapon: Canvas, t
 const INK = 0x2a2018;
 
 /** A loose watercolour wash, slightly off-register, under a confident ink outline. */
-function drawInk(shape: Canvas, weapon: Canvas, type: UnitType, team: Team, r: number, theme: Theme, variant: number): void {
+function drawInk(shape: Canvas, weapon: Canvas, type: UnitType, team: Team, r: number, theme: Theme, variant: number, gear: 'lance' | 'bow' = 'lance'): void {
   const color = team === 'blue' ? theme.blue : theme.red;
   const wash = { color, alpha: 0.5 };
   const line = { width: Math.max(0.55, r * 0.13), color: INK, alpha: 0.9, cap: 'round' as const, join: 'round' as const };
@@ -56,6 +56,12 @@ function drawInk(shape: Canvas, weapon: Canvas, type: UnitType, team: Team, r: n
     shape.moveTo(r * 0.85, -r * 0.18).quadraticCurveTo(r * 1.6, -r * 0.2, r * 1.7, 0).quadraticCurveTo(r * 1.6, r * 0.2, r * 0.85, r * 0.18).stroke(line);
     shape.moveTo(-r * 1.15, 0).lineTo(-r * 1.8, r * 0.12).stroke(line);
     shape.circle(-r * 0.1, 0, r * 0.26).fill({ color: INK, alpha: 0.85 });
+    if (gear === 'bow') {
+      // A bow drawn in two quick strokes, and the string.
+      weapon.moveTo(r * 0.35, -r * 0.95).quadraticCurveTo(r * 1.0, -r * 0.4, r * 0.55, 0).quadraticCurveTo(r * 1.0, r * 0.4, r * 0.35, r * 0.95).stroke(line);
+      weapon.moveTo(r * 0.35, -r * 0.95).lineTo(r * 0.2, 0).lineTo(r * 0.35, r * 0.95).stroke({ ...line, width: Math.max(0.3, r * 0.05), alpha: 0.6 });
+      return;
+    }
     weapon.moveTo(-r * 0.6, r * 0.4).lineTo(r * 2.6, r * 0.36).stroke({ ...line, width: Math.max(0.5, r * 0.1) });
     weapon.poly([r * 1.75, r * 0.37, r * 2.1, r * 0.37, r * 1.9, r * 0.7]).fill({ color, alpha: 0.75 });
     return;

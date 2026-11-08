@@ -1,7 +1,10 @@
 import { Application, Container, Graphics, Sprite, Texture } from 'pixi.js';
 import { Theme } from '../theme';
 import { ChargeView, FieldLayout, mixColor } from '../charge/view';
-import { ChargeSim, SimEvent, Squadron, mulberry32 } from '../charge/sim';
+import { ChargeSim, SimEvent, Soldier, Squadron, mulberry32 } from '../charge/sim';
+import { RiderGear } from '../charge/figure-art';
+import { CHARGE as C } from '../charge/config';
+import { HORSE_VARIANTS } from '../unit-art';
 import { Team } from '../types';
 import { LANES as L } from './config';
 import { WOODS } from './map';
@@ -144,6 +147,25 @@ export class LaneView extends ChargeView {
     }
   }
 
+  /** Horse archers carry bows, not lances. */
+  protected override riderGear(s: Soldier): RiderGear {
+    return this.sim && s.squad && this.sim.heroOf(s.squad)?.kind === 'archers' ? 'bow' : 'lance';
+  }
+
+  /** Bake the horse archers' figures up front, so the first sight of them doesn't hitch. */
+  private bowsBaked = false;
+  private bakeBows(sim: LaneSim): void {
+    if (this.bowsBaked) return;
+    this.bowsBaked = true;
+    for (const team of ['blue', 'red'] as const) {
+      if (sim.heroes[team].kind !== 'archers') continue;
+      for (let v = 0; v < HORSE_VARIANTS; v++) {
+        if (this.upright) this.sheetFor('cavalry', team, C.RIDER_RADIUS, v, 'bow');
+        else this.texturesFor('cavalry', team, C.RIDER_RADIUS, v, 'bow');
+      }
+    }
+  }
+
   protected override chief(sq: Squadron): boolean {
     return sq.ai === 'rival' || super.chief(sq);
   }
@@ -151,6 +173,7 @@ export class LaneView extends ChargeView {
   override render(sim: ChargeSim, events: SimEvent[], dt: number): void {
     const ls = sim as LaneSim;
     this.sim = ls;
+    this.bakeBows(ls);
     this.updateFog(ls, dt);
     super.render(sim, events, dt);
     this.syncStructures(ls);

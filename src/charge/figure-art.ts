@@ -409,7 +409,15 @@ function footman(m: Model, type: UnitType, r: number, p: Palette, frame: number,
 }
 
 /** The weapon a fallen footman dropped, lying on the ground beside him. */
-function droppedWeapon(m: Model, type: UnitType, r: number, p: Palette): void {
+/** What a horseman carries: a couched lance (knights) or a bow (horse archers). */
+export type RiderGear = 'lance' | 'bow';
+
+function droppedWeapon(m: Model, type: UnitType, r: number, p: Palette, gear: RiderGear = 'lance'): void {
+  if (type === 'cavalry' && gear === 'bow') {
+    m.cap([0.6 * r, 1.0 * r, 0.05 * r], [1.3 * r, 1.5 * r, 0.05 * r], 0.045 * r, p.wood);
+    m.cap([1.3 * r, 1.5 * r, 0.05 * r], [2.1 * r, 1.35 * r, 0.05 * r], 0.045 * r, p.wood);
+    return;
+  }
   if (type === 'swordsman') {
     m.cap([0.6 * r, 0.7 * r, 0.05 * r], [1.6 * r, 0.95 * r, 0.05 * r], 0.05 * r, lighten(p.steel, 0.2), 0, 'metal');
     m.cap([0.6 * r, 0.55 * r, 0.05 * r], [0.65 * r, 0.85 * r, 0.05 * r], 0.04 * r, p.gold, 0.001, 'metal');
@@ -424,8 +432,9 @@ function droppedWeapon(m: Model, type: UnitType, r: number, p: Palette): void {
   }
 }
 
-/** A knight on a barded horse, hooves at the origin. */
-function horseman(m: Model, r: number, p: Palette, frame: number, variant: number): void {
+/** A knight on a barded horse (or a horse archer), hooves at the origin. */
+function horseman(m: Model, r: number, p: Palette, frame: number, variant: number, gear: RiderGear = 'lance'): void {
+  const bow = gear === 'bow';
   const { kind, gait, t } = poseOf(frame);
   const moving = kind === 'walk' || kind === 'flee';
   const attack = kind === 'attack' ? t : -1;
@@ -498,8 +507,38 @@ function horseman(m: Model, r: number, p: Palette, frame: number, variant: numbe
   m.cap(add(seat, [0, 0, 0.15 * r]), shoulder, 0.28 * r, p.team, 0.25);
   m.cap(add(seat, [0.02 * r, -0.26 * r, 0.22 * r]), add(seat, [0.02 * r, 0.26 * r, 0.22 * r]), 0.06 * r, p.leather, 0.2505);
   m.cap(add(shoulder, [0, -0.3 * r, -0.05 * r]), add(shoulder, [0, 0.3 * r, -0.05 * r]), 0.15 * r, p.mail, 0.251, 'metal');
-  // Great helm with a plume (or a crest) in the team's colour.
   const head: V3 = add(shoulder, [0.06 * r, 0, 0.38 * r]);
+  if (bow) {
+    // Horse archer: a light pointed helmet with a team scarf, no shield, a quiver at the hip.
+    m.cap(add(head, [0, 0, -0.06 * r]), add(head, [0, 0, 0.06 * r]), 0.17 * r, p.steel, 0.253, 'metal');
+    m.cap(add(head, [0, 0, 0.12 * r]), add(head, [-0.02 * r, 0, 0.34 * r]), 0.06 * r, p.steel, 0.2535, 'metal');
+    m.cap(add(head, [-0.05 * r, -0.17 * r, -0.12 * r]), add(head, [-0.05 * r, 0.17 * r, -0.12 * r]), 0.06 * r, p.team, 0.254);
+    const qTop: V3 = add(seat, [-0.35 * r, 0.32 * r, 0.55 * r]), qBot: V3 = add(seat, [-0.1 * r, 0.36 * r, -0.15 * r]);
+    m.cap(qBot, qTop, 0.11 * r, p.leather, 0.24);
+    for (const k of [-1, 0, 1]) m.cap(qTop, add(qTop, [-0.12 * r, k * 0.06 * r, 0.22 * r]), 0.03 * r, 0xe8e0c8, 0.241);
+    if (!armed) {
+      m.cap(add(shoulder, [0, 0.3 * r, 0]), kind === 'die' ? add(shoulder, [0, 0.6 * r, 0.5 * r]) : add(shoulder, [0.32 * r, 0.36 * r, -0.4 * r]), 0.1 * r, p.mail, 0.02, 'metal');
+      return;
+    }
+    // Recurve bow held out on the left; the string drawn back to the cheek as he looses.
+    const draw = attack >= 0 ? Math.sin(Math.min(1, attack * 1.4) * Math.PI) : 0;
+    const grip: V3 = add(shoulder, [0.5 * r, -0.5 * r, -0.05 * r]);
+    const tipUp: V3 = add(grip, [-0.12 * r, 0, 0.78 * r]), tipDn: V3 = add(grip, [-0.12 * r, 0, -0.62 * r]);
+    const midUp: V3 = add(grip, [0.1 * r, 0, 0.42 * r]), midDn: V3 = add(grip, [0.1 * r, 0, -0.34 * r]);
+    const wood = darken(p.wood, 0.15);
+    m.cap(grip, midUp, 0.05 * r, wood, 0.03);
+    m.cap(midUp, tipUp, 0.04 * r, wood, 0.031);
+    m.cap(grip, midDn, 0.05 * r, wood, 0.03);
+    m.cap(midDn, tipDn, 0.04 * r, wood, 0.031);
+    const nock: V3 = add(grip, [-(0.18 + 0.55 * draw) * r, 0.1 * r * draw, 0.05 * r]);
+    m.cap(tipUp, nock, 0.012 * r, 0xf0ead8, 0.032);
+    m.cap(nock, tipDn, 0.012 * r, 0xf0ead8, 0.032);
+    m.cap(add(shoulder, [0, -0.3 * r, 0]), grip, 0.1 * r, p.mail, 0.02, 'metal');
+    m.cap(add(shoulder, [0, 0.3 * r, 0]), nock, 0.1 * r, p.mail, 0.021, 'metal');
+    if (draw > 0.2) m.cap(nock, add(grip, [0.35 * r, 0, 0.05 * r]), 0.02 * r, 0xe8e0c8, 0.033);
+    return;
+  }
+  // Great helm with a plume (or a crest) in the team's colour.
   m.cap(add(head, [0, 0, -0.08 * r]), add(head, [0, 0, 0.1 * r]), 0.21 * r, p.steel, 0.253, 'metal');
   m.cap(add(head, [0.2 * r, -0.12 * r, 0.02 * r]), add(head, [0.2 * r, 0.12 * r, 0.02 * r]), 0.02 * r, 0x1a1a1a, 0.254);
   if (crest) m.cap(add(head, [0.12 * r, 0, 0.3 * r]), add(head, [-0.2 * r, 0, 0.3 * r]), 0.07 * r, p.gold, 0.255, 'metal');
@@ -676,12 +715,12 @@ const SUN_SCREEN = (() => {
  * `detachWeapon`, a levelled pike or couched lance is left out and returned as
  * `weapon` for the caller to draw at the exact heading.
  */
-export function buildFigure(type: UnitType, team: Team, r: number, theme: Theme, variant: number, angle: number, frame: number, detachWeapon = false): FigureFrame {
+export function buildFigure(type: UnitType, team: Team, r: number, theme: Theme, variant: number, angle: number, frame: number, detachWeapon = false, gear: RiderGear = 'lance'): FigureFrame {
   const m = new Model();
   m.detach = detachWeapon;
   const p = palette(team, theme);
   const { kind, t } = poseOf(frame);
-  if (type === 'cavalry') horseman(m, r, p, frame, variant);
+  if (type === 'cavalry') horseman(m, r, p, frame, variant, gear);
   else footman(m, type, r, p, frame, ((variant % INFANTRY_LOOKS) + INFANTRY_LOOKS) % INFANTRY_LOOKS);
   if (kind === 'die') {
     // Struck down: footmen topple backwards, a horse rolls onto its side.
@@ -689,7 +728,7 @@ export function buildFigure(type: UnitType, team: Team, r: number, theme: Theme,
     const c = Math.cos(a), s = Math.sin(a);
     if (type === 'cavalry') m.transform(([f, y, h]) => [f, y * c + h * s, -y * s + h * c + 0.55 * r * s]);
     else m.transform(([f, y, h]) => [f * c - h * s, y, f * s + h * c + 0.3 * r * s]);
-    if (t >= 1) droppedWeapon(m, type, r, p);
+    if (t >= 1) droppedWeapon(m, type, r, p, gear);
   }
 
   const cos = Math.cos(angle), sin = Math.sin(angle);

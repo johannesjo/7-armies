@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ChargeSim, BattalionSpec, SimEvent } from './sim';
+import { ChargeSim, BattalionSpec, SimEvent, chooseMove, dogfightGeometry } from './sim';
 import { CHARGE as C } from './config';
 
 const DOWN = Math.PI / 2;
@@ -91,7 +91,8 @@ describe('horseman strikes', () => {
   it('meeting head-on, both sides strike', () => {
     const sim = new ChargeSim([block()], {
       seed: 4, squad: { x: 400, y: 600, facing: 0, count: 1 }, muster: false,
-      squads: [{ team: 'red', ai: 'hunter', x: 700, y: 600, facing: Math.PI, count: 3 }],
+      // Heavy knights take a head-on charge rather than slipping aside.
+      squads: [{ team: 'red', ai: 'hunter', x: 700, y: 600, facing: Math.PI, count: 3, style: 'heavy' }],
     });
     sim.leader!.speed = C.GALLOP_SPEED;
     const events = ride(sim, 0, 1.5);
@@ -113,5 +114,90 @@ describe('horseman strikes', () => {
     }
     expect(sim.leader!.speed).toBeLessThan(C.CHARGE_MIN_SPEED);
     expect(events.some(e => e.type === 'impact' && !e.pike)).toBe(false);
+  });
+});
+
+describe('cavalry dogfights', () => {
+  const at = (x: number, y: number, facing: number) => ({ x, y, facing });
+
+  it('reads the geometry: on his tail, head-on, and which side of his line', () => {
+    // We're behind him, both riding east.
+    const tail = dogfightGeometry(at(0, 0, 0), at(100, 0, 0));
+    expect(tail.hisOff).toBeCloseTo(Math.PI);
+    expect(tail.myOff).toBeCloseTo(0);
+    // Head-on.
+    const head = dogfightGeometry(at(0, 0, 0), at(100, 0, Math.PI));
+    expect(head.hisOff).toBeCloseTo(0);
+    // He rides east; we're south of him (screen y down) = on his right.
+    expect(dogfightGeometry(at(100, 50, 0), at(100, 0, 0)).side).toBe(1);
+    expect(dogfightGeometry(at(100, -50, 0), at(100, 0, 0)).side).toBe(-1);
+  });
+
+  it('chooses: pursue on his tail, joust or slip past head-on, evade when he rides at our side', () => {
+    const tail = dogfightGeometry(at(0, 0, 0), at(100, 0, 0));
+    expect(chooseMove(tail, 'nimble').move).toBe('pursue');
+    expect(chooseMove(tail, 'heavy').move).toBe('pursue');
+    const head = dogfightGeometry(at(0, 0, 0), at(200, 0, Math.PI));
+    expect(chooseMove(head, 'heavy').move).toBe('joust');
+    // Light horse slip past only with the numbers; otherwise they get out of the way.
+    expect(chooseMove(head, 'nimble', 1.5).move).toBe('slash');
+    expect(chooseMove(head, 'nimble', 1).move).toBe('bait');
+    // Nobody meets a charge that will roll over them.
+    expect(chooseMove(head, 'heavy', 0.5).move).toBe('bait');
+    // Almost on us: break hard.
+    expect(chooseMove(dogfightGeometry(at(0, 0, 0), at(90, 0, Math.PI)), 'nimble', 1).move).toBe('evade');
+    // He rides at us while we face away across his path.
+    const beam = dogfightGeometry(at(0, 0, UP), at(200, 0, Math.PI));
+    expect(chooseMove(beam, 'nimble').move).toBe('bait');
+    // Nobody has the advantage yet: work round behind him.
+    const level = dogfightGeometry(at(0, 0, UP), at(0, 200, 0));
+    expect(chooseMove(level, 'nimble').move).toBe('lag');
+  });
+
+  it('light horse work round onto the tail of a squadron riding a steady circle', () => {
+    const sim = new ChargeSim([block()], {
+      seed: 5, squad: { x: 900, y: 700, facing: 0, count: 6 }, muster: false,
+      squads: [{ team: 'red', ai: 'hunter', x: 900, y: 300, facing: DOWN, count: 6, style: 'nimble' }],
+    });
+    const red = sim.squadrons.find(sq => sq.team === 'red')!;
+    let onTail = 0;
+    for (let t = 0; t < 12; t += 1 / 60) {
+      // We canter round a wide circle, never turning to fight.
+      const L = sim.leader;
+      if (!L) break;
+      const h = L.facing + 0.6;
+      sim.step(1 / 60, { dirX: Math.cos(h), dirY: Math.sin(h), gallop: false });
+      const R = red.riders[0];
+      if (R && sim.leader) {
+        const g = dogfightGeometry(R, sim.leader);
+        if (g.hisOff > 2.1 && g.d < 200) onTail++;
+      }
+    }
+    // A good share of the fight spent sitting behind us.
+    expect(onTail / 60).toBeGreaterThan(1.5);
+  });
+
+  it('light horse slip aside from a head-on charge instead of meeting it', () => {
+    const run = (style: 'heavy' | 'nimble') => {
+      const sim = new ChargeSim([block()], {
+        seed: 4, squad: { x: 400, y: 600, facing: 0, count: 1 }, muster: false,
+        squads: [{ team: 'red', ai: 'hunter', x: 760, y: 600, facing: Math.PI, count: 3, style }],
+      });
+      sim.leader!.speed = C.GALLOP_SPEED;
+      let closest = Infinity;
+      for (let t = 0; t < 1.6; t += 1 / 60) {
+        sim.step(1 / 60, { dirX: 1, dirY: 0, gallop: true });
+        const R = sim.squadrons[1].riders[0], L = sim.leader;
+        // How far off our line he is as he goes by.
+        if (R && L && Math.abs(R.x - L.x) < 30) closest = Math.min(closest, Math.abs(R.y - L.y));
+      }
+      return closest;
+    };
+    // Knights ride straight down our line; light horse pass well off it.
+    expect(run('heavy')).toBeLessThan(12);
+    const nimble = run('nimble');
+    expect(nimble).toBeGreaterThan(15);
+    expect(nimble).toBeLessThan(150); // ...but they did ride past us
+
   });
 });

@@ -150,6 +150,17 @@ export class ChargeAudio {
       case 'combo':
         this.chime([784, 988]);
         break;
+      case 'tail':
+        // Warning: a sharp, low double call on the horn.
+        this.horn([196, 196], 0.55);
+        break;
+      case 'clash':
+        // The crash of a charge going home: a deep thud, splintering wood (or steel on pikes).
+        this.thud(60, 0.75, 0.4);
+        this.noiseBurst('bandpass', e.pike ? 2600 : 1400, 0.35, 0.12);
+        this.noiseBurst('highpass', 3000, 0.18, 0.06, this.ctx!.currentTime + 0.03);
+        if (e.pike) this.clang();
+        break;
     }
   }
 

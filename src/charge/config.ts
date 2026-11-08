@@ -136,6 +136,10 @@ export const CHARGE = {
   RIDER_STRIKE: 16,
   STRIKE_WEDGE_BONUS: 0.5,
   STRIKE_COOLDOWN: 0.35,
+  /** Warn when an enemy horseman charging at you is behind you within this distance... */
+  TAIL_WARN_DIST: 300,
+  /** ...at most this often (s). */
+  TAIL_WARN_COOLDOWN: 4,
   /** Sword-fighting from the saddle reaches this far round from the front (rad), not behind. */
   SADDLE_ARC: 1.9,
   /** How hard a footman can push to regain his place (world units/s²). */

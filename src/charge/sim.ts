@@ -200,6 +200,13 @@ export interface Volley {
 
 export type SimEvent =
   | { type: 'impact'; x: number; y: number; angle: number; side: AttackSide; pike: boolean }
+  /**
+   * Your squadron crashes into enemy horse, or onto pike points: the big moments of a
+   * charge (the view gives them weight). `pike`: you rode onto the hedge.
+   */
+  | { type: 'clash'; x: number; y: number; angle: number; pike: boolean }
+  /** An enemy horseman has got onto your tail (fires when the danger begins). */
+  | { type: 'tail'; x: number; y: number }
   | { type: 'hit'; x: number; y: number; angle: number; team: Team; damage: number; id: number }
   | { type: 'kill'; x: number; y: number; angle: number; team: Team; id: number; byPlayer: boolean; side: AttackSide; points: number }
   | { type: 'volley'; id: number; team: Team; x: number; y: number; radius: number; flight: number; atPlayer: boolean }
@@ -315,6 +322,10 @@ export class ChargeSim {
   bowled = 0;
   /** Enemy knights killed by your infantry or archers while they hunted you. */
   lured = 0;
+  /** Enemy horsemen on your tail right now: behind your leader, riding at him. */
+  onTail: Soldier[] = [];
+  private tailCooldown = 0;
+  private clashCooldown = 0;
   /** The freshly killed, still flying from the blow that felled them — they bowl over the living. */
   flying: { body: Soldier; t: number }[] = [];
   combo = 0;
@@ -603,6 +614,8 @@ export class ChargeSim {
     this.updateArrows(dt);
     this.updateCamp(dt);
     this.updateMorale(dt);
+    this.updateTail(dt);
+    this.clashCooldown -= dt;
 
     this.comboTimer -= dt;
     if (this.comboTimer <= 0) this.combo = 0;
@@ -613,6 +626,37 @@ export class ChargeSim {
     this.soldiers.length = live;
     this.squadrons = this.squadrons.filter(sq => sq === this.player || sq.riders.some(r => r.alive));
     this.checkOutcome();
+  }
+
+  /**
+   * Watch your back: any enemy squadron whose leader sits behind yours, riding at him
+   * at a charge, is on your tail. The 'tail' warning fires as such a threat appears.
+   */
+  private updateTail(dt: number): void {
+    this.tailCooldown -= dt;
+    const L = this.leader;
+    const was = this.onTail.length > 0;
+    this.onTail.length = 0;
+    if (!L || !this.player) return;
+    for (const sq of this.squadrons) {
+      const R = sq.riders[0];
+      if (sq.team === this.player.team || !R || sq.phase === 'broken' || sq.phase === 'retreat') continue;
+      if (R.speed < C.CHARGE_MIN_SPEED) continue;
+      const g = dogfightGeometry(R, L);
+      // He points at us (we're off his nose), and he's in our rear arc.
+      if (g.d < C.TAIL_WARN_DIST && g.myOff < 0.6 && g.hisOff > 1.9) this.onTail.push(R);
+    }
+    if (this.onTail.length > 0 && !was && this.tailCooldown <= 0) {
+      this.tailCooldown = C.TAIL_WARN_COOLDOWN;
+      this.events.push({ type: 'tail', x: this.onTail[0].x, y: this.onTail[0].y });
+    }
+  }
+
+  /** One 'clash' event per crash of your squadron, not one per rider in it. */
+  private clash(x: number, y: number, angle: number, pike: boolean): void {
+    if (this.clashCooldown > 0) return;
+    this.clashCooldown = 0.6;
+    this.events.push({ type: 'clash', x, y, angle, pike });
   }
 
   private spawnWaves(): void {
@@ -1533,6 +1577,7 @@ export class ChargeSim {
       const k = clamp(closing / C.GALLOP_SPEED, 0.3, 1.1);
       const heading = Math.atan2(r.vy, r.vx);
       this.events.push({ type: 'impact', x: r.x - dx / d * r.radius, y: r.y - dy / d * r.radius, angle: heading, side: 'front', pike: true });
+      if (r.squad === this.player && k > 0.6) this.clash(r.x, r.y, heading, true);
       r.speed *= C.PIKE_BALK;
       r.vx *= C.PIKE_BALK;
       r.vy *= C.PIKE_BALK;
@@ -1789,6 +1834,7 @@ export class ChargeSim {
       // Hit in the flank or rear, a squadron is thrown into disorder.
       if (victim.squad) this.shockSquad(victim.squad, C.CLASH_SHOCK[side], other, mine);
       const speedK = Math.min(1.1, other.speed / C.GALLOP_SPEED);
+      if ((mine || victim.squad === this.player) && speedK > 0.6) this.clash(victim.x, victim.y, approach, false);
       const wedge = 1 + C.STRIKE_WEDGE_BONUS * (other.squad?.cohesion ?? 0);
       this.damageRider(victim, C.RIDER_STRIKE * speedK * wedge * sideMultiplier(side), approach, mine, side);
       return;

@@ -90,7 +90,19 @@ export const CHARGE = {
   DOWN_TIME: 1.4,
   DOWN_TIME_JITTER: 1.2,
   /** Rider damage per unit of impulse when riding onto braced pikes. */
-  PIKE_RIDER_DAMAGE: 0.022,
+  PIKE_RIDER_DAMAGE: 0.05,
+  /**
+   * The pike hedge: a braced pikeman strikes a horseman charging at his front from
+   * this far beyond arm's length (world units), within this half-angle of where he
+   * faces (rad), for this much damage at full gallop. Each pike strikes once per
+   * PIKE_HEDGE_COOLDOWN (s), and the horse balks: its speed is cut to this share.
+   * Ride at a pike block's front and the charge dies on its points.
+   */
+  PIKE_REACH: 14,
+  PIKE_HEDGE_ARC: 0.55,
+  PIKE_HEDGE_DAMAGE: 16,
+  PIKE_HEDGE_COOLDOWN: 0.9,
+  PIKE_BALK: 0.55,
   /** Men colliding faster than this were thrown — the crash hurts. */
   THROWN_REL: 80,
   SECONDARY_DV0: 60,

@@ -201,3 +201,50 @@ describe('cavalry dogfights', () => {
 
   });
 });
+
+describe('the pike hedge', () => {
+  const charge = (pikeFacing: number) => {
+    const sim = new ChargeSim([
+      block(),
+      { team: 'red', type: 'pikeman', role: 'front', x: 600, y: 400, facing: pikeFacing, count: 24, cols: 8 },
+    ], { seed: 3, squad: { x: 600, y: 700, facing: UP, count: 1 }, muster: false });
+    sim.leader!.speed = C.GALLOP_SPEED;
+    const events: SimEvent[] = [];
+    let slowest = Infinity;
+    for (let t = 0; t < 2.5; t += 1 / 60) {
+      sim.step(1 / 60, { dirX: 0, dirY: -1, gallop: true });
+      events.push(...sim.events);
+      const L = sim.leader;
+      if (L && L.y < 520) slowest = Math.min(slowest, L.speed);
+    }
+    return { sim, events, slowest };
+  };
+
+  it('a lone rider galloping at the front of braced pikes dies on their points', () => {
+    const { events } = charge(DOWN);
+    expect(events.some(e => e.type === 'impact' && e.pike)).toBe(true);
+    expect(events.some(e => e.type === 'rider-down' && e.team === 'blue')).toBe(true);
+  });
+
+  it('the hedge stops the charge: the horse balks below charging speed', () => {
+    const sim = new ChargeSim([
+      block(),
+      { team: 'red', type: 'pikeman', role: 'front', x: 600, y: 400, facing: DOWN, count: 24, cols: 8 },
+    ], { seed: 3, squad: { x: 600, y: 700, facing: UP, count: 1 }, muster: false });
+    sim.leader!.speed = C.GALLOP_SPEED;
+    sim.leader!.hp = sim.leader!.maxHp = 1000; // survive to see the balk
+    let balked = false;
+    for (let t = 0; t < 2; t += 1 / 60) {
+      const before = sim.leader!.speed;
+      sim.step(1 / 60, { dirX: 0, dirY: -1, gallop: true });
+      if (sim.events.some(e => e.type === 'impact' && e.pike) && sim.leader!.speed < before * 0.8) balked = true;
+    }
+    expect(balked).toBe(true);
+  });
+
+  it('the same pikes caught in the flank cannot brace: the rider rides through', () => {
+    const { events } = charge(0); // pikes face east; we come from the south, into their flank
+    expect(events.some(e => e.type === 'impact' && e.pike)).toBe(false);
+    expect(events.some(e => e.type === 'rider-down' && e.team === 'blue')).toBe(false);
+  });
+});

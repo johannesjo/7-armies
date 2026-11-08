@@ -54,6 +54,8 @@ export interface Soldier {
   /** Distance to that enemy. */
   aimDist: number;
   aimTimer: number;
+  /** Pikemen: sim time when this pike can strike a charging horseman again. */
+  pikeReady: number;
 }
 
 /** Who controls a squadron: the player, or one of the AI behaviours. */
@@ -504,6 +506,7 @@ export class ChargeSim {
       aim: NaN,
       aimDist: Infinity,
       aimTimer: 0,
+      pikeReady: 0,
     };
   }
 
@@ -1483,6 +1486,8 @@ export class ChargeSim {
         }
       }
 
+      if (r.speed >= C.CHARGE_MIN_SPEED) this.pikeHedge(r);
+
       // Too slow to trample: fight from the saddle.
       if (r.alive && meleeTarget && r.speed < C.CHARGE_MIN_SPEED && r.attackTimer <= 0) {
         r.attackTimer = C.RIDER_MELEE_COOLDOWN;
@@ -1493,6 +1498,45 @@ export class ChargeSim {
         const aiK = mine || meleeTarget.rider ? 1 : C.AI_INFANTRY_MULT;
         this.damageSoldier(meleeTarget, C.RIDER_MELEE_DAMAGE * sideMultiplier(side) * aiK, ang, mine, side);
       }
+    }
+  }
+
+  /**
+   * A horseman charging at the front of braced pikes meets their points before he
+   * reaches the men: each pike in reach strikes him, and his horse balks, losing its
+   * speed — so a frontal charge stalls on the hedge, where the pikes keep stabbing.
+   */
+  private pikeHedge(r: Soldier): void {
+    const reach = C.PIKE_REACH + r.radius + C.INFANTRY_RADIUS.pikeman;
+    const near = this.grid.query(r.x, r.y, reach, this.near);
+    for (const s of near) {
+      if (!r.alive) return;
+      if (s.type !== 'pikeman' || !s.alive || s.team === r.team || s.fleeing || s.down > 0 || s.pikeReady > this.time) continue;
+      const b = s.bat;
+      if (!b || b.routed) continue;
+      // The hedge stands off the formation's front face: a rider already among the
+      // ranks, or coming in from the side, is past the points.
+      const fx = Math.cos(b.facing), fy = Math.sin(b.facing);
+      const rows = Math.ceil(b.grid.length / b.cols);
+      const ahead = (r.x - b.x) * fx + (r.y - b.y) * fy;
+      const across = (r.x - b.x) * -fy + (r.y - b.y) * fx;
+      if (ahead < ((rows - 1) / 2) * b.spacing || Math.abs(across) > (b.cols / 2) * b.spacing + r.radius) continue;
+      const dx = r.x - s.x, dy = r.y - s.y, d = Math.hypot(dx, dy);
+      if (d > reach || d < 1) continue;
+      // Only off the formation's front (a block caught in the flank can't level its
+      // pikes round in time), and only at a horseman riding onto them.
+      if (Math.abs(angleDiff(Math.atan2(dy, dx), this.victimFacing(s))) > C.PIKE_HEDGE_ARC) continue;
+      const closing = -(r.vx * dx + r.vy * dy) / d;
+      if (closing < C.CHARGE_MIN_SPEED * 0.6) continue;
+      s.pikeReady = this.time + C.PIKE_HEDGE_COOLDOWN;
+      s.lastAttack = this.time;
+      const k = clamp(closing / C.GALLOP_SPEED, 0.3, 1.1);
+      const heading = Math.atan2(r.vy, r.vx);
+      this.events.push({ type: 'impact', x: r.x - dx / d * r.radius, y: r.y - dy / d * r.radius, angle: heading, side: 'front', pike: true });
+      r.speed *= C.PIKE_BALK;
+      r.vx *= C.PIKE_BALK;
+      r.vy *= C.PIKE_BALK;
+      this.damageRider(r, C.PIKE_HEDGE_DAMAGE * k, heading + Math.PI, false, 'front');
     }
   }
 

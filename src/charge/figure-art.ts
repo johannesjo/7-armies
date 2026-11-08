@@ -121,6 +121,13 @@ function shade(c: number, k: number): number {
 /** A posed figure: its parts, in unit-local 3D. */
 class Model {
   prims: Prim[] = [];
+  /**
+   * Long weapons (levelled pike, couched lance) can be left out of the frame and
+   * drawn by the view as their own sprite, turned to the exact heading every frame:
+   * baked into 16 facings they visibly snap. When detached, their shaft is kept here.
+   */
+  detach = false;
+  weapon: WeaponSegment | null = null;
   cap(a: V3, b: V3, w: number, color: number, bias = 0, finish: Finish = 'matte'): void {
     this.prims.push({ k: 'cap', a, b, w, color, bias, finish });
   }
@@ -373,6 +380,10 @@ function footman(m: Model, type: UnitType, r: number, p: Palette, frame: number,
       arm(L, add(back, [1.55 * r, -0.05 * r, 0]));
       arm(R, add(back, [0.55 * r, 0, 0]));
     }
+    if (m.detach && frame !== IDLE_FRAME) {
+      m.weapon = { butt: back, tip: front };
+      return;
+    }
     m.cap(back, front, 0.055 * r, p.wood, 0.02);
     const ux = (front[0] - back[0]) / len, uz = (front[2] - back[2]) / len;
     m.poly([add(front, [-uz * 0.08 * r, 0, ux * 0.08 * r]), add(front, [ux * 0.5 * r, 0, uz * 0.5 * r]), add(front, [uz * 0.08 * r, 0, -ux * 0.08 * r])], p.steel, 0.021, 'metal');
@@ -520,6 +531,10 @@ function horseman(m: Model, r: number, p: Palette, frame: number, variant: numbe
   m.cap(add(shoulder, [0, 0.3 * r, 0]), lanceHand, 0.1 * r, p.mail, 0.02, 'metal');
   const butt: V3 = add(lanceHand, [-0.9 * r, 0.02 * r, 0.12 * r]);
   const tip: V3 = add(lanceHand, [3.4 * r, 0.05 * r, moving || attack >= 0 ? -0.35 * r : 1.2 * r]);
+  if (m.detach) {
+    m.weapon = { butt, tip };
+    return;
+  }
   m.cap(butt, tip, 0.055 * r, p.wood, 0.01);
   const dx = tip[0] - butt[0], dz = tip[2] - butt[2], len = Math.hypot(dx, dz);
   const at = (k: number, upAmt: number): V3 => [butt[0] + dx * k - (dz / len) * upAmt, tip[1], butt[2] + dz * k + (dx / len) * upAmt];
@@ -576,13 +591,63 @@ export function canvasPainter(ctx: CanvasRenderingContext2D): Painter {
   };
 }
 
+/** A long weapon's shaft in unit-local 3D (forward, right, up), butt to tip. */
+export interface WeaponSegment {
+  butt: V3;
+  tip: V3;
+}
+
 export interface FigureFrame {
   /** Bounds in local units (origin at the feet). */
   minX: number;
   minY: number;
   maxX: number;
   maxY: number;
+  /** The detached long weapon for this frame, if any (see buildFigure's `detachWeapon`). */
+  weapon: WeaponSegment | null;
   draw(p: Painter, ox: number, oy: number): void;
+}
+
+/**
+ * Where a unit-local point lands on screen for a figure facing `angle`, relative to
+ * its feet. `mirror` matches a mirrored (west-facing) sprite, whose handedness flips.
+ */
+export function projectLocal(v: readonly number[], angle: number, mirror = false): { x: number; y: number; depth: number } {
+  const f = v[0], s = mirror ? -v[1] : v[1], z = v[2];
+  const c = Math.cos(angle), sn = Math.sin(angle);
+  const wx = f * c - s * sn, wy = f * sn + s * c;
+  return { x: wx, y: wy * GROUND - z * HEIGHT, depth: wy };
+}
+
+/**
+ * Paint a long weapon lying along +x from its butt at (ox, oy) for `len` units, in
+ * the figures' shading: a lance with its steel head and team pennant (hanging toward
+ * +y), or a pike with its long blade.
+ */
+export function paintLongWeapon(g: Painter, kind: 'lance' | 'pike', team: Team, r: number, theme: Theme, len: number, ox: number, oy: number): void {
+  const p = palette(team, theme);
+  const w = 0.055 * r;
+  const rim = Math.max(0.18, r * 0.035);
+  const x1 = ox + len;
+  g.line(ox, oy, x1, oy, (w + rim) * 2, 0x1c1a14);
+  if (kind === 'lance') {
+    const head = [x1 - 0.03 * len, oy - 0.035 * r, x1 + 0.1 * len, oy, x1 - 0.03 * len, oy + 0.035 * r];
+    const pen = [ox + 0.8 * len, oy, ox + 0.92 * len, oy, ox + 0.82 * len, oy + 0.3 * r];
+    g.poly(head, 0x1c1a14, 1, rim);
+    g.poly(pen, 0x1c1a14, 1, rim);
+    g.line(ox, oy, x1, oy, w * 2, shade(p.wood, 0.75));
+    g.line(ox, oy - w * 0.3, x1, oy - w * 0.3, w * 0.9, shade(p.wood, 1.1));
+    g.poly(head, shade(p.steel, 1.1));
+    g.poly(pen, p.team);
+    g.poly([ox + 0.8 * len, oy, ox + 0.92 * len, oy, ox + 0.86 * len, oy + 0.1 * r], shade(p.team, 1.15));
+    return;
+  }
+  const blade = [x1, oy - 0.08 * r, x1 + 0.5 * r, oy, x1, oy + 0.08 * r];
+  g.poly(blade, 0x1c1a14, 1, rim);
+  g.line(ox, oy, x1, oy, w * 2, shade(p.wood, 0.75));
+  g.line(ox, oy - w * 0.3, x1, oy - w * 0.3, w * 0.9, shade(p.wood, 1.1));
+  g.poly(blade, shade(p.steel, 1.1));
+  g.poly([x1, oy - 0.08 * r, x1 + 0.5 * r, oy, x1, oy], shade(p.steel, 1.4));
 }
 
 interface Shape {
@@ -607,10 +672,13 @@ const SUN_SCREEN = (() => {
 
 /**
  * Build one frame of a unit design facing `angle`, ready to paint at any offset.
- * `variant` picks the horse coat for cavalry and the look for infantry.
+ * `variant` picks the horse coat for cavalry and the look for infantry. With
+ * `detachWeapon`, a levelled pike or couched lance is left out and returned as
+ * `weapon` for the caller to draw at the exact heading.
  */
-export function buildFigure(type: UnitType, team: Team, r: number, theme: Theme, variant: number, angle: number, frame: number): FigureFrame {
+export function buildFigure(type: UnitType, team: Team, r: number, theme: Theme, variant: number, angle: number, frame: number, detachWeapon = false): FigureFrame {
   const m = new Model();
+  m.detach = detachWeapon;
   const p = palette(team, theme);
   const { kind, t } = poseOf(frame);
   if (type === 'cavalry') horseman(m, r, p, frame, variant);
@@ -689,7 +757,7 @@ export function buildFigure(type: UnitType, team: Team, r: number, theme: Theme,
       else paintFlat(g, s, ox, oy, shade(s.color, (0.55 + 0.6 * s.lit) * ao + (s.finish === 'metal' ? 0.1 * s.lit : 0)), 0);
     }
   };
-  return { minX, minY, maxX, maxY, draw };
+  return { minX, minY, maxX, maxY, weapon: m.weapon, draw };
 }
 
 /** A rounded part: shadowed body, lit middle, a soft (or sharp, for metal) highlight. */

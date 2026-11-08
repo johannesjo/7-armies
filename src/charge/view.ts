@@ -5,7 +5,7 @@ import { Theme } from '../theme';
 import { drawUnitArt, HORSE_VARIANTS, attackPose, attackDuration } from '../unit-art';
 import { CHARGE as C } from './config';
 import { ArtStyle, drawStyledUnit, paintFeltTile, paintPaperTile } from './art-styles';
-import { CORPSE_FRAME, FRAMES, DRAWN_DIRS, IDLE_FRAME, INFANTRY_LOOKS, attackFrame, buildFigure, canvasPainter, deathFrame, dirAngle, facingFrame, fleeFrame, walkFrame } from './figure-art';
+import { CORPSE_FRAME, FRAMES, DRAWN_DIRS, IDLE_FRAME, INFANTRY_LOOKS, WeaponSegment, attackFrame, buildFigure, canvasPainter, deathFrame, dirAngle, facingFrame, fleeFrame, paintLongWeapon, projectLocal, walkFrame } from './figure-art';
 import { Battalion, ChargeSim, SimEvent, Soldier, Squadron, angleDiff, attackSide, mulberry32 } from './sim';
 import { PathPoint } from './path';
 import { DirectZones } from './direct';
@@ -37,6 +37,17 @@ interface FigureSheet {
   frames: Texture[];
   ax: number[];
   ay: number[];
+  /**
+   * Levelled pikes and couched lances aren't in the frames: they're a sprite of their
+   * own, turned to the unit's exact heading so they swing smoothly. Per frame (any
+   * facing): the shaft in unit-local 3D, or null when nothing is carried detached.
+   */
+  weapons: (WeaponSegment | null)[];
+  /** The weapon sprite's texture (drawn along +x from the butt) and its shaft length. */
+  weaponTex: Texture | null;
+  weaponLen: number;
+  /** Where the butt sits in the weapon texture (its anchor). */
+  weaponAnchor: { x: number; y: number };
 }
 
 /** Baked figure sheets live for the whole session: only the first battle pays to draw them. */
@@ -756,9 +767,10 @@ export class ChargeView {
     // Sheets are many and large, so their resolution is capped: units are small on screen.
     const maxW = Math.floor(4096 / res);
     const PAD = 1;
+    const detach = type === 'pikeman' || type === 'cavalry';
     const figs = [];
     for (let d = 0; d < DRAWN_DIRS; d++) {
-      for (let f = 0; f < FRAMES; f++) figs.push(buildFigure(type, team, r, this.theme, variant, dirAngle(d), f));
+      for (let f = 0; f < FRAMES; f++) figs.push(buildFigure(type, team, r, this.theme, variant, dirAngle(d), f, detach));
     }
     const cells: { x: number; y: number; w: number; h: number }[] = [];
     let x = 0, y = 0, rowH = 0, width = 0;
@@ -780,10 +792,34 @@ export class ChargeView {
     figs.forEach((fr, i) => fr.draw(painter, cells[i].x + PAD - fr.minX, cells[i].y + PAD - fr.minY));
     const source = new CanvasSource({ resource: canvas, resolution: res });
     const frames = cells.map(c => new Texture({ source, frame: new Rectangle(c.x, c.y, c.w, c.h) }));
+    // The detached weapon: the same in every facing, so take it from the first row.
+    const weapons = figs.slice(0, FRAMES).map(fr => fr.weapon);
+    let weaponTex: Texture | null = null, weaponLen = 0;
+    const weaponAnchor = { x: 0, y: 0.5 };
+    const seg = weapons.find(w => w);
+    if (seg) {
+      weaponLen = Math.hypot(seg.tip[0] - seg.butt[0], seg.tip[1] - seg.butt[1], seg.tip[2] - seg.butt[2]);
+      const kind = type === 'cavalry' ? 'lance' : 'pike';
+      const wPad = 1, tw = weaponLen * 1.15 + r * 0.6 + wPad * 2, th = r * 0.8 + wPad * 2;
+      const wc = document.createElement('canvas');
+      wc.width = Math.ceil(tw * res);
+      wc.height = Math.ceil(th * res);
+      const wctx = wc.getContext('2d')!;
+      wctx.scale(res, res);
+      const oy = wPad + r * 0.2;
+      paintLongWeapon(canvasPainter(wctx), kind, team, r, this.theme, weaponLen, wPad, oy);
+      weaponTex = new Texture({ source: new CanvasSource({ resource: wc, resolution: res }) });
+      weaponAnchor.x = wPad / tw;
+      weaponAnchor.y = oy / th;
+    }
     const sheet = {
       frames,
       ax: figs.map((fr, i) => (PAD - fr.minX) / cells[i].w),
       ay: figs.map((fr, i) => (PAD - fr.minY) / cells[i].h),
+      weapons,
+      weaponTex,
+      weaponLen,
+      weaponAnchor,
     };
     figureSheets.set(key, sheet);
     return sheet;
@@ -819,8 +855,11 @@ export class ChargeView {
       // No two men quite alike: a touch lighter or darker each (plus the size jitter).
       const tone = 0xe4 + ((s.id * 37) % 28);
       body.tint = (tone << 16) | (tone << 8) | tone;
-      weapon = new Sprite(Texture.EMPTY);
+      weapon = new Sprite(sheet.weaponTex ?? Texture.EMPTY);
+      weapon.anchor.set(sheet.weaponAnchor.x, sheet.weaponAnchor.y);
       weapon.visible = false;
+      // The weapon goes in front of the body or behind it, depending on where it points.
+      root.sortableChildren = true;
     } else {
       const t = this.texturesFor(s.type, s.team, s.radius, variant);
       body = new Sprite(t.body);
@@ -875,6 +914,7 @@ export class ChargeView {
     const u = this.units.get(id);
     if (!u) return;
     this.units.delete(id);
+    if (this.upright) u.weapon.visible = false; // the falling frames have no pike or lance
     // Trampled men are flung along the charge, a little to either side.
     const a = angle + (this.rand() - 0.5) * 0.9;
     this.dying.push({
@@ -1213,6 +1253,29 @@ export class ChargeView {
     else if (moving) frame = walkFrame(u.phase);
     this.showFrame(u, dir * FRAMES + frame);
     u.body.scale.x = mirror ? -1 : 1;
+    this.poseWeapon(u, s, frame, mirror, quirk);
+  }
+
+  /**
+   * Lay the detached pike or lance from the unit's hands along its exact heading:
+   * the body shows one of 16 facings, but the long weapon turns smoothly.
+   */
+  private poseWeapon(u: UnitGfx, s: Soldier, frame: number, mirror: boolean, quirk: number): void {
+    const sheet = u.sheet!;
+    const seg = sheet.weapons[frame];
+    if (!seg || !sheet.weaponTex) { u.weapon.visible = false; return; }
+    // Mirrored sprites stand for the opposite heading, flipped; the weapon follows the
+    // true heading with the handedness the mirrored art shows.
+    const heading = s.facing + (s.rider || s.fleeing ? 0 : quirk * 0.28);
+    const a = projectLocal(seg.butt, heading, mirror), b = projectLocal(seg.tip, heading, mirror);
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const rot = Math.atan2(dy, dx);
+    u.weapon.visible = true;
+    u.weapon.position.set(u.body.x + a.x, u.body.y + a.y);
+    u.weapon.rotation = rot;
+    // Foreshortened as it points toward or away from the camera; the pennant hangs down.
+    u.weapon.scale.set(Math.hypot(dx, dy) / sheet.weaponLen, Math.cos(rot) < 0 ? -1 : 1);
+    u.weapon.zIndex = (a.depth + b.depth) / 2 > -0.1 * s.radius ? 1 : -1;
   }
 
   private showFrame(u: UnitGfx, i: number): void {

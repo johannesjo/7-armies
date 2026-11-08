@@ -375,32 +375,51 @@ describe('field edges', () => {
 });
 
 describe('army morale', () => {
-  it('the whole red army flees once enough of it has broken — and that wins the battle', () => {
-    const reds = [0, 1, 2, 3, 4].map(i => block({ x: 300 + i * 150 }));
-    const sim = new ChargeSim([...reds, block({ team: 'blue', y: 900, facing: UP })], { seed: 1, squad: null });
-    expect(sim.armyMorale('red')).toBe(1);
-    // Rout two of five battalions (40%): wavering, but still fighting.
-    sim.battalions[0].morale = -1;
-    sim.battalions[1].morale = -1;
-    sim.step(1 / 60);
+  const run = (sim: ChargeSim, seconds: number) => { for (let t = 0; t < seconds; t += 1 / 30) sim.step(1 / 30); };
+
+  it('a wavering army slowly loses heart instead of recovering', () => {
+    const reds = [0, 1, 2, 3, 4, 5].map(i => block({ x: 200 + i * 150 }));
+    const sim = new ChargeSim([...reds, block({ team: 'blue', y: 1300, facing: UP })], { seed: 1, squad: null });
+    for (const b of sim.battalions.slice(0, 3)) b.morale = -1;
+    sim.step(1 / 30);
+    sim.step(1 / 30);
+    // Half the army gone: morale low enough to waver.
+    expect(sim.armyMorale('red')).toBeLessThan(C.ARMY_WAVER);
+    const before = sim.battalions[4].morale;
+    run(sim, 3);
+    expect(sim.battalions[4].morale).toBeLessThan(before - 2);
     expect(sim.outcome).toBe('playing');
-    expect(sim.armyMorale('red')).toBeCloseTo(1 - 0.4 / C.ARMY_BREAK.red, 1);
-    // A third (60%) breaks the army: everyone left runs and the day is won.
-    sim.battalions[2].morale = -1;
-    sim.step(1 / 60);
+  });
+
+  it('when morale runs out the red army collapses battalion by battalion — then it is won', () => {
+    const reds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => block({ x: 150 + i * 100 }));
+    const sim = new ChargeSim([...reds, block({ team: 'blue', y: 1300, facing: UP })], { seed: 1, squad: null });
+    for (const b of sim.battalions.slice(0, 7)) b.morale = -1; // 70%
+    sim.step(1 / 30);
+    sim.step(1 / 30);
     expect(sim.armyBroken.red).toBe(true);
+    // Not an instant switch: the last battalions are still standing for a few seconds...
+    expect(sim.outcome).toBe('playing');
+    expect(sim.battalions.filter(b => b.team === 'red' && !b.routed).length).toBe(3);
+    run(sim, C.ARMY_COLLAPSE_MIN + 0.5);
+    const mid = sim.battalions.filter(b => b.team === 'red' && !b.routed).length;
+    expect(mid).toBeLessThan(3);
+    // ...then the collapse runs its course and the day is won.
+    run(sim, C.ARMY_COLLAPSE_TIME + 1);
     expect(sim.battalions.filter(b => b.team === 'red').every(b => b.routed)).toBe(true);
     expect(sim.outcome).toBe('victory');
   });
 
-  it('our army breaking is a defeat', () => {
-    const blues = [0, 1, 2, 3, 4].map(i => block({ team: 'blue', x: 300 + i * 150, y: 900, facing: UP }));
+  it('our army collapsing is a defeat', () => {
+    const blues = [0, 1, 2, 3, 4].map(i => block({ team: 'blue', x: 300 + i * 150, y: 1300, facing: UP }));
     const sim = new ChargeSim([block(), ...blues], { seed: 1, squad: null });
     // Four of five battalions (80%) gone: the last one gives up too.
     for (const b of sim.battalions.filter(b => b.team === 'blue').slice(0, 4)) b.morale = -1;
     let broke = false;
-    sim.step(1 / 60);
-    for (const e of sim.events) if (e.type === 'army-break' && e.team === 'blue') broke = true;
+    for (let t = 0; t < C.ARMY_COLLAPSE_TIME + 3 && sim.outcome === 'playing'; t += 1 / 30) {
+      sim.step(1 / 30);
+      for (const e of sim.events) if (e.type === 'army-break' && e.team === 'blue') broke = true;
+    }
     expect(broke).toBe(true);
     expect(sim.outcome).toBe('defeat');
   });

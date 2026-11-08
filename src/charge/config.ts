@@ -208,12 +208,17 @@ export const CHARGE = {
 
   // --- Army morale ---
   /**
-   * An army breaks and flees, all of it, once this share of its foot is dead or fled.
-   * Blue holds out a little longer so the battle lasts a few minutes without you.
+   * An army's morale runs out once this share of its foot is dead or fled. Blue holds
+   * out a little longer so the battle lasts a few minutes without you.
    */
-  ARMY_BREAK: { blue: 0.8, red: 0.6 },
-  /** Army morale (0..1) below which it is announced as wavering. */
-  ARMY_WAVER: 0.3,
+  ARMY_BREAK: { blue: 0.8, red: 0.7 },
+  /** Below this army morale (0..1) the army wavers: every battalion slowly loses heart... */
+  ARMY_WAVER: 0.35,
+  /** ...by up to this much morale per second as army morale nears zero, and stops recovering. */
+  ARMY_DRAIN: 4,
+  /** When morale runs out the army collapses: the rest break one by one over this long (s). */
+  ARMY_COLLAPSE_TIME: 10,
+  ARMY_COLLAPSE_MIN: 1.2,
 
   // --- The red general ---
   GENERAL_HP: 45,

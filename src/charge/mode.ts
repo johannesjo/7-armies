@@ -486,11 +486,14 @@ export class ChargeMode {
     let hurt = false;
     for (const e of events) {
       if (e.type === 'rider-hit' && e.mine) hurt = true;
-      if (e.type === 'rout' && e.team === 'blue') this.banner('Our line is breaking — hurry!', 2200);
+      if (e.type === 'rout' && e.team === 'blue' && !this.sim?.armyBroken.blue) this.banner('Our line is breaking — hurry!', 2200);
       if (e.type === 'rout' && e.team === 'red' && this.sim && this.sim.outcome === 'playing') {
-        this.banner(`Enemy morale ${Math.round(this.sim.armyMorale('red') * 100)}%`, 1600);
+        if (!this.sim.armyBroken.red) this.banner(`Enemy morale ${Math.round(this.sim.armyMorale('red') * 100)}%`, 1600);
       }
       if (e.type === 'rider-down' && e.mine && e.wasLeader && this.sim?.leader) this.banner('A new rider takes the banner', 1600);
+      if (e.type === 'army-break') {
+        this.banner(e.team === 'red' ? 'The enemy army is breaking!' : 'Our army is breaking!', 3000);
+      }
       if (e.type === 'army-waver') {
         this.banner(e.team === 'red' ? 'The enemy wavers — keep pressing!' : 'Our army wavers — hurry!', 2400);
       }

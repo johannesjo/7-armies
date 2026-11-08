@@ -144,6 +144,8 @@ export interface Battalion {
   lastPlayerHit: number;
   /** Paces how often wounded men in the front rank swap with fresh men behind. */
   rotateTimer: number;
+  /** Sim time this battalion gives up as its army collapses (Infinity = not yet). */
+  breakAt: number;
 }
 
 export interface Arrow {
@@ -294,7 +296,10 @@ export class ChargeSim {
   pendingWaves: Wave[] = [];
   /** Share of each army's foot dead or fled (plus the general's fall, for red). */
   readonly armyLoss: Record<Team, number> = { blue: 0, red: 0 };
+  /** The army's morale has run out and it is collapsing, battalion by battalion. */
   readonly armyBroken: Record<Team, boolean> = { blue: false, red: false };
+  /** Morale each battalion of a wavering army loses per second. */
+  private readonly armyDrain: Record<Team, number> = { blue: 0, red: 0 };
   private readonly armyWavered: Record<Team, boolean> = { blue: false, red: false };
   generalFallen = false;
   generalKilledByPlayer = false;
@@ -418,6 +423,7 @@ export class ChargeSim {
       engagedTimer: 0,
       lastPlayerHit: -99,
       rotateTimer: this.rand() * C.ROTATE_INTERVAL,
+      breakAt: Infinity,
     };
     for (let i = 0; i < spec.count; i++) {
       const p = this.slotPos(bat, i);
@@ -1771,11 +1777,13 @@ export class ChargeSim {
       const alive = this.members(b).length;
       lost[b.team] += b.initial - alive;
       if (alive === 0) { b.routed = true; continue; }
-      if (b.sinceShock > C.MORALE_RECOVERY_DELAY) {
+      const drain = this.armyDrain[b.team];
+      if (drain > 0) b.morale -= drain * dt; // a wavering army: heart drains, nothing recovers
+      else if (b.sinceShock > C.MORALE_RECOVERY_DELAY) {
         const cap = C.MORALE_CAP_BASE + (100 - C.MORALE_CAP_BASE) * (alive / b.initial);
         if (b.morale < cap) b.morale = Math.min(cap, b.morale + C.MORALE_RECOVERY * dt);
       }
-      if (b.morale <= 0 || alive < b.initial * C.ROUT_STRENGTH) {
+      if (b.morale <= 0 || alive < b.initial * C.ROUT_STRENGTH || this.time >= b.breakAt) {
         this.rout(b);
         lost[b.team] += alive; // the men still standing now run too
       }
@@ -1784,8 +1792,9 @@ export class ChargeSim {
   }
 
   /**
-   * Each army's heart follows how much of it is dead or fled. Past ARMY_BREAK the
-   * rest gives up and runs: one giant battle, and when it's won it's won.
+   * Each army's heart follows how much of it is dead or fled. Low, the army wavers
+   * and its battalions slowly lose heart; out, it collapses — the rest break one by
+   * one, the shakiest first. One giant battle, and when it's won it's won.
    */
   private updateArmies(lost: Record<Team, number>, total: Record<Team, number>): void {
     if (this.outcome !== 'playing') return;
@@ -1796,28 +1805,29 @@ export class ChargeSim {
       this.armyLoss[team] = loss;
       // Reinforcements still on the way keep an army in the fight.
       if (team === 'red' && this.pendingWaves.length > 0) continue;
-      if (!this.armyWavered[team] && this.armyMorale(team) < C.ARMY_WAVER) {
+      const morale = this.armyMorale(team);
+      if (!this.armyWavered[team] && morale < C.ARMY_WAVER) {
         this.armyWavered[team] = true;
         this.events.push({ type: 'army-waver', team });
       }
+      this.armyDrain[team] = morale < C.ARMY_WAVER ? C.ARMY_DRAIN * (1 - morale / C.ARMY_WAVER) : 0;
       if (loss >= C.ARMY_BREAK[team]) this.breakArmy(team);
     }
   }
 
+  /** Morale is gone: the remaining battalions give up one after another, shakiest first. */
   private breakArmy(team: Team): void {
     this.armyBroken[team] = true;
-    let x = 0, y = 0, n = 0;
-    for (const b of this.battalions) {
-      if (b.team !== team || b.routed) continue;
-      b.routed = true;
-      b.morale = 0;
-      x += b.x; y += b.y; n++;
-      for (const s of this.members(b)) {
-        s.fleeing = true;
-        s.fleeDrift = (this.rand() - 0.5) * 0.9;
-      }
-    }
-    if (n === 0) { x = C.WORLD_W / 2; y = C.FRONT_Y; n = 1; }
+    this.armyLoss[team] = C.ARMY_BREAK[team];
+    const standing = this.battalions.filter(b => b.team === team && !b.routed).sort((a, b) => a.morale - b.morale);
+    let x = 0, y = 0;
+    standing.forEach((b, i) => {
+      const k = standing.length > 1 ? i / (standing.length - 1) : 0;
+      b.breakAt = this.time + C.ARMY_COLLAPSE_MIN + k * C.ARMY_COLLAPSE_TIME + this.rand() * 0.8;
+      x += b.x; y += b.y;
+    });
+    const n = Math.max(1, standing.length);
+    if (standing.length === 0) { x = C.WORLD_W / 2; y = C.FRONT_Y; }
     this.events.push({ type: 'army-break', team, x: x / n, y: y / n });
   }
 
@@ -1857,19 +1867,18 @@ export class ChargeSim {
 
   private checkOutcome(): void {
     if (this.outcome !== 'playing') return;
-    if (this.armyBroken.red) {
+    const redGone = this.battalions.every(b => b.team !== 'red' || b.routed);
+    if (this.pendingWaves.length === 0 && redGone
+      && (this.armyBroken.red || this.squadrons.every(sq => sq.team !== 'red' || sq.riders.length === 0))) {
+      // Every battalion has run (the knights quit the field with them).
       this.outcome = 'victory';
       this.outcomeReason = this.generalFallen ? 'Their general is dead and the enemy army flees!' : 'The enemy army breaks and flees!';
-    } else if (this.armyBroken.blue) {
+    } else if (this.armyBroken.blue && this.battalions.every(b => b.team !== 'blue' || b.routed)) {
       this.outcome = 'defeat';
       this.outcomeReason = 'Our army has lost heart and flees.';
-    } else if (this.pendingWaves.length === 0 && this.battalions.every(b => b.team !== 'red' || b.routed)
-      && this.squadrons.every(sq => sq.team !== 'red' || sq.riders.length === 0)) {
-      this.outcome = 'victory';
-      this.outcomeReason = 'The enemy army has broken!';
     } else if (this.battalions.every(b => b.team !== 'blue' || b.role !== 'front' || b.routed)) {
       this.outcome = 'defeat';
-      this.outcomeReason = 'Our battle line has collapsed.';
+      this.outcomeReason = this.armyBroken.blue ? 'Our army has lost heart and flees.' : 'Our battle line has collapsed.';
     } else if (this.riders.length === 0 && this.leader === null && this.ridersLost > 0) {
       this.outcome = 'defeat';
       this.outcomeReason = 'Your squadron has fallen.';

@@ -381,9 +381,11 @@
     }
     #ch-banner {
       position: absolute;
-      top: 34%;
+      /* Near the top, under the HUD, clear of the squadron at the centre of the screen. */
+      top: calc(96px + env(safe-area-inset-top, 0px));
       left: 50%;
-      transform: translate(-50%, -50%) scale(0.9);
+      transform: translate(-50%, 0) scale(0.9);
+      transform-origin: 50% 0;
       /* Fits any screen: scales with its width and wraps (balanced) rather than overflowing. */
       font-size: clamp(16px, 3.4vw, 34px);
       font-weight: 800;
@@ -399,7 +401,10 @@
       pointer-events: none;
       text-shadow: 0 2px 12px rgba(0,0,0,0.5);
     }
-    #ch-banner.active { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    #ch-banner.active { opacity: 1; transform: translate(-50%, 0) scale(1); }
+    /* Victory and defeat: mid-screen. */
+    #ch-banner.center { top: 40%; transform: translate(-50%, -50%) scale(0.9); transform-origin: 50% 50%; }
+    #ch-banner.center.active { transform: translate(-50%, -50%) scale(1); }
     #ch-end-btn {
       display: none;
       position: absolute;
@@ -593,7 +598,7 @@
       #ch-riders { font-size: 16px; }
       #ch-score { font-size: 20px; }
       #ch-minimap { width: 128px; height: 80px; }
-      #ch-banner { font-size: clamp(15px, 4.6vw, 22px); letter-spacing: 1px; }
+      #ch-banner { font-size: clamp(15px, 4.6vw, 22px); letter-spacing: 1px; top: calc(140px + env(safe-area-inset-top, 0px)); }
       #ch-buttons { top: calc(84px + env(safe-area-inset-top, 0px)); }
       /* Small screens: just how to ride, below the buttons; the tactics tips are in the pause menu. */
       #ch-hint { font-size: 11px; padding: 6px 10px; line-height: 1.45; top: calc(140px + env(safe-area-inset-top, 0px)); }
@@ -607,7 +612,7 @@
       #ch-minimap { width: 128px; height: 80px; }
       #ch-hint { top: calc(70px + env(safe-area-inset-top, 0px)); font-size: 11px; padding: 6px 12px; line-height: 1.5; max-width: min(460px, calc(100% - 220px)); }
       #ch-hint .hint-more { display: none; }
-      #ch-banner { font-size: clamp(15px, 3vw, 22px); top: 72%; }
+      #ch-banner { font-size: clamp(15px, 3vw, 22px); top: calc(78px + env(safe-area-inset-top, 0px)); }
     }
     body.day-mode #charge-hud { text-shadow: 0 1px 2px rgba(255,255,255,0.6); }
     body.day-mode .ch-bar { background: rgba(68,51,34,0.18); }

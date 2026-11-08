@@ -496,7 +496,7 @@ export class ChargeMode {
         this.pursuitTimer = 0;
         this.pursuitKills = sim.kills;
         this.victoryRiders = sim.riders.length;
-        this.banner('Victory!', 3200, true);
+        this.banner('Victory!', 3200, true, true);
         this.audio.victory();
         this.endBtn.classList.add('active');
         setTimeout(() => {
@@ -511,7 +511,7 @@ export class ChargeMode {
     } else if (sim.outcome !== 'playing') {
       if (this.endTimer < 0) {
         this.endTimer = END_DELAY;
-        this.banner('Defeat', END_DELAY * 1000, true);
+        this.banner('Defeat', END_DELAY * 1000, true, true);
       }
       this.endTimer -= rawDt;
       if (this.endTimer <= 0) this.finish();
@@ -563,9 +563,19 @@ export class ChargeMode {
   }
 
   /** Centre-screen message; skipped when combat text is off unless `force` (victory/defeat). */
-  private banner(text: string, ms: number, force = false): void {
+  /**
+   * Show a banner. Most sit near the top, out of the way of the riding (just below
+   * the help text while that's still up); `center` puts the big endings mid-screen.
+   */
+  private banner(text: string, ms: number, force = false, center = false): void {
     if (!this.combatText && !force) return;
     this.bannerEl.textContent = text;
+    this.bannerEl.classList.toggle('center', center);
+    this.bannerEl.style.top = '';
+    if (!center && this.hintEl.classList.contains('active')) {
+      const below = this.hintEl.getBoundingClientRect().bottom - this.screen.getBoundingClientRect().top + 10;
+      this.bannerEl.style.top = `${Math.round(below)}px`;
+    }
     this.bannerEl.classList.add('active');
     if (this.bannerTimeout) clearTimeout(this.bannerTimeout);
     this.bannerTimeout = setTimeout(() => this.bannerEl.classList.remove('active'), ms);

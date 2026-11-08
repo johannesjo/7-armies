@@ -28,6 +28,8 @@ interface UnitGfx {
   speed: number;
   sheet: FigureSheet | null;
   frame: number;
+  /** Last hoof fall stamped into the ground (gait quarter-cycles), for hoof prints. */
+  hoofBeat: number | null;
 }
 
 /** Every facing and frame of one upright unit design: textures and their foot anchors. */
@@ -828,7 +830,7 @@ export class ChargeView {
     }
     root.addChild(body, weapon);
     this.unitLayer.addChild(root);
-    u = { root, body, weapon, pulse: 0, fleeing: false, aimRot: 0, stamp: this.unitStamp, px: s.x, py: s.y, phase: (s.id * 1.7) % 6.28, speed: 0, sheet, frame: -1 };
+    u = { root, body, weapon, pulse: 0, fleeing: false, aimRot: 0, stamp: this.unitStamp, px: s.x, py: s.y, phase: (s.id * 1.7) % 6.28, speed: 0, sheet, frame: -1, hoofBeat: null };
     this.units.set(s.id, u);
     return u;
   }
@@ -1337,27 +1339,51 @@ export class ChargeView {
           color: this.dust, alpha: 0.32 * k, stain: false,
         });
       }
-      if (stamp && this.upright) {
-        // Paired hoof prints, and now and then a clod of turf torn up at the gallop.
-        const c = Math.cos(r.facing), sn = Math.sin(r.facing);
-        for (const side of [-1.6, 1.6]) {
-          const px = r.x - sn * side + (this.rand() - 0.5) * 2 - c * (side > 0 ? 2 : 0);
-          const py = r.y + c * side + (this.rand() - 0.5) * 2 - sn * (side > 0 ? 2 : 0);
-          this.stainBatch.poly(ovalPoints(px, py, 1.1, 0.7, r.facing)).fill({ color: mixColor(this.theme.dirt, 0x2a2010, 0.35), alpha: 0.24 * k });
-        }
-        if (this.rand() < 0.3 * k) {
-          this.stainBatch.poly(ovalPoints(r.x - c * 6, r.y - sn * 6, 2.6 + this.rand() * 1.5, 1.4, r.facing + (this.rand() - 0.5)))
-            .fill({ color: this.theme.dirt, alpha: 0.1 });
-        }
-        this.stainDirty = true;
-      } else if (stamp) {
+      if (stamp && !this.upright) {
         // Hoof prints baked into the ground: the field remembers your charges.
+        // (The upright style stamps them per hoof fall instead; see stampHoofPrints.)
         const side = this.rand() < 0.5 ? 2 : -2;
         const jx = (this.rand() - 0.5) * 3, jy = (this.rand() - 0.5) * 3;
         this.stainBatch.circle(r.x - Math.sin(r.facing) * side + jx, r.y + Math.cos(r.facing) * side + jy, 0.8)
           .fill({ color: this.theme.grass ? this.theme.dirt : this.theme.obstacleBorder, alpha: this.theme.grass ? 0.16 : 0.08 });
         this.stainDirty = true;
       }
+    }
+    if (this.upright) this.stampHoofPrints(sim);
+  }
+
+  /**
+   * Every horseman at a canter or faster presses a pair of hoof prints into the turf
+   * each time a hoof comes down in his gait cycle, so charges leave tracks that build
+   * into churned lanes. Galloping hard also tears up the odd clod of earth.
+   */
+  private stampHoofPrints(sim: ChargeSim): void {
+    const print = mixColor(this.theme.dirt, 0x2a1e10, 0.45);
+    for (const s of sim.soldiers) {
+      if (!s.alive || s.type !== 'cavalry') continue;
+      const u = this.units.get(s.id);
+      if (!u || u.speed < 35) continue;
+      // Four hoof falls per stride.
+      const beat = Math.floor(u.phase / (Math.PI / 2));
+      if (beat === u.hoofBeat) continue;
+      const first = u.hoofBeat === null;
+      u.hoofBeat = beat;
+      if (first) continue;
+      const k = Math.min(1, u.speed / C.GALLOP_SPEED);
+      const c = Math.cos(s.facing), sn = Math.sin(s.facing);
+      // Fore and hind feet land in turn; each fall leaves a left-right pair.
+      const along = beat % 2 === 0 ? 4.5 : -4.5;
+      for (const side of [-1.5, 1.5]) {
+        const x = s.x + c * along - sn * side + (this.rand() - 0.5) * 1.2;
+        const y = s.y + sn * along + c * side + (this.rand() - 0.5) * 1.2;
+        this.stainBatch.poly(ovalPoints(x, y, 1.5, 1.1, s.facing)).fill({ color: print, alpha: 0.2 + 0.18 * k });
+        this.stainBatch.poly(ovalPoints(x + c * 0.4, y + sn * 0.4, 0.7, 0.55, s.facing)).fill({ color: print, alpha: 0.15 * k });
+      }
+      if (k > 0.7 && this.rand() < 0.25) {
+        this.stainBatch.poly(ovalPoints(s.x - c * 7, s.y - sn * 7, 2.4 + this.rand() * 1.6, 1.3, s.facing + (this.rand() - 0.5)))
+          .fill({ color: this.theme.dirt, alpha: 0.14 });
+      }
+      this.stainDirty = true;
     }
   }
 

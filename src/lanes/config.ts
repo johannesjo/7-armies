@@ -106,18 +106,13 @@ export const LANES = {
   THUNDER_IMPACT: 2,
   THUNDER_SHOCK: 2,
   THUNDER_STRIKE: 1.6,
-  /** Hussars' Wheel: the squadron turns far tighter at full gallop for a few seconds. */
-  WHEEL_TIME: 4,
-  WHEEL_COOLDOWN: 18,
-  WHEEL_TURN: 2.2,
-  WHEEL_SPEED: 1.12,
   /** Horse archers' Arrow Storm: every rider looses this many arrows at once, this far. */
   STORM_ARROWS: 3,
   STORM_RANGE: 320,
   STORM_COOLDOWN: 16,
 
   // --- Horse archers ---
-  HA_RANGE: 230,
+  HA_RANGE: 260,
   /** Arrow damage multipliers against foot and against horsemen. */
   HA_POWER_FOOT: 4,
   HA_POWER_RIDER: 0.6,

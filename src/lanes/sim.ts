@@ -296,9 +296,6 @@ export class LaneSim extends ChargeSim {
       e.impact = m.impact * L.THUNDER_IMPACT;
       e.shock = m.shock * L.THUNDER_SHOCK;
       e.strike = m.strike * L.THUNDER_STRIKE;
-    } else if (h.ability === 'wheel') {
-      e.turn = m.turn * L.WHEEL_TURN;
-      e.speed = m.speed * L.WHEEL_SPEED;
     }
   }
 
@@ -817,7 +814,7 @@ export class LaneSim extends ChargeSim {
     while (h.xp >= xpToNext(h.level)) {
       h.xp -= xpToNext(h.level);
       h.level++;
-      const offer = drawOffer(h.picks, this.rand);
+      const offer = drawOffer(h.picks, this.rand, h.kind);
       if (offer.length > 0) h.offers.push(offer);
       this.emit({ type: 'level', team: h.team, level: h.level });
     }
@@ -836,7 +833,7 @@ export class LaneSim extends ChargeSim {
     this.refreshEff(h);
     // Hands still waiting were dealt before this pick: deal them afresh, so none offers
     // a card that is now maxed.
-    h.offers = h.offers.map(() => drawOffer(h.picks, this.rand)).filter(o => o.length > 0);
+    h.offers = h.offers.map(() => drawOffer(h.picks, this.rand, h.kind)).filter(o => o.length > 0);
     // Tougher riders: everyone's wounds scale with the new strength.
     if (h.mods.hp !== before.hp) {
       for (const r of h.sq.riders) {
@@ -1029,10 +1026,6 @@ export class LaneSim extends ChargeSim {
     if (h.ability === 'thunder') {
       const intoFoot = b && sq.phase === 'charge' && Math.hypot(b.x - Ld.x, b.y - Ld.y) < 170;
       if (intoFoot || (sq.targetSquad && dF < 220)) this.useAbility(h.team);
-    } else if (h.ability === 'wheel') {
-      // Wheel when a fight with horse turns close, or to swing round onto a battalion's side.
-      const swing = b && sq.phase !== 'charge' && Math.hypot(b.x - Ld.x, b.y - Ld.y) < 200;
-      if ((sq.targetSquad && dF < 260) || swing) this.useAbility(h.team);
     } else {
       // Loose the storm once a good number of enemies are in bowshot.
       let inRange = 0;

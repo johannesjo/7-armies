@@ -63,11 +63,26 @@ describe('lanes cards', () => {
   });
 
   it('builds a commander kit from the picks', () => {
-    const m = modsFromPicks(['riders', 'riders', 'barding', 'remounts', 'remounts'], 'hussars');
-    expect(m.maxRiders).toBe(baseMods('hussars').maxRiders + 6);
-    expect(m.hp).toBeCloseTo(baseMods('hussars').hp + 0.2);
+    const m = modsFromPicks(['riders', 'riders', 'barding', 'remounts', 'remounts'], 'archers');
+    expect(m.maxRiders).toBe(baseMods('archers').maxRiders + 6);
+    expect(m.hp).toBeCloseTo(baseMods('archers').hp + 0.2);
     expect(m.remount).toBeCloseTo(14 * 0.7);
     for (const id of CARD_IDS) expect(CARDS[id].title.length).toBeGreaterThan(0);
+  });
+
+  it('each kind of horse is dealt its own cards', () => {
+    const rand = mulberry32(9);
+    const seen = { knights: new Set<string>(), archers: new Set<string>() };
+    for (let i = 0; i < 300; i++) {
+      for (const id of drawOffer([], rand, 'knights')) seen.knights.add(id);
+      for (const id of drawOffer([], rand, 'archers')) seen.archers.add(id);
+    }
+    expect(seen.knights.has('lances')).toBe(true);
+    expect(seen.knights.has('bows')).toBe(false);
+    expect(seen.archers.has('bows')).toBe(true);
+    expect(seen.archers.has('lances')).toBe(false);
+    expect(seen.archers.has('joust')).toBe(false);
+    expect(modsFromPicks(['bows'], 'archers').archery).toBeCloseTo(baseMods('archers').archery * 1.25);
   });
 });
 
@@ -183,15 +198,17 @@ describe('lanes sim', () => {
 
 describe('lanes commanders, abilities and fog', () => {
   it('each kind of horse plays differently', () => {
-    const k = baseMods('knights'), h = baseMods('hussars'), a = baseMods('archers');
-    expect(k.hp).toBeGreaterThan(h.hp);
-    expect(k.strike).toBeGreaterThan(h.strike);
-    expect(h.speed).toBeGreaterThan(k.speed);
-    expect(h.maxRiders).toBeGreaterThan(k.maxRiders);
+    const k = baseMods('knights'), a = baseMods('archers');
+    // Knights: few, tough, heavy, crushing; archers: many, fast, fragile, shooting.
+    expect(k.hp).toBeGreaterThan(a.hp * 1.8);
+    expect(k.impact).toBeGreaterThan(a.impact * 3);
+    expect(k.siege).toBeGreaterThan(a.siege * 2);
+    expect(a.speed).toBeGreaterThan(k.speed);
+    expect(a.maxRiders).toBeGreaterThan(k.maxRiders);
     expect(a.archery).toBeGreaterThan(0);
     expect(k.archery).toBe(0);
-    const sim = new LaneSim({ seed: 1, commander: 'hussars', rivalCommander: 'knights' });
-    expect(sim.riders.length).toBe(h.maxRiders);
+    const sim = new LaneSim({ seed: 1, commander: 'archers', rivalCommander: 'knights' });
+    expect(sim.riders.length).toBe(a.maxRiders);
     expect(sim.rival.sq.riders.length).toBe(k.maxRiders);
     expect(sim.rival.sq.riders[0].maxHp).toBeCloseTo(30 * k.hp);
   });
@@ -209,13 +226,6 @@ describe('lanes commanders, abilities and fog', () => {
     for (let i = 0; i < 60 * (L.THUNDER_TIME + 0.2); i++) sim.step(1 / 60, NO_INPUT);
     expect(sim.mods(sim.player).speed).toBeCloseTo(speed);
     expect(sim.cooldown('blue')).toBeGreaterThan(0);
-  });
-
-  it('Wheel makes hussars turn far tighter', () => {
-    const sim = new LaneSim({ seed: 2, commander: 'hussars' });
-    const turn = sim.mods(sim.player).turn;
-    expect(sim.useAbility('blue')).toBe(true);
-    expect(sim.mods(sim.player).turn).toBeCloseTo(turn * L.WHEEL_TURN);
   });
 
   it('Arrow Storm needs foes in bowshot, then every rider looses at once', () => {

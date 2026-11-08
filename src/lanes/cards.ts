@@ -24,10 +24,10 @@ export interface HeroMods extends RiderMods {
 }
 
 /** What kind of horse a commander leads, chosen before the match. */
-export type CommanderKind = 'knights' | 'hussars' | 'archers';
+export type CommanderKind = 'knights' | 'archers';
 
 /** Each kind of horse has one ability of its own. */
-export type AbilityId = 'thunder' | 'wheel' | 'storm';
+export type AbilityId = 'thunder' | 'storm';
 
 export interface Ability {
   id: AbilityId;
@@ -42,7 +42,6 @@ export interface Ability {
 
 export const ABILITIES: Record<AbilityId, Ability> = {
   thunder: { id: 'thunder', title: 'Thunder Charge', icon: '📯', text: '4 s: faster, trample twice as hard, terrify', cooldown: L.THUNDER_COOLDOWN, duration: L.THUNDER_TIME },
-  wheel: { id: 'wheel', title: 'Wheel', icon: '↻', text: '4 s: turn twice as tight at full gallop', cooldown: L.WHEEL_COOLDOWN, duration: L.WHEEL_TIME },
   storm: { id: 'storm', title: 'Arrow Storm', icon: '🏹', text: `Every rider looses ${L.STORM_ARROWS} arrows at once`, cooldown: L.STORM_COOLDOWN, duration: 0 },
 };
 
@@ -59,18 +58,19 @@ export interface Commander {
 export const COMMANDERS: Record<CommanderKind, Commander> = {
   knights: {
     kind: 'knights', title: 'Knights', icon: '🛡', ability: 'thunder',
-    text: 'Heavy horse: tough, hit hardest, win the joust. Fewer riders, a little slower.',
-    apply: m => { m.maxRiders = 8; m.hp = 1.35; m.mass = 1.15; m.strike = 1.25; m.impact = 1.15; m.speed = 0.94; m.turn = 0.9; },
-  },
-  hussars: {
-    kind: 'hussars', title: 'Hussars', icon: '⚔', ability: 'wheel',
-    text: 'Light horse: fast and nimble, more riders. Lighter, so a frontal clash costs more.',
-    apply: m => { m.maxRiders = 12; m.hp = 0.85; m.mass = 0.9; m.speed = 1.08; m.turn = 1.18; m.impact = 0.95; },
+    text: 'Break through: few riders, very tough and heavy. Trample foot, win the joust, pull down walls. A little slow.',
+    apply: m => {
+      m.maxRiders = 8; m.hp = 1.4; m.mass = 1.2; m.strike = 1.3; m.impact = 1.25;
+      m.speed = 0.94; m.turn = 0.9; m.siege = 1.4;
+    },
   },
   archers: {
     kind: 'archers', title: 'Horse Archers', icon: '🏹', ability: 'storm',
-    text: 'Shoot on the move at anything near. Weak in a charge — circle, don\'t crash.',
-    apply: m => { m.maxRiders = 10; m.hp = 0.8; m.impact = 0.55; m.strike = 0.7; m.archery = 0.42; },
+    text: 'Harass and kite: many fast, fragile riders who shoot on the move. Barely trample — circle, don\'t crash. Weak at walls.',
+    apply: m => {
+      m.maxRiders = 12; m.hp = 0.7; m.mass = 0.85; m.impact = 0.3; m.strike = 0.5;
+      m.speed = 1.1; m.turn = 1.2; m.siege = 0.6; m.archery = 0.6;
+    },
   },
 };
 
@@ -87,7 +87,7 @@ export function baseMods(kind: CommanderKind = 'knights'): HeroMods {
 
 export type CardId =
   | 'riders' | 'barding' | 'lances' | 'joust' | 'steeds' | 'drill' | 'terror'
-  | 'hooks' | 'surgeon' | 'remounts' | 'banner' | 'shields' | 'muster';
+  | 'hooks' | 'surgeon' | 'remounts' | 'banner' | 'shields' | 'muster' | 'bows';
 
 export interface Card {
   id: CardId;
@@ -98,6 +98,8 @@ export interface Card {
   weight: number;
   /** Most times it can be taken. */
   max: number;
+  /** Only offered to these kinds of horse (default: all). */
+  only?: CommanderKind[];
   apply(m: HeroMods): void;
 }
 
@@ -112,11 +114,15 @@ export const CARDS: Record<CardId, Card> = {
   },
   lances: {
     id: 'lances', title: 'Couched Lances', text: '+25% trample damage against foot', icon: '➶',
-    weight: 2, max: 4, apply: m => { m.impact += 0.25; },
+    weight: 2, max: 4, only: ['knights'], apply: m => { m.impact += 0.25; },
+  },
+  bows: {
+    id: 'bows', title: 'Composite Bows', text: 'Your riders shoot 25% faster', icon: '🏹',
+    weight: 2.4, max: 4, only: ['archers'], apply: m => { m.archery *= 1.25; },
   },
   joust: {
     id: 'joust', title: 'Jousting Lances', text: '+25% lance damage against horsemen', icon: '⚔',
-    weight: 1.6, max: 4, apply: m => { m.strike += 0.25; },
+    weight: 1.6, max: 4, only: ['knights'], apply: m => { m.strike += 0.25; },
   },
   steeds: {
     id: 'steeds', title: 'Swift Steeds', text: 'Your horses ride 6% faster', icon: '🐎',
@@ -166,9 +172,9 @@ export function modsFromPicks(picks: readonly CardId[], kind: CommanderKind = 'k
 }
 
 /** Three different cards (fewer if the pool runs dry), weighted, none already maxed. */
-export function drawOffer(picks: readonly CardId[], rand: () => number, size = 3): CardId[] {
+export function drawOffer(picks: readonly CardId[], rand: () => number, kind: CommanderKind = 'knights', size = 3): CardId[] {
   const taken = (id: CardId) => picks.filter(p => p === id).length;
-  const pool = CARD_IDS.filter(id => taken(id) < CARDS[id].max);
+  const pool = CARD_IDS.filter(id => taken(id) < CARDS[id].max && (!CARDS[id].only || CARDS[id].only!.includes(kind)));
   const out: CardId[] = [];
   while (out.length < size && pool.length > 0) {
     const total = pool.reduce((s, id) => s + CARDS[id].weight, 0);
@@ -187,7 +193,7 @@ export function drawOffer(picks: readonly CardId[], rand: () => number, size = 3
 /** How much the AI commander likes each card (it still varies its picks). */
 const AI_TASTE: Record<CardId, number> = {
   riders: 3, barding: 2, lances: 2, joust: 1.6, steeds: 1.2, drill: 0.8, terror: 1.3,
-  hooks: 1.1, surgeon: 1, remounts: 1.3, banner: 0.8, shields: 1.2, muster: 0.6,
+  hooks: 1.1, surgeon: 1, remounts: 1.3, banner: 0.8, shields: 1.2, muster: 0.6, bows: 2.4,
 };
 
 export function aiPick(offer: readonly CardId[], rand: () => number): number {

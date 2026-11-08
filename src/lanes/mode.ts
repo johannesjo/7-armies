@@ -250,7 +250,7 @@ export class LaneMode extends ChargeMode {
     this.formEl.style.width = `${cohesion * 100}%`;
     this.formEl.classList.toggle('loose', cohesion < 0.5);
     this.levelEl.textContent = `Level ${me.level}`;
-    this.xpEl.style.width = me.level >= L.MAX_LEVEL ? '100%' : `${(me.xp / xpToNext(me.level)) * 100}%`;
+    this.xpEl.style.width = `${Math.min(1, me.xp / xpToNext(me.level)) * 100}%`;
     const rk = COMMANDERS[rival.kind];
     this.rivalEl.textContent = rival.dead
       ? `${rk.icon} Rival slain (${Math.ceil(rival.respawnAt - sim.time)})`

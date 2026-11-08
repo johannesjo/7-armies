@@ -6,7 +6,7 @@ import { Team } from '../types';
  * Blue holds the west (left) end of the field, red the east.
  */
 export const LANES = {
-  WORLD_W: 3600,
+  WORLD_W: 3000,
   WORLD_H: 2400,
 
   // --- The map ---
@@ -18,17 +18,17 @@ export const LANES = {
    */
   LANE_HALF: 260,
   /** Woods fill the space between the lanes from one base to the other... */
-  WOODS_X0: 620,
-  WOODS_X1: 2980,
+  WOODS_X0: 600,
+  WOODS_X1: 2400,
   /** ...broken by passes where horsemen can cross between lanes. */
-  PASSES_X: [1300, 2300] as readonly number[],
+  PASSES_X: [1100, 1900] as readonly number[],
   PASS_HALF: 110,
   /** Horses picking their way through the trees go no faster than this share of a canter. */
   WOODS_SLOW: 0.45,
 
-  KEEP: { blue: { x: 280, y: 1200 }, red: { x: 3320, y: 1200 } } as Record<Team, { x: number; y: number }>,
+  KEEP: { blue: { x: 270, y: 1200 }, red: { x: 2730, y: 1200 } } as Record<Team, { x: number; y: number }>,
   KEEP_R: 54,
-  KEEP_HP: 1800,
+  KEEP_HP: 1300,
   KEEP_RANGE: 430,
   KEEP_VOLLEY: 1.9,
   KEEP_ARROWS: 16,
@@ -39,10 +39,10 @@ export const LANES = {
   HOME_REMOUNT: 0.45,
 
   /** Towers per lane and side, innermost first; each sits a little off the road. */
-  TOWER_X: { blue: [820, 1350], red: [2780, 2250] } as Record<Team, readonly number[]>,
+  TOWER_X: { blue: [780, 1170], red: [2220, 1830] } as Record<Team, readonly number[]>,
   TOWER_OFFSET: [150, -150, -150] as readonly number[],
   TOWER_R: 24,
-  TOWER_HP: [800, 600] as readonly number[],
+  TOWER_HP: [600, 450] as readonly number[],
   TOWER_RANGE: 340,
   TOWER_VOLLEY: 2.4,
   TOWER_ARROWS: 10,
@@ -62,9 +62,9 @@ export const LANES = {
   SIEGE_REACH_RIDER: 46,
 
   // --- Waves ---
-  SPAWN_X: { blue: 560, red: 3040 } as Record<Team, number>,
+  SPAWN_X: { blue: 540, red: 2460 } as Record<Team, number>,
   FIRST_WAVE: 1,
-  WAVE_INTERVAL: 30,
+  WAVE_INTERVAL: 25,
   WAVE_SWORDS: 20,
   WAVE_PIKES: 16,
   /** Every this many waves each battalion grows by WAVE_GROWTH men, up to WAVE_GROWTH_MAX. */
@@ -86,8 +86,10 @@ export const LANES = {
   // --- Commanders ---
   HERO_START: 10,
   HERO_MAX: 45,
-  RESPAWN_BASE: 6,
-  RESPAWN_PER_LEVEL: 1.6,
+  RESPAWN_BASE: 5,
+  RESPAWN_PER_LEVEL: 1.2,
+  /** However high a commander's level, he is back in the saddle within this long (s). */
+  RESPAWN_MAX: 28,
 
   // --- Abilities ---
   /** Charge!: the horn sounds — faster, harder-hitting and more terrifying for a few seconds. */
@@ -127,12 +129,11 @@ export const LANES = {
   XP_ROUT: 4,
   XP_HERO_KILL: 40,
   XP_TOWER: 45,
-  MAX_LEVEL: 16,
 } as const;
 
 /** Experience needed to go from `level` to the next. */
 export function xpToNext(level: number): number {
-  return 30 + 15 * (level - 1);
+  return 25 + 10 * (level - 1);
 }
 
 export function enemyOf(team: Team): Team {

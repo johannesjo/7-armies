@@ -27,19 +27,19 @@ describe('lanes map', () => {
       }
     }
     expect(WOODS.length).toBe(6);
-    expect(inWoods(1000, (L.LANE_Y[0] + L.LANE_Y[1]) / 2)).toBe(true);
+    expect(inWoods(800, (L.LANE_Y[0] + L.LANE_Y[1]) / 2)).toBe(true);
     expect(inWoods(L.PASSES_X[0], (L.LANE_Y[0] + L.LANE_Y[1]) / 2)).toBe(false);
   });
 
   it('routes riders between lanes by a pass instead of through the trees', () => {
-    const from = { x: 1000, y: L.LANE_Y[0] }, to = { x: 1000, y: L.LANE_Y[1] };
+    const from = { x: 800, y: L.LANE_Y[0] }, to = { x: 800, y: L.LANE_Y[1] };
     expect(segmentHitsWoods(from.x, from.y, to.x, to.y)).toBe(true);
     const wp = navWaypoint(from, to);
     expect(wp).not.toEqual(to);
     expect(segmentHitsWoods(from.x, from.y, wp.x, wp.y, 14)).toBe(false);
     expect(segmentHitsWoods(wp.x, wp.y, to.x, to.y, 14)).toBe(false);
     // Along a lane the way is open.
-    expect(navWaypoint({ x: 800, y: L.LANE_Y[2] }, { x: 2800, y: L.LANE_Y[2] })).toEqual({ x: 2800, y: L.LANE_Y[2] });
+    expect(navWaypoint({ x: 800, y: L.LANE_Y[2] }, { x: 2300, y: L.LANE_Y[2] })).toEqual({ x: 2300, y: L.LANE_Y[2] });
   });
 
   it('knows which lane a height belongs to', () => {

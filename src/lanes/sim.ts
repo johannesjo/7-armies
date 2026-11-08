@@ -735,7 +735,7 @@ export class LaneSim extends ChargeSim {
         // The last rider has fallen: the commander is out until he can ride again.
         h.dead = true;
         h.deaths++;
-        const wait = (L.RESPAWN_BASE + L.RESPAWN_PER_LEVEL * h.level) * h.mods.respawn;
+        const wait = Math.min(L.RESPAWN_MAX, L.RESPAWN_BASE + L.RESPAWN_PER_LEVEL * h.level) * h.mods.respawn;
         h.respawnAt = this.time + wait;
         const foe = this.heroes[enemyOf(team)];
         foe.kills++;
@@ -789,16 +789,15 @@ export class LaneSim extends ChargeSim {
   }
 
   private gainXp(h: Hero, amount: number): void {
-    if (h.level >= L.MAX_LEVEL) return;
     h.xp += amount;
-    while (h.level < L.MAX_LEVEL && h.xp >= xpToNext(h.level)) {
+    // No cap: levels keep coming (cards run out only once every card is maxed).
+    while (h.xp >= xpToNext(h.level)) {
       h.xp -= xpToNext(h.level);
       h.level++;
       const offer = drawOffer(h.picks, this.rand);
       if (offer.length > 0) h.offers.push(offer);
       this.laneEvents.push({ type: 'level', team: h.team, level: h.level });
     }
-    if (h.level >= L.MAX_LEVEL) h.xp = 0;
   }
 
   /** Take card `index` of the oldest hand on offer. */

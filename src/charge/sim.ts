@@ -59,6 +59,20 @@ export interface Soldier {
 /** Who controls a squadron: the player, or one of the AI behaviours. */
 export type SquadAI = 'player' | 'raider' | 'guard' | 'hunter' | 'general' | 'garrison';
 export type SquadPhase = 'muster' | 'approach' | 'charge' | 'retreat' | 'idle' | 'broken';
+/** How an AI squadron fights other horse: heavy knights joust, light horse turn for your rear. */
+export type SquadStyle = 'heavy' | 'nimble';
+/**
+ * Manoeuvres in a fight between squadrons:
+ * - pursue: on the enemy's tail; lead him and gallop in for the rear strike.
+ * - lag: neither side has the advantage; aim behind him, slowing to turn inside him.
+ * - bait: he is riding at us and we can't take him head-on; draw him into a chase.
+ * - evade: he is almost on us; break hard sideways. Close in, a galloping horse can't
+ *   turn fast enough to follow, so he overshoots and we come out behind him.
+ * - joust: meet him head-on.
+ * - slash: pass close alongside him and cut at his flank.
+ * - extend: just rode through; carry on straight, then come round again.
+ */
+export type DogfightMove = 'pursue' | 'lag' | 'bait' | 'evade' | 'joust' | 'slash' | 'extend';
 
 export interface Squadron {
   id: number;
@@ -85,6 +99,12 @@ export interface Squadron {
   guardRadius: number;
   /** Guards escorting another squad: their post moves with it. */
   ward: Squadron | null;
+  /** How this squadron fights other horse. */
+  style: SquadStyle;
+  /** Dogfight manoeuvre in hand, how long it is held, and which way it breaks (+1 right, -1 left). */
+  move: DogfightMove;
+  moveTimer: number;
+  moveSide: number;
   /** The leader's recent path; followers ride along it, offset into their lane. */
   trail: TrailPoint[];
   /** Distance the leader has ridden (the arc position of the newest trail point). */
@@ -123,6 +143,8 @@ export interface SquadSpec {
   guardRadius?: number;
   /** Guards: escort the first squad with this AI on our side (e.g. the general) instead of a fixed post. */
   ward?: SquadAI;
+  /** How it fights other horse (default: a bodyguard is heavy, others a coin toss). */
+  style?: SquadStyle;
 }
 
 export interface Battalion {
@@ -504,6 +526,10 @@ export class ChargeSim {
       fleeFrom: null,
       guardRadius: spec.guardRadius ?? C.GUARD_RADIUS,
       ward: spec.ward ? this.squadrons.find(o => o.team === spec.team && o.ai === spec.ward) ?? null : null,
+      style: spec.style ?? (spec.ward ? 'heavy' : this.rand() < 0.5 ? 'heavy' : 'nimble'),
+      move: 'lag',
+      moveTimer: 0,
+      moveSide: 1,
       trail: [],
       trailS: 0,
     };
@@ -983,12 +1009,7 @@ export class ChargeSim {
     }
 
     const T = sq.targetSquad?.riders[0];
-    if (T) {
-      // Ride at where the enemy horse will be.
-      const aim = { x: T.x + T.vx * 0.35, y: T.y + T.vy * 0.35 };
-      const d = Math.hypot(aim.x - L.x, aim.y - L.y);
-      return { ...this.rideTo(L, aim, d < 340), dirX: (aim.x - L.x) / (d || 1), dirY: (aim.y - L.y) / (d || 1) };
-    }
+    if (T) return this.dogfightInput(sq, L, T, dt);
 
     const b = sq.targetBat;
     if (!b) return this.rideTo(L, sq.home, false);
@@ -1037,6 +1058,71 @@ export class ChargeSim {
       wp = { x: b.x + nx * 170, y: b.y + ny * 170 };
     }
     return this.rideTo(L, wp, false);
+  }
+
+  /**
+   * Fighting another squadron like a dogfight: work round onto the enemy's tail, break
+   * out of his path when he rides at us, pass and come round again. A manoeuvre is held
+   * for a moment once chosen so the squadron commits instead of dithering.
+   */
+  private dogfightInput(sq: Squadron, L: Soldier, T: Soldier, dt: number): ChargeInput {
+    const g = dogfightGeometry(L, T);
+    sq.moveTimer -= dt;
+    // Just rode through him: carry on and come round, rather than wheeling in his face.
+    if ((sq.move === 'joust' || sq.move === 'slash') && g.myOff > 2.0 && g.d < 150) {
+      sq.move = 'extend';
+      sq.moveTimer = sq.style === 'heavy' ? 1.4 : 0.8;
+    } else if (sq.moveTimer <= 0) {
+      const odds = sq.riders.length / Math.max(1, sq.targetSquad?.riders.length ?? 1);
+      const pick = chooseMove(g, sq.style, odds);
+      sq.move = pick.move;
+      sq.moveTimer = pick.hold;
+      sq.moveSide = pick.move === 'slash' ? (this.rand() < 0.5 ? -1 : 1) : g.side;
+    }
+
+    const tx = Math.cos(T.facing), ty = Math.sin(T.facing);
+    const toward = (x: number, y: number, gallop: boolean): ChargeInput => {
+      const dx = x - L.x, dy = y - L.y, d = Math.hypot(dx, dy) || 1;
+      return { dirX: dx / d, dirY: dy / d, gallop };
+    };
+    switch (sq.move) {
+      case 'pursue': {
+        // Lead him, more the further off he is, and gallop in for the strike.
+        const lead = clamp(g.d / 300, 0.15, 0.6);
+        return toward(T.x + T.vx * lead, T.y + T.vy * lead, true);
+      }
+      case 'bait': {
+        // Ride away from him, curving a little to the side we'll break to.
+        const ax = -Math.cos(g.toT) - Math.sin(g.toT) * 0.35 * sq.moveSide;
+        const ay = -Math.sin(g.toT) + Math.cos(g.toT) * 0.35 * sq.moveSide;
+        const al = Math.hypot(ax, ay) || 1;
+        return { dirX: ax / al, dirY: ay / al, gallop: true };
+      }
+      case 'evade': {
+        // Out of his path, square to his line, on the side we're already on.
+        return { dirX: -ty * sq.moveSide, dirY: tx * sq.moveSide, gallop: true };
+      }
+      case 'joust':
+        return toward(T.x + T.vx * 0.3, T.y + T.vy * 0.3, true);
+      case 'slash': {
+        // Aim to pass beside his wedge, clear of its points: close enough to cut at the
+        // riders on its edge.
+        const px = -Math.sin(g.toT) * sq.moveSide, py = Math.cos(g.toT) * sq.moveSide;
+        const half = 30 + 5 * Math.sqrt(sq.targetSquad?.riders.length ?? 1);
+        return toward(T.x + px * half, T.y + py * half, true);
+      }
+      case 'extend':
+        return { dirX: Math.cos(L.facing), dirY: Math.sin(L.facing), gallop: true };
+      case 'lag':
+      default: {
+        // Aim behind him. Light horse ease to a canter while still turning, because a
+        // slower horse turns tighter — that is how they get inside a galloping enemy.
+        const ax = T.x - tx * 80, ay = T.y - ty * 80;
+        const off = Math.abs(angleDiff(Math.atan2(ay - L.y, ax - L.x), L.facing));
+        const gallop = g.d > 380 || off < 0.5 || sq.style === 'heavy';
+        return toward(ax, ay, gallop);
+      }
+    }
   }
 
   // --- Battalions ---------------------------------------------------------------
@@ -1958,6 +2044,51 @@ export class ChargeSim {
 export function rotate(v: Vec2, a: number): Vec2 {
   const c = Math.cos(a), s = Math.sin(a);
   return { x: v.x * c - v.y * s, y: v.x * s + v.y * c };
+}
+
+/** Where two horsemen stand relative to each other, as a dogfighter sees it. */
+export interface DogfightGeometry {
+  d: number;
+  /** Bearing from us to him. */
+  toT: number;
+  /** How far he is off our nose (0 = dead ahead, pi = behind us). */
+  myOff: number;
+  /** How far we are off his nose (0 = he rides straight at us, pi = we're on his tail). */
+  hisOff: number;
+  /** Which side of his line we're on (+1 his right, -1 his left). */
+  side: number;
+}
+
+export function dogfightGeometry(L: { x: number; y: number; facing: number }, T: { x: number; y: number; facing: number }): DogfightGeometry {
+  const dx = T.x - L.x, dy = T.y - L.y;
+  const toT = Math.atan2(dy, dx);
+  const tx = Math.cos(T.facing), ty = Math.sin(T.facing);
+  return {
+    d: Math.hypot(dx, dy),
+    toT,
+    myOff: Math.abs(angleDiff(L.facing, toT)),
+    hisOff: Math.abs(angleDiff(T.facing, toT + Math.PI)),
+    side: tx * -dy - ty * -dx >= 0 ? 1 : -1,
+  };
+}
+
+/**
+ * Pick a manoeuvre against an enemy squadron, and how long to hold it (s). `odds` is
+ * our riders per enemy rider: nobody meets a charge head-on that will roll over them.
+ */
+export function chooseMove(g: DogfightGeometry, style: SquadStyle, odds = 1): { move: DogfightMove; hold: number } {
+  // On his tail: press the advantage.
+  if (g.hisOff > 2.1 && g.d < 450) return { move: 'pursue', hold: 0.7 };
+  // He's riding at us.
+  if (g.hisOff < 0.7 && g.d < 340) {
+    // Knights take the joust unless badly outnumbered.
+    if (style === 'heavy' && odds >= 0.75) return { move: 'joust', hold: 1.0 };
+    // Light horse slip past his flank when they have the numbers.
+    if (style === 'nimble' && odds >= 1.3 && g.myOff < 0.9) return { move: 'slash', hold: 1.0 };
+    // Otherwise: draw him on, and break at the last moment so he overshoots.
+    return g.d < 120 ? { move: 'evade', hold: 0.7 } : { move: 'bait', hold: 0.25 };
+  }
+  return { move: 'lag', hold: 0.5 };
 }
 
 function clamp(v: number, lo: number, hi: number): number {

@@ -1,11 +1,10 @@
-import { Graphics } from 'pixi.js';
 import { Team, UnitType } from '../types';
 import { Theme } from '../theme';
 import { HORSE_VARIANTS } from '../unit-art';
 
 /**
  * Upright figures in the manner of classic pre-rendered RTS sprites: a steep camera
- * looking down on small, naturally coloured soldiers lit by the sun, with the team
+ * looking down on small, naturally coloured soldiers lit by a high sun, with the team
  * colour on their cloth and shields only.
  *
  * Each figure is a small posed model of limbs (capsules) and flat plates in 3D
@@ -18,18 +17,34 @@ import { HORSE_VARIANTS } from '../unit-art';
 export const DIRS = 16;
 /** Facings actually drawn: east through north to south; the west half is mirrored. */
 export const DRAWN_DIRS = DIRS / 2 + 1;
-/** Frame layout: one standing pose, a walk (or gallop) cycle, then an attack. */
+
+/** Frame layout: standing, a walk (gallop) cycle, an attack, running away, and falling dead. */
 export const IDLE_FRAME = 0;
 export const WALK_FRAMES = 8;
 export const ATTACK_FRAMES = 4;
-export const FRAMES = 1 + WALK_FRAMES + ATTACK_FRAMES;
+export const FLEE_FRAMES = 4;
+/** Falling frames; the last one is the body lying still. */
+export const DEATH_FRAMES = 4;
+const WALK0 = 1;
+const ATTACK0 = WALK0 + WALK_FRAMES;
+const FLEE0 = ATTACK0 + ATTACK_FRAMES;
+const DEATH0 = FLEE0 + FLEE_FRAMES;
+export const FRAMES = DEATH0 + DEATH_FRAMES;
+/** The fallen, lying still (also used for a man knocked off his feet). */
+export const CORPSE_FRAME = FRAMES - 1;
+
+/** Different looks per infantry type (helmets, shields, clothes); horses vary by coat. */
+export const INFANTRY_LOOKS = 2;
 
 /** Camera elevation: steep, looking down on the troops at about 50°. */
 const ELEV = (50 * Math.PI) / 180;
 const GROUND = Math.sin(ELEV); // how much ground depth survives the projection
 const HEIGHT = Math.cos(ELEV) * 1.15; // how tall upright things look (a touch exaggerated)
-/** Sun from high above and slightly left and behind the camera's view (world x, y-south, up). */
-const SUN: V3 = norm([-0.35, 0.25, 0.9]);
+/**
+ * The sun stands high and straight behind the camera's shoulder, left-right symmetric,
+ * so a mirrored (west-facing) figure is lit exactly like its east-facing original.
+ */
+const SUN: V3 = norm([0, 0.32, 0.95]);
 /** Toward the camera, for painting order and back-face flipping. */
 const VIEW: V3 = [0, Math.cos(ELEV), Math.sin(ELEV)];
 
@@ -47,14 +62,30 @@ export function dirAngle(dir: number): number {
   return -Math.PI / 2 + dir * ((Math.PI * 2) / DIRS);
 }
 
-/** Frame index for a gait phase (radians, advancing with distance) or the attack. */
-export function walkFrame(phase: number): number {
+const cycle = (phase: number, n: number) => {
   const t = ((phase / (Math.PI * 2)) % 1 + 1) % 1;
-  return 1 + Math.min(WALK_FRAMES - 1, Math.floor(t * WALK_FRAMES));
+  return Math.min(n - 1, Math.floor(t * n));
+};
+const step = (progress: number, n: number) => Math.max(0, Math.min(n - 1, Math.floor(progress * n)));
+
+/** Frame index for a gait phase (radians, advancing with distance). */
+export function walkFrame(phase: number): number {
+  return WALK0 + cycle(phase, WALK_FRAMES);
 }
 
+/** Frame index for running away, by gait phase. */
+export function fleeFrame(phase: number): number {
+  return FLEE0 + cycle(phase, FLEE_FRAMES);
+}
+
+/** Frame index through a blow (0..1). */
 export function attackFrame(progress: number): number {
-  return 1 + WALK_FRAMES + Math.max(0, Math.min(ATTACK_FRAMES - 1, Math.floor(progress * ATTACK_FRAMES)));
+  return ATTACK0 + step(progress, ATTACK_FRAMES);
+}
+
+/** Frame index through a fall (0..1); 1 is lying still. */
+export function deathFrame(progress: number): number {
+  return DEATH0 + step(progress, DEATH_FRAMES);
 }
 
 type V3 = [number, number, number];
@@ -89,7 +120,7 @@ function shade(c: number, k: number): number {
 
 /** A posed figure: its parts, in unit-local 3D. */
 class Model {
-  readonly prims: Prim[] = [];
+  prims: Prim[] = [];
   cap(a: V3, b: V3, w: number, color: number, bias = 0, finish: Finish = 'matte'): void {
     this.prims.push({ k: 'cap', a, b, w, color, bias, finish });
   }
@@ -104,17 +135,26 @@ class Model {
     const pts: V3[] = [];
     for (let i = 0; i < n; i++) {
       const t = (i / n) * Math.PI * 2;
-      const cu = Math.cos(t) * ru, sv = Math.sin(t) * rv;
-      pts.push([c[0] + u[0] * cu + v[0] * sv, c[1] + u[1] * cu + v[1] * sv, c[2] + u[2] * cu + v[2] * sv]);
+      pts.push(onPlane(c, u, v, Math.cos(t) * ru, Math.sin(t) * rv));
     }
     this.poly(pts, color, bias, finish);
   }
+  /** Move every part (for a whole-body fall). */
+  transform(f: (v: V3) => V3): void {
+    this.prims = this.prims.map(p => p.k === 'cap' ? { ...p, a: f(p.a), b: f(p.b) } : { ...p, pts: p.pts.map(f) });
+  }
 }
 
-/** Natural materials; only `team` and `teamDark` say whose man he is. */
+/** A point on the plane through c spanned by u and v. */
+function onPlane(c: V3, u: V3, v: V3, a: number, b: number): V3 {
+  return [c[0] + u[0] * a + v[0] * b, c[1] + u[1] * a + v[1] * b, c[2] + u[2] * a + v[2] * b];
+}
+
+/** Natural materials; only `team`, `teamDark` and `teamTrim` say whose man he is. */
 interface Palette {
   team: number;
   teamDark: number;
+  teamTrim: number;
   steel: number;
   mail: number;
   wood: number;
@@ -122,12 +162,15 @@ interface Palette {
   linen: number;
   skin: number;
   boot: number;
+  gold: number;
 }
 
 function palette(team: Team, theme: Theme): Palette {
+  const t = team === 'blue' ? theme.blue : theme.red;
   return {
-    team: team === 'blue' ? theme.blue : theme.red,
+    team: t,
     teamDark: team === 'blue' ? theme.blueDark : theme.redDark,
+    teamTrim: mix(t, 0xeadfc0, 0.72),
     steel: theme.steel,
     mail: mix(theme.steel, theme.steelDark, 0.45),
     wood: theme.wood,
@@ -135,6 +178,7 @@ function palette(team: Team, theme: Theme): Palette {
     linen: 0xa08a64,
     skin: 0xc8906a,
     boot: 0x3a2a1c,
+    gold: 0xc09a40,
   };
 }
 
@@ -146,71 +190,116 @@ const COATS: [number, number, number][] = [
   [0xb8996a, 0x3a2c1c, 0x4a3a28], // dun
 ];
 
-/** Gait and attack state for a frame. */
-function poseOf(frame: number): { gait: number; moving: boolean; attack: number } {
-  if (frame >= 1 && frame <= WALK_FRAMES) return { gait: ((frame - 1) / WALK_FRAMES) * Math.PI * 2, moving: true, attack: -1 };
-  if (frame > WALK_FRAMES) return { gait: 0, moving: false, attack: (frame - 1 - WALK_FRAMES + 0.5) / ATTACK_FRAMES };
-  return { gait: 0, moving: false, attack: -1 };
+type PoseKind = 'idle' | 'walk' | 'attack' | 'flee' | 'die';
+
+/** What a frame shows: its kind, the gait phase, and progress through a blow or a fall. */
+function poseOf(frame: number): { kind: PoseKind; gait: number; t: number } {
+  if (frame >= DEATH0) return { kind: 'die', gait: 0, t: (frame - DEATH0) / (DEATH_FRAMES - 1) };
+  if (frame >= FLEE0) return { kind: 'flee', gait: ((frame - FLEE0) / FLEE_FRAMES) * Math.PI * 2, t: 0 };
+  if (frame >= ATTACK0) return { kind: 'attack', gait: 0, t: (frame - ATTACK0 + 0.5) / ATTACK_FRAMES };
+  if (frame >= WALK0) return { kind: 'walk', gait: ((frame - WALK0) / WALK_FRAMES) * Math.PI * 2, t: 0 };
+  return { kind: 'idle', gait: 0, t: 0 };
 }
 
 /** A foot soldier, feet at the origin, about 3.4 body radii tall. */
-function footman(m: Model, type: UnitType, r: number, p: Palette, frame: number): void {
-  const { gait, moving, attack } = poseOf(frame);
-  const swing = moving ? Math.sin(gait) : 0;
-  const lift = moving ? 0.18 * r : 0;
-  const bob = moving ? Math.abs(Math.cos(gait)) * 0.07 * r : 0;
+function footman(m: Model, type: UnitType, r: number, p: Palette, frame: number, look: number): void {
+  const { kind, gait, t } = poseOf(frame);
+  const moving = kind === 'walk' || kind === 'flee';
+  const running = kind === 'flee';
+  const attack = kind === 'attack' ? t : -1;
+  const armed = kind !== 'flee' && kind !== 'die';
+  const swing = moving ? Math.sin(gait) * (running ? 1.35 : 1) : 0;
+  const lift = moving ? (running ? 0.28 : 0.18) * r : 0;
+  const bob = moving ? Math.abs(Math.cos(gait)) * (running ? 0.12 : 0.07) * r : 0;
+  // Running men lean into it.
+  const lean = running ? 0.25 * r : 0;
   const hipZ = 1.6 * r + bob, shZ = 2.75 * r + bob, headZ = 3.12 * r + bob;
   const hip = 0.17 * r, sh = 0.36 * r;
 
-  // Clothes by trade: mail for swordsmen, a quilted coat for pikes, linen and leather for archers.
-  const sleeve = type === 'swordsman' ? p.mail : type === 'pikeman' ? p.linen : 0x8a7650;
-  const hose = type === 'swordsman' ? p.mail : type === 'pikeman' ? 0x6a5a42 : 0x5a5236;
+  // Clothes by trade and look: mail for swordsmen, a quilted or leather coat for pikes,
+  // linen and leather for archers.
+  const sleeve = type === 'swordsman' ? p.mail
+    : type === 'pikeman' ? (look === 0 ? p.linen : 0x7a5a3a)
+    : (look === 0 ? 0x8a7650 : 0x6a7048);
+  const hose = type === 'swordsman' ? p.mail : type === 'pikeman' ? 0x6a5a42 : (look === 0 ? 0x5a5236 : 0x5e4a32);
   const sleeveFinish: Finish = type === 'swordsman' ? 'metal' : 'matte';
+  const hair = look === 0 ? 0x4a3020 : 0x8a6a3a;
 
   // Legs: stride fore and aft, the foot coming forward lifts.
   for (const side of [-1, 1]) {
     const k = side * swing;
     const foot: V3 = [k * 0.45 * r, side * hip, Math.max(0, -side * Math.cos(gait)) * lift + 0.1 * r];
-    const knee: V3 = [k * 0.22 * r + (foot[2] > 0.2 * r ? 0.14 * r : 0.04 * r), side * hip, hipZ * 0.5 + foot[2] * 0.5];
-    m.cap([0, side * hip, hipZ], knee, 0.14 * r, hose, 0, sleeveFinish);
+    const knee: V3 = [k * 0.22 * r + (foot[2] > 0.2 * r ? 0.14 * r : 0.04 * r) + lean * 0.3, side * hip, hipZ * 0.5 + foot[2] * 0.5];
+    m.cap([lean * 0.4, side * hip, hipZ], knee, 0.14 * r, hose, 0, sleeveFinish);
     m.cap(knee, foot, 0.12 * r, hose, 0, sleeveFinish);
     m.cap(foot, add(foot, [0.2 * r, 0, -0.03 * r]), 0.1 * r, p.boot, 0.01);
   }
 
+  // Upper body, leaning forward when running.
+  const up = (v: V3): V3 => [v[0] + lean * ((v[2] - hipZ) / (shZ - hipZ)), v[1], v[2]];
+
   // Quiver on the back (archers).
   if (type === 'archer') {
-    m.cap([-0.32 * r, -0.1 * r, 2.0 * r + bob], [-0.4 * r, 0.12 * r, 3.0 * r + bob], 0.13 * r, p.leather, -0.05);
-    for (const o of [-0.05, 0.05]) m.cap([-0.4 * r, (0.12 + o) * r, 3.0 * r + bob], [-0.42 * r, (0.14 + o) * r, 3.25 * r + bob], 0.04 * r, 0xe8e0d0, -0.05);
+    m.cap(up([-0.32 * r, -0.1 * r, 2.0 * r + bob]), up([-0.4 * r, 0.12 * r, 3.0 * r + bob]), 0.13 * r, p.leather, -0.05);
+    for (const o of [-0.05, 0.05]) m.cap(up([-0.4 * r, (0.12 + o) * r, 3.0 * r + bob]), up([-0.42 * r, (0.14 + o) * r, 3.25 * r + bob]), 0.04 * r, 0xe8e0d0, -0.05);
   }
 
-  // Body: the trade's coat underneath, the team's surcoat over it, belted.
-  m.cap([0.01 * r, 0, hipZ - 0.05 * r], [0, 0, shZ - 0.12 * r], 0.31 * r, p.team);
-  // Skirt of the surcoat over the thighs.
+  // Body: the team's surcoat, belted, with a pale hem and folds down the front.
+  m.cap([0.01 * r, 0, hipZ - 0.05 * r], up([0, 0, shZ - 0.12 * r]), 0.31 * r, p.team);
   for (const s of [-1, 1]) {
     m.poly([[0.31 * r, 0, hipZ], [0.31 * r, s * 0.3 * r, hipZ], [0.34 * r, s * 0.3 * r, hipZ - 0.5 * r], [0.34 * r, 0, hipZ - 0.55 * r]], p.team, 0.002);
     m.poly([[-0.31 * r, 0, hipZ], [-0.31 * r, s * 0.3 * r, hipZ], [-0.34 * r, s * 0.3 * r, hipZ - 0.5 * r], [-0.34 * r, 0, hipZ - 0.55 * r]], p.teamDark, -0.002);
+    // Hem trim along the bottom of the skirt.
+    m.poly([[0.345 * r, 0, hipZ - 0.47 * r], [0.345 * r, s * 0.3 * r, hipZ - 0.43 * r], [0.35 * r, s * 0.3 * r, hipZ - 0.5 * r], [0.35 * r, 0, hipZ - 0.55 * r]], p.teamTrim, 0.0025);
+    // A fold either side of the chest.
+    const fy = s * 0.13 * r;
+    m.poly([up([0.32 * r, fy - 0.02 * r, shZ - 0.3 * r]), up([0.32 * r, fy + 0.02 * r, shZ - 0.3 * r]), [0.34 * r, fy + 0.035 * r, hipZ - 0.4 * r], [0.34 * r, fy - 0.035 * r, hipZ - 0.4 * r]], p.teamDark, 0.003);
   }
-  m.cap([0, -sh * 0.62, shZ - 0.06 * r], [0, sh * 0.62, shZ - 0.06 * r], 0.16 * r, type === 'swordsman' ? p.mail : sleeve, 0.003, sleeveFinish);
+  // Collar trim, belt and buckle.
+  m.cap(up([0.02 * r, -0.17 * r, shZ - 0.03 * r]), up([0.02 * r, 0.17 * r, shZ - 0.03 * r]), 0.07 * r, p.teamTrim, 0.0035);
   m.cap([0.03 * r, -0.29 * r, hipZ + 0.1 * r], [0.03 * r, 0.29 * r, hipZ + 0.1 * r], 0.06 * r, p.leather, 0.004);
+  m.ball([0.32 * r, 0, hipZ + 0.1 * r], 0.055 * r, p.gold, 0.0045, 'metal');
+  // Shoulders (a mail cape for swordsmen).
+  m.cap(up([0, -sh * 0.62, shZ - 0.06 * r]), up([0, sh * 0.62, shZ - 0.06 * r]), 0.16 * r, type === 'swordsman' ? p.mail : sleeve, 0.005, sleeveFinish);
 
-  // Head and headgear.
-  m.ball([0.04 * r, 0, headZ], 0.2 * r, p.skin, 0.005);
+  // Head and headgear by look.
+  const head = up([0.04 * r, 0, headZ]);
+  m.ball(head, 0.2 * r, p.skin, 0.006);
+  const beard = (type === 'pikeman' && look === 1) || (type === 'swordsman' && look === 1) || (type === 'archer' && look === 0);
+  if (beard) m.ball(add(head, [0.13 * r, 0, -0.12 * r]), 0.11 * r, hair, 0.0065);
   if (type === 'swordsman') {
-    m.ball([0.0, 0, headZ + 0.06 * r], 0.22 * r, p.steel, 0.006, 'metal');
-    m.cap([0.21 * r, 0, headZ + 0.05 * r], [0.23 * r, 0, headZ - 0.13 * r], 0.035 * r, p.steel, 0.007, 'metal');
-    m.cap([-0.05 * r, 0, headZ - 0.05 * r], [-0.05 * r, 0, headZ - 0.25 * r], 0.17 * r, p.mail, 0.0045, 'metal');
+    if (look === 0) {
+      // Conical helm with a nasal over a mail coif.
+      m.cap(add(head, [-0.09 * r, 0, -0.05 * r]), add(head, [-0.09 * r, 0, -0.25 * r]), 0.17 * r, p.mail, 0.0055, 'metal');
+      m.ball(add(head, [-0.04 * r, 0, 0.06 * r]), 0.22 * r, p.steel, 0.007, 'metal');
+      m.cap(add(head, [-0.04 * r, 0, 0.15 * r]), add(head, [-0.04 * r, 0, 0.3 * r]), 0.08 * r, p.steel, 0.0072, 'metal');
+      m.cap(add(head, [0.17 * r, 0, 0.05 * r]), add(head, [0.19 * r, 0, -0.13 * r]), 0.035 * r, p.steel, 0.0075, 'metal');
+    } else {
+      // Brimmed iron hat.
+      m.disc(add(head, [-0.04 * r, 0, 0.12 * r]), [1, 0, 0], [0, 1, 0], 0.32 * r, 0.32 * r, p.steel, 0.007, 'metal');
+      m.ball(add(head, [-0.04 * r, 0, 0.14 * r]), 0.19 * r, p.steel, 0.0075, 'metal');
+    }
   } else if (type === 'pikeman') {
-    // Kettle hat: a dome over a broad brim.
-    m.disc([0, 0, headZ + 0.1 * r], [1, 0, 0], [0, 1, 0], 0.38 * r, 0.38 * r, p.steel, 0.006, 'metal');
-    m.ball([0, 0, headZ + 0.13 * r], 0.2 * r, p.steel, 0.007, 'metal');
-  } else {
+    if (look === 0) {
+      // Kettle hat: a dome over a broad brim.
+      m.disc(add(head, [-0.04 * r, 0, 0.1 * r]), [1, 0, 0], [0, 1, 0], 0.38 * r, 0.38 * r, p.steel, 0.007, 'metal');
+      m.ball(add(head, [-0.04 * r, 0, 0.13 * r]), 0.2 * r, p.steel, 0.0075, 'metal');
+    } else {
+      // Padded arming cap.
+      m.ball(add(head, [-0.06 * r, 0, 0.06 * r]), 0.21 * r, 0x8a7448, 0.007);
+    }
+  } else if (look === 0) {
     // Leather hood and cowl.
-    m.ball([-0.03 * r, 0, headZ + 0.05 * r], 0.23 * r, 0x6a5232, 0.006);
-    m.ball([0.11 * r, 0, headZ - 0.02 * r], 0.14 * r, p.skin, 0.007);
-    m.cap([-0.05 * r, -0.25 * r, headZ - 0.25 * r], [-0.05 * r, 0.25 * r, headZ - 0.25 * r], 0.12 * r, 0x6a5232, 0.0065);
+    m.ball(add(head, [-0.07 * r, 0, 0.05 * r]), 0.23 * r, 0x6a5232, 0.007);
+    m.ball(add(head, [0.07 * r, 0, -0.02 * r]), 0.14 * r, p.skin, 0.0075);
+    m.cap(add(head, [-0.09 * r, -0.25 * r, -0.25 * r]), add(head, [-0.09 * r, 0.25 * r, -0.25 * r]), 0.12 * r, 0x6a5232, 0.0068);
+  } else {
+    // Bareheaded, with a headband in the team's colour.
+    m.ball(add(head, [-0.06 * r, 0, 0.05 * r]), 0.2 * r, hair, 0.007);
+    m.cap(add(head, [0.02 * r, -0.19 * r, 0.06 * r]), add(head, [0.02 * r, 0.19 * r, 0.06 * r]), 0.04 * r, p.team, 0.0075);
   }
 
-  const L: V3 = [0, -sh, shZ - 0.05 * r], R: V3 = [0, sh, shZ - 0.05 * r];
+  const L = up([0, -sh, shZ - 0.05 * r]), R = up([0, sh, shZ - 0.05 * r]);
   const arm = (from: V3, hand: V3, bias = 0.01) => {
     const elbow: V3 = [(from[0] + hand[0]) / 2 - 0.05 * r, (from[1] + hand[1]) / 2 + Math.sign(from[1]) * 0.07 * r, (from[2] + hand[2]) / 2 - 0.1 * r];
     m.cap(from, elbow, 0.11 * r, sleeve, bias, sleeveFinish);
@@ -218,19 +307,42 @@ function footman(m: Model, type: UnitType, r: number, p: Palette, frame: number)
     m.ball(hand, 0.08 * r, type === 'swordsman' ? p.leather : p.skin, bias + 0.001);
   };
 
+  if (!armed) {
+    // Weapon gone: arms pump as he runs (or fly up as he falls).
+    if (kind === 'die') {
+      arm(L, [-0.1 * r, -0.62 * r, shZ + 0.55 * r]);
+      arm(R, [-0.05 * r, 0.62 * r, shZ + 0.5 * r]);
+    } else {
+      arm(L, up([0.3 * r * swing, -0.42 * r, 2.15 * r + bob]), 0.01);
+      arm(R, up([-0.3 * r * swing, 0.42 * r, 2.15 * r + bob]), 0.01);
+    }
+    return;
+  }
+
   if (type === 'swordsman') {
-    // Kite shield on the left arm, sword in the right: raised, then a cut down and across.
-    // Carried well forward, so the painted face shows from most sides.
+    // Shield on the left arm, carried well forward so its painted face shows from most
+    // sides; sword in the right hand: raised, then a cut down and across.
     const shieldC: V3 = [0.5 * r, -0.32 * r, 2.15 * r + bob];
     arm(L, [0.42 * r, -0.3 * r, 2.2 * r + bob], 0.05);
     const sU: V3 = [0, 0, 1], sV: V3 = norm([0.55, 0.83, 0]);
-    const kite = (scale: number, color: number, bias: number) => {
-      const pt = (u: number, v: number): V3 => add(shieldC, [sU[0] * u + sV[0] * v, sU[1] * u + sV[1] * v, sU[2] * u + sV[2] * v]);
-      m.poly([pt(0.55 * r * scale, -0.32 * r * scale), pt(0.6 * r * scale, 0), pt(0.55 * r * scale, 0.32 * r * scale), pt(0, 0.34 * r * scale), pt(-0.75 * r * scale, 0), pt(0, -0.34 * r * scale)], color, bias);
-    };
-    kite(1.08, 0x4a3420, 0.12);
-    kite(1, p.team, 0.121);
-    m.disc(add(shieldC, [0.02 * r, 0.01 * r, 0.12 * r]), sU, sV, 0.09 * r, 0.09 * r, p.steel, 0.122, 'metal', 10);
+    if (look === 0) {
+      const kite = (scale: number, color: number, bias: number) => {
+        const s = r * scale;
+        m.poly([[0.55, -0.32], [0.6, 0], [0.55, 0.32], [0, 0.34], [-0.75, 0], [0, -0.34]].map(([u, v]) => onPlane(shieldC, sU, sV, u * s, v * s)), color, bias);
+      };
+      kite(1.08, 0x4a3420, 0.12);
+      kite(1, p.team, 0.121);
+      // A pale stripe down the middle.
+      m.poly([[0.58, -0.06], [0.58, 0.06], [-0.6, 0.04], [-0.6, -0.04]].map(([u, v]) => onPlane(shieldC, sU, sV, u * r, v * r)), p.teamTrim, 0.1215);
+      m.disc(onPlane(shieldC, sU, sV, 0.12 * r, 0), sU, sV, 0.09 * r, 0.09 * r, p.steel, 0.122, 'metal', 10);
+    } else {
+      // Round shield, quartered by a pale cross, iron rim and boss.
+      m.disc(shieldC, sU, sV, 0.47 * r, 0.47 * r, 0x5a5a5e, 0.12, 'metal');
+      m.disc(shieldC, sU, sV, 0.42 * r, 0.42 * r, p.team, 0.121);
+      m.poly([[0.42, -0.05], [0.42, 0.05], [-0.42, 0.05], [-0.42, -0.05]].map(([u, v]) => onPlane(shieldC, sU, sV, u * r, v * r)), p.teamTrim, 0.1212);
+      m.poly([[-0.05, -0.42], [0.05, -0.42], [0.05, 0.42], [-0.05, 0.42]].map(([u, v]) => onPlane(shieldC, sU, sV, u * r, v * r)), p.teamTrim, 0.1214);
+      m.disc(shieldC, sU, sV, 0.1 * r, 0.1 * r, p.steel, 0.122, 'metal', 10);
+    }
     let hand: V3, tip: V3;
     if (attack >= 0) {
       const a = Math.min(1, attack * 1.25);
@@ -243,7 +355,7 @@ function footman(m: Model, type: UnitType, r: number, p: Palette, frame: number)
     }
     arm(R, hand);
     m.cap(hand, tip, 0.05 * r, lighten(p.steel, 0.2), 0.015, 'metal');
-    m.cap(add(hand, [0, -0.13 * r, 0]), add(hand, [0, 0.13 * r, 0]), 0.04 * r, 0xa88a3a, 0.016, 'metal');
+    m.cap(add(hand, [0, -0.13 * r, 0]), add(hand, [0, 0.13 * r, 0]), 0.04 * r, p.gold, 0.016, 'metal');
   } else if (type === 'pikeman') {
     // Pike levelled at the enemy, both hands on the shaft; a thrust drives it on.
     // At rest it stands upright beside him, so a halted block bristles like a hedge.
@@ -269,11 +381,11 @@ function footman(m: Model, type: UnitType, r: number, p: Palette, frame: number)
     const draw = attack >= 0 ? Math.min(1, attack * 1.6) * (attack > 0.85 ? 0 : 1) : 0;
     const bowHand: V3 = attack >= 0 ? [0.8 * r, -0.12 * r, 2.65 * r + bob] : [0.32 * r - swing * 0.1 * r, -0.4 * r, 2.0 * r + bob];
     arm(L, bowHand, attack >= 0 ? 0.02 : -0.002);
-    const up: V3 = attack >= 0 ? [0, 0, 1] : [0.35, 0, 0.94];
+    const upv: V3 = attack >= 0 ? [0, 0, 1] : [0.35, 0, 0.94];
     const limb = 1.05 * r;
     const bend = attack >= 0 ? -0.16 * r - draw * 0.15 * r : -0.14 * r;
-    const top = add(bowHand, [up[0] * limb + bend, up[1] * limb, up[2] * limb]);
-    const bot = add(bowHand, [-up[0] * limb + bend, -up[1] * limb, -up[2] * limb]);
+    const top = add(bowHand, [upv[0] * limb + bend, upv[1] * limb, upv[2] * limb]);
+    const bot = add(bowHand, [-upv[0] * limb + bend, -upv[1] * limb, -upv[2] * limb]);
     const grip = add(bowHand, [0.07 * r, 0, 0]);
     m.cap(top, grip, 0.045 * r, p.wood, 0.025);
     m.cap(grip, bot, 0.045 * r, p.wood, 0.025);
@@ -285,10 +397,30 @@ function footman(m: Model, type: UnitType, r: number, p: Palette, frame: number)
   }
 }
 
+/** The weapon a fallen footman dropped, lying on the ground beside him. */
+function droppedWeapon(m: Model, type: UnitType, r: number, p: Palette): void {
+  if (type === 'swordsman') {
+    m.cap([0.6 * r, 0.7 * r, 0.05 * r], [1.6 * r, 0.95 * r, 0.05 * r], 0.05 * r, lighten(p.steel, 0.2), 0, 'metal');
+    m.cap([0.6 * r, 0.55 * r, 0.05 * r], [0.65 * r, 0.85 * r, 0.05 * r], 0.04 * r, p.gold, 0.001, 'metal');
+  } else if (type === 'pikeman') {
+    m.cap([1.2 * r, 0.9 * r, 0.05 * r], [-3.8 * r, 1.3 * r, 0.05 * r], 0.055 * r, p.wood);
+    m.poly([[1.2 * r, 0.82 * r, 0.05 * r], [1.7 * r, 0.86 * r, 0.05 * r], [1.2 * r, 0.98 * r, 0.05 * r]], p.steel, 0.001, 'metal');
+  } else if (type === 'archer') {
+    m.cap([0.5 * r, 0.75 * r, 0.05 * r], [1.2 * r, 1.3 * r, 0.05 * r], 0.045 * r, p.wood);
+    m.cap([1.2 * r, 1.3 * r, 0.05 * r], [2.0 * r, 1.2 * r, 0.05 * r], 0.045 * r, p.wood);
+  } else {
+    m.cap([1.0 * r, 1.2 * r, 0.05 * r], [-2.6 * r, 1.6 * r, 0.05 * r], 0.055 * r, p.wood);
+  }
+}
+
 /** A knight on a barded horse, hooves at the origin. */
 function horseman(m: Model, r: number, p: Palette, frame: number, variant: number): void {
-  const { gait, moving, attack } = poseOf(frame);
+  const { kind, gait, t } = poseOf(frame);
+  const moving = kind === 'walk' || kind === 'flee';
+  const attack = kind === 'attack' ? t : -1;
+  const armed = kind !== 'flee' && kind !== 'die';
   const [coat, mane, points] = COATS[((variant % HORSE_VARIANTS) + HORSE_VARIANTS) % HORSE_VARIANTS % COATS.length];
+  const crest = variant % 2 === 1;
   const rise = moving ? Math.sin(gait) * 0.1 * r : 0;
   const pitch = moving ? Math.cos(gait) * 0.07 : 0;
   const bodyZ = 1.75 * r + rise;
@@ -296,12 +428,13 @@ function horseman(m: Model, r: number, p: Palette, frame: number, variant: numbe
   const z = (x: number) => bodyZ + x * pitch;
 
   // Legs: a gallop's footfalls come round in turn (hind left, hind right, fore left, fore right).
+  // A falling horse's legs buckle.
   const legs: [number, number, number][] = [[rear + 0.12 * r, -1, 0], [rear + 0.12 * r, 1, 0.12], [front - 0.08 * r, -1, 0.5], [front - 0.08 * r, 1, 0.62]];
   for (const [x, side, off] of legs) {
     const hindLeg = x < 0;
-    const t = gait + off * Math.PI * 2;
-    const swingA = moving ? Math.sin(t) * (hindLeg ? 0.55 : 0.7) : (hindLeg ? -0.05 : 0.05);
-    const fold = moving ? Math.max(0, Math.cos(t)) * (hindLeg ? 0.9 : -1.2) : 0;
+    const ph = gait + off * Math.PI * 2;
+    const swingA = moving ? Math.sin(ph) * (hindLeg ? 0.55 : 0.7) : kind === 'die' ? (hindLeg ? -0.5 : 0.6) * side : (hindLeg ? -0.05 : 0.05);
+    const fold = moving ? Math.max(0, Math.cos(ph)) * (hindLeg ? 0.9 : -1.2) : kind === 'die' ? (hindLeg ? 0.8 : -0.9) : 0;
     const hipP: V3 = [x, side * 0.25 * r, z(x) - 0.25 * r];
     const upper = 0.68 * r, lower = 0.8 * r;
     const knee: V3 = add(hipP, [Math.sin(swingA) * upper, 0, -Math.cos(swingA) * upper]);
@@ -326,20 +459,25 @@ function horseman(m: Model, r: number, p: Palette, frame: number, variant: numbe
   m.ball(add(muzzle, [0.02 * r, 0, -0.02 * r]), 0.12 * r, darken(coat, 0.3), 0.031);
   m.cap(add(neckTop, [-0.05 * r, 0, 0.14 * r]), add(neckTop, [-0.55 * r, 0, -0.3 * r]), 0.08 * r, mane, 0.025);
   for (const side of [-1, 1]) m.ball(add(neckTop, [0.02 * r, side * 0.08 * r, 0.2 * r]), 0.05 * r, darken(coat, 0.2), 0.032);
+  // Bridle and reins.
+  m.cap(add(neckTop, [0.1 * r, 0, 0.05 * r]), add(muzzle, [-0.05 * r, 0, 0.02 * r]), 0.03 * r, 0x2a1a10, 0.033);
 
-  // Barding: a cloth in the team's colour over the back and flanks, with a pale hem.
+  // Barding: a cloth in the team's colour over the back and flanks, with folds and a pale hem.
   const top = z(0) + 0.42 * r, hem = z(0) - 0.5 * r;
   m.poly([[rear - 0.05 * r, -0.35 * r, top], [front * 0.75, -0.35 * r, top], [front * 0.75, 0.35 * r, top], [rear - 0.05 * r, 0.35 * r, top]], p.team, 0.12);
   for (const side of [-1, 1]) {
     const y = side * 0.53 * r;
     m.poly([[rear - 0.05 * r, side * 0.35 * r, top], [front * 0.75, side * 0.35 * r, top], [front * 0.85, y, hem], [rear - 0.12 * r, y, hem]], p.team, 0.15);
-    m.poly([[rear - 0.12 * r, y * 1.01, hem + 0.09 * r], [front * 0.85, y * 1.01, hem + 0.09 * r], [front * 0.85, y * 1.01, hem], [rear - 0.12 * r, y * 1.01, hem]], 0xd8ccaa, 0.151);
+    for (const fx of [-0.45, 0.05, 0.45]) {
+      m.poly([[fx * r - 0.03 * r, side * 0.36 * r, top - 0.05 * r], [fx * r + 0.03 * r, side * 0.36 * r, top - 0.05 * r], [fx * r + 0.07 * r, y * 1.005, hem + 0.1 * r], [fx * r - 0.07 * r, y * 1.005, hem + 0.1 * r]], p.teamDark, 0.1505);
+    }
+    m.poly([[rear - 0.12 * r, y * 1.01, hem + 0.09 * r], [front * 0.85, y * 1.01, hem + 0.09 * r], [front * 0.85, y * 1.01, hem], [rear - 0.12 * r, y * 1.01, hem]], p.teamTrim, 0.151);
   }
   m.cap([-0.4 * r, 0, top + 0.06 * r], [0.25 * r, 0, top + 0.06 * r], 0.16 * r, p.leather, 0.16);
 
   // Rider in mail and a team surcoat, legs down the horse's sides, leaning into the gallop.
   const seat: V3 = [-0.15 * r, 0, top + 0.2 * r];
-  const lean = moving ? 0.3 * r : 0.05 * r;
+  const lean = kind === 'flee' ? 0.45 * r : moving ? 0.3 * r : 0.05 * r;
   const shoulder: V3 = add(seat, [lean, 0, 1.0 * r]);
   for (const side of [-1, 1]) {
     const knee: V3 = [0.22 * r, side * 0.56 * r, z(0) + 0.05 * r];
@@ -347,37 +485,95 @@ function horseman(m: Model, r: number, p: Palette, frame: number, variant: numbe
     m.cap(knee, [0.08 * r, side * 0.6 * r, z(0) - 0.55 * r], 0.11 * r, p.mail, 0.2, 'metal');
   }
   m.cap(add(seat, [0, 0, 0.15 * r]), shoulder, 0.28 * r, p.team, 0.25);
+  m.cap(add(seat, [0.02 * r, -0.26 * r, 0.22 * r]), add(seat, [0.02 * r, 0.26 * r, 0.22 * r]), 0.06 * r, p.leather, 0.2505);
   m.cap(add(shoulder, [0, -0.3 * r, -0.05 * r]), add(shoulder, [0, 0.3 * r, -0.05 * r]), 0.15 * r, p.mail, 0.251, 'metal');
-  // Great helm with a short plume in the team's colour.
+  // Great helm with a plume (or a crest) in the team's colour.
   const head: V3 = add(shoulder, [0.06 * r, 0, 0.38 * r]);
   m.cap(add(head, [0, 0, -0.08 * r]), add(head, [0, 0, 0.1 * r]), 0.21 * r, p.steel, 0.253, 'metal');
   m.cap(add(head, [0.2 * r, -0.12 * r, 0.02 * r]), add(head, [0.2 * r, 0.12 * r, 0.02 * r]), 0.02 * r, 0x1a1a1a, 0.254);
-  m.cap(add(head, [0, 0, 0.26 * r]), add(head, [-0.35 * r, 0, 0.38 * r]), 0.08 * r, p.team, 0.255);
+  if (crest) m.cap(add(head, [0.12 * r, 0, 0.3 * r]), add(head, [-0.2 * r, 0, 0.3 * r]), 0.07 * r, p.gold, 0.255, 'metal');
+  else m.cap(add(head, [0, 0, 0.26 * r]), add(head, [-0.35 * r, 0, 0.38 * r]), 0.08 * r, p.team, 0.255);
 
   // Heater shield on the left arm.
   const shieldC: V3 = add(shoulder, [0.12 * r, -0.4 * r, -0.45 * r]);
   m.cap(add(shoulder, [0, -0.3 * r, 0]), add(shieldC, [0, 0.1 * r, 0.1 * r]), 0.1 * r, p.mail, 0, 'metal');
   const sU: V3 = [0, 0, 1], sV: V3 = norm([0.85, 0.53, 0]);
   const heater = (scale: number, color: number, bias: number) => {
-    const pt = (u: number, v: number): V3 => add(shieldC, [sU[0] * u + sV[0] * v, sU[1] * u + sV[1] * v, sU[2] * u + sV[2] * v]);
     const s = r * scale;
-    m.poly([pt(0.4 * s, -0.36 * s), pt(0.4 * s, 0.36 * s), pt(0.0, 0.36 * s), pt(-0.55 * s, 0), pt(0.0, -0.36 * s)], color, bias);
+    m.poly([[0.4, -0.36], [0.4, 0.36], [0, 0.36], [-0.55, 0], [0, -0.36]].map(([u, v]) => onPlane(shieldC, sU, sV, u * s, v * s)), color, bias);
   };
   heater(1.1, 0x4a3420, 0.01);
   heater(1, p.team, 0.011);
-  heater(0.45, mix(p.team, 0xe8dcc0, 0.75), 0.012);
+  // A pale chevron on the shield.
+  m.poly([[-0.25, 0], [0.12, -0.3], [0.2, -0.22], [-0.17, 0.08]].map(([u, v]) => onPlane(shieldC, sU, sV, u * r, v * r)), p.teamTrim, 0.012);
+  m.poly([[-0.25, 0], [0.12, 0.3], [0.2, 0.22], [-0.17, -0.08]].map(([u, v]) => onPlane(shieldC, sU, sV, u * r, v * r)), p.teamTrim, 0.0121);
 
+  const hand: V3 = add(shoulder, [0.32 * r, 0.36 * r, -0.4 * r]);
+  if (!armed) {
+    // Lance thrown away: the rein hand forward, the other up.
+    m.cap(add(shoulder, [0, 0.3 * r, 0]), kind === 'die' ? add(shoulder, [0, 0.6 * r, 0.5 * r]) : hand, 0.1 * r, p.mail, 0.02, 'metal');
+    return;
+  }
   // Lance couched under the right arm; the strike drives it forward.
   const thrust = attack >= 0 ? Math.sin(Math.min(1, attack * 1.2) * Math.PI) * 0.8 * r : 0;
-  const hand: V3 = add(shoulder, [0.32 * r + thrust, 0.36 * r, -0.4 * r]);
-  m.cap(add(shoulder, [0, 0.3 * r, 0]), hand, 0.1 * r, p.mail, 0.02, 'metal');
-  const butt: V3 = add(hand, [-0.9 * r, 0.02 * r, 0.12 * r]);
-  const tip: V3 = add(hand, [3.4 * r, 0.05 * r, moving || attack >= 0 ? -0.35 * r : 1.2 * r]);
+  const lanceHand = add(hand, [thrust, 0, 0]);
+  m.cap(add(shoulder, [0, 0.3 * r, 0]), lanceHand, 0.1 * r, p.mail, 0.02, 'metal');
+  const butt: V3 = add(lanceHand, [-0.9 * r, 0.02 * r, 0.12 * r]);
+  const tip: V3 = add(lanceHand, [3.4 * r, 0.05 * r, moving || attack >= 0 ? -0.35 * r : 1.2 * r]);
   m.cap(butt, tip, 0.055 * r, p.wood, 0.01);
   const dx = tip[0] - butt[0], dz = tip[2] - butt[2], len = Math.hypot(dx, dz);
-  const at = (k: number, up: number): V3 => [butt[0] + dx * k - (dz / len) * up, tip[1], butt[2] + dz * k + (dx / len) * up];
+  const at = (k: number, upAmt: number): V3 => [butt[0] + dx * k - (dz / len) * upAmt, tip[1], butt[2] + dz * k + (dx / len) * upAmt];
   m.poly([at(0.97, 0.035 * r), at(1.1, 0), at(0.97, -0.035 * r)], p.steel, 0.011, 'metal');
   m.poly([at(0.8, 0), at(0.92, 0), at(0.82, -0.3 * r)], p.team, 0.012);
+}
+
+/** A tiny drawing surface: what a figure needs to be painted (Canvas 2D in the game). */
+export interface Painter {
+  circle(x: number, y: number, r: number, color: number, alpha?: number): void;
+  /** A stroke with round ends. */
+  line(x0: number, y0: number, x1: number, y1: number, width: number, color: number, alpha?: number): void;
+  /** A filled polygon, optionally grown by a rim of the same colour. */
+  poly(pts: number[], color: number, alpha?: number, rim?: number): void;
+}
+
+const css = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
+
+/** Paint figures onto a 2D canvas (fast: no tessellation, rasterised natively). */
+export function canvasPainter(ctx: CanvasRenderingContext2D): Painter {
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  return {
+    circle(x, y, r, color, alpha = 1) {
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = css(color);
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    },
+    line(x0, y0, x1, y1, width, color, alpha = 1) {
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = css(color);
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+    },
+    poly(pts, color, alpha = 1, rim = 0) {
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = css(color);
+      ctx.beginPath();
+      ctx.moveTo(pts[0], pts[1]);
+      for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
+      ctx.closePath();
+      ctx.fill();
+      if (rim > 0) {
+        ctx.strokeStyle = css(color);
+        ctx.lineWidth = rim * 2;
+        ctx.stroke();
+      }
+    },
+  };
 }
 
 export interface FigureFrame {
@@ -386,7 +582,7 @@ export interface FigureFrame {
   minY: number;
   maxX: number;
   maxY: number;
-  draw(g: Graphics, ox: number, oy: number): void;
+  draw(p: Painter, ox: number, oy: number): void;
 }
 
 interface Shape {
@@ -409,12 +605,24 @@ const SUN_SCREEN = (() => {
   return [x / l, y / l] as const;
 })();
 
-/** Build one frame of a unit design facing `angle`, ready to paint at any offset. */
+/**
+ * Build one frame of a unit design facing `angle`, ready to paint at any offset.
+ * `variant` picks the horse coat for cavalry and the look for infantry.
+ */
 export function buildFigure(type: UnitType, team: Team, r: number, theme: Theme, variant: number, angle: number, frame: number): FigureFrame {
   const m = new Model();
   const p = palette(team, theme);
+  const { kind, t } = poseOf(frame);
   if (type === 'cavalry') horseman(m, r, p, frame, variant);
-  else footman(m, type, r, p, frame);
+  else footman(m, type, r, p, frame, ((variant % INFANTRY_LOOKS) + INFANTRY_LOOKS) % INFANTRY_LOOKS);
+  if (kind === 'die') {
+    // Struck down: footmen topple backwards, a horse rolls onto its side.
+    const a = [0.45, 0.95, 1.35, 1.55][Math.round(t * (DEATH_FRAMES - 1))];
+    const c = Math.cos(a), s = Math.sin(a);
+    if (type === 'cavalry') m.transform(([f, y, h]) => [f, y * c + h * s, -y * s + h * c + 0.55 * r * s]);
+    else m.transform(([f, y, h]) => [f * c - h * s, y, f * s + h * c + 0.3 * r * s]);
+    if (t >= 1) droppedWeapon(m, type, r, p);
+  }
 
   const cos = Math.cos(angle), sin = Math.sin(angle);
   const world = (v: V3): V3 => [v[0] * cos - v[1] * sin, v[0] * sin + v[1] * cos, v[2]];
@@ -447,13 +655,15 @@ export function buildFigure(type: UnitType, team: Team, r: number, theme: Theme,
   });
   shapes.sort((a, b) => a.depth - b.depth || a.order - b.order);
 
-  // Soft ground shadow under the figure, stretched along the horse.
-  const sl = type === 'cavalry' ? 1.7 * r : 0.6 * r, sw = type === 'cavalry' ? 0.7 * r : 0.5 * r;
+  // Soft ground shadow under the figure, stretched along the horse (or the fallen body).
+  const lying = kind === 'die' ? t : 0;
+  const sl = type === 'cavalry' ? 1.7 * r : (0.6 + 1.2 * lying) * r, sw = type === 'cavalry' ? (0.7 + 0.6 * lying) * r : 0.5 * r;
+  const sx = type === 'cavalry' ? 0 : -lying * 1.4 * r;
   const shadowAt = (k: number): [number, number][] => {
     const out: [number, number][] = [];
     for (let i = 0; i < 20; i++) {
-      const t = (i / 20) * Math.PI * 2;
-      out.push(screen(world([Math.cos(t) * sl * k, Math.sin(t) * sw * k, 0])));
+      const a = (i / 20) * Math.PI * 2;
+      out.push(screen(world([sx + Math.cos(a) * sl * k, Math.sin(a) * sw * k, 0])));
     }
     return out;
   };
@@ -468,8 +678,8 @@ export function buildFigure(type: UnitType, team: Team, r: number, theme: Theme,
   for (const s of shapes) for (const [x, y] of s.pts) grow(x, y, s.w + rim + 0.2);
   for (const [x, y] of shadows[0]) grow(x, y, 0.2);
 
-  const draw = (g: Graphics, ox: number, oy: number) => {
-    for (const sh of shadows) g.poly(sh.flatMap(([x, y]) => [x + ox, y + oy])).fill({ color: 0x14180a, alpha: 0.2 });
+  const draw = (g: Painter, ox: number, oy: number) => {
+    for (const sh of shadows) g.poly(sh.flatMap(([x, y]) => [x + ox, y + oy]), 0x14180a, 0.2);
     // A thin dark edge, as anti-aliased renders have, so the figure holds against the grass.
     for (const s of shapes) paintFlat(g, s, ox, oy, 0x1c1a14, rim);
     for (const s of shapes) {
@@ -483,7 +693,7 @@ export function buildFigure(type: UnitType, team: Team, r: number, theme: Theme,
 }
 
 /** A rounded part: shadowed body, lit middle, a soft (or sharp, for metal) highlight. */
-function paintRound(g: Graphics, s: Shape, ox: number, oy: number, ao: number): void {
+function paintRound(g: Painter, s: Shape, ox: number, oy: number, ao: number): void {
   const metal = s.finish === 'metal';
   const [lx, ly] = SUN_SCREEN;
   const layers: [number, number, number][] = metal
@@ -495,21 +705,16 @@ function paintRound(g: Graphics, s: Shape, ox: number, oy: number, ao: number): 
   }
 }
 
-function paintCap(g: Graphics, pts: [number, number][], ox: number, oy: number, w: number, color: number): void {
+function paintCap(g: Painter, pts: [number, number][], ox: number, oy: number, w: number, color: number): void {
   const [a, b] = pts;
-  if (Math.abs(a[0] - b[0]) < 1e-4 && Math.abs(a[1] - b[1]) < 1e-4) {
-    g.circle(a[0] + ox, a[1] + oy, w).fill(color);
-  } else {
-    g.moveTo(a[0] + ox, a[1] + oy).lineTo(b[0] + ox, b[1] + oy).stroke({ width: w * 2, color, cap: 'round' });
-  }
+  if (Math.abs(a[0] - b[0]) < 1e-4 && Math.abs(a[1] - b[1]) < 1e-4) g.circle(a[0] + ox, a[1] + oy, w, color);
+  else g.line(a[0] + ox, a[1] + oy, b[0] + ox, b[1] + oy, w * 2, color);
 }
 
-function paintFlat(g: Graphics, s: Shape, ox: number, oy: number, color: number, rim: number): void {
+function paintFlat(g: Painter, s: Shape, ox: number, oy: number, color: number, rim: number): void {
   if (s.cap) {
     paintCap(g, s.pts, ox, oy, s.w + rim, color);
     return;
   }
-  const flat = s.pts.flatMap(([x, y]) => [x + ox, y + oy]);
-  g.poly(flat).fill(color);
-  if (rim > 0) g.poly(flat).stroke({ width: rim * 2, color, join: 'round' });
+  g.poly(s.pts.flatMap(([x, y]) => [x + ox, y + oy]), color, 1, rim);
 }

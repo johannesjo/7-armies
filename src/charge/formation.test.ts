@@ -101,3 +101,14 @@ describe('squadron formation movement', () => {
   });
 
 });
+
+describe('full squadron', () => {
+  it('completes the wedge: every row behind the leader is full', () => {
+    const followers = wedgeSlots(C.MAX_SQUAD - 1);
+    const rows = new Map<number, number>();
+    for (const s of followers) rows.set(s.x, (rows.get(s.x) ?? 0) + 1);
+    const counts = [...rows.entries()].sort((a, b) => b[0] - a[0]).map(([, n]) => n);
+    expect(C.MAX_SQUAD).toBeGreaterThan(30);
+    counts.forEach((n, i) => expect(n).toBe(i + 2));
+  });
+});

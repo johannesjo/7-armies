@@ -39,18 +39,19 @@ const replayBtn = document.getElementById('replay-btn')!;
 const reloadBtn = document.getElementById('reload-btn')!;
 
 const themeSelect = document.getElementById('theme-select') as HTMLSelectElement;
-const THEME_KEY = 'theme';
+// Bumped when the default style changes, so everyone sees the new default once.
+const THEME_KEY = 'theme-v2';
 
 function loadThemeName(): ThemeName {
   let stored: string | null = null;
   try { stored = localStorage.getItem(THEME_KEY); } catch { /* storage unavailable */ }
-  return stored && stored in THEMES ? stored as ThemeName : 'field';
+  return stored && stored in THEMES ? stored as ThemeName : 'rts';
 }
 
 themeSelect.value = loadThemeName();
 
 function currentTheme(): Theme {
-  return THEMES[themeSelect.value as ThemeName] ?? THEMES.field;
+  return THEMES[themeSelect.value as ThemeName] ?? THEMES.rts;
 }
 
 function teamCss(team: 'blue' | 'red'): string {
@@ -61,6 +62,7 @@ function teamCss(team: 'blue' | 'red'): string {
 /** Parchment uses the light page styling; field and night use the dark overlays. */
 function applyBodyTheme(): void {
   document.body.classList.toggle('day-mode', themeSelect.value === 'parchment' || themeSelect.value === 'ink');
+  document.body.classList.toggle('style-rts', themeSelect.value === 'rts');
 }
 const pixiContainer = document.getElementById('pixi-container')!;
 

@@ -334,7 +334,10 @@
       user-select: none;
       -webkit-user-select: none;
     }
-    #charge-canvas { position: absolute; inset: 0; }
+    /* The controls listen on this container: block browser gestures here (not just on the
+       canvas), or a held finger is taken for a scroll/zoom and cancelled — the 3D view hides
+       the Pixi canvas, so touches land on the container itself. */
+    #charge-canvas { position: absolute; inset: 0; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
     #charge-canvas canvas { display: block; touch-action: none; }
     #charge-hud {
       position: absolute;

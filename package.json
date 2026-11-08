@@ -1,7 +1,7 @@
 {
   "name": "7-armies",
   "version": "1.0.0",
-  "description": "Medieval army battle game",
+  "description": "Medieval cavalry charge game",
   "main": "index.js",
   "scripts": {
     "dev": "vite",

@@ -18,14 +18,6 @@ const HORSE_COATS: [number, number][] = [
 /** Number of horse coat variants (pass `variant` 0..n-1 to drawUnitArt). */
 export const HORSE_VARIANTS = HORSE_COATS.length;
 
-/** Stable small hash for picking a cosmetic variant from an id. */
-export function artVariant(id: string | number): number {
-  const s = String(id);
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
 function shadow(g: Canvas, rx: number, ry: number): void {
   g.ellipse(0, 0, rx, ry).fill({ color: 0x000000, alpha: 0.14 });
 }

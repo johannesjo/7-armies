@@ -4,8 +4,8 @@ import { Team, UnitType, Vec2 } from '../types';
 import { Theme } from '../theme';
 import { drawUnitArt, HORSE_VARIANTS, attackPose, attackDuration } from '../unit-art';
 import { CHARGE as C } from './config';
-import { ArtStyle, drawStyledUnit, paintFeltTile, paintPaperTile } from './art-styles';
-import { CORPSE_FRAME, FRAMES, DRAWN_DIRS, IDLE_FRAME, INFANTRY_LOOKS, WeaponSegment, attackFrame, buildFigure, canvasPainter, deathFrame, dirAngle, facingFrame, fleeFrame, paintLongWeapon, projectLocal, walkFrame } from './figure-art';
+import { ArtStyle, drawStyledUnit, paintPaperTile } from './art-styles';
+import { RiderGear, CORPSE_FRAME, FRAMES, DRAWN_DIRS, IDLE_FRAME, INFANTRY_LOOKS, WeaponSegment, attackFrame, buildFigure, canvasPainter, deathFrame, dirAngle, facingFrame, fleeFrame, paintLongWeapon, projectLocal, walkFrame } from './figure-art';
 import { Battalion, ChargeSim, SimEvent, Soldier, Squadron, angleDiff, attackSide, mulberry32 } from './sim';
 import { PathPoint } from './path';
 import { DirectZones } from './direct';
@@ -107,6 +107,27 @@ interface Popup {
 
 const MAX_PARTICLES = 900;
 
+export interface Rect { x: number; y: number; w: number; h: number }
+
+/** The field a view draws: its size, any woods on it, and whether it is the big battle. */
+export interface FieldLayout {
+  w: number;
+  h: number;
+  /** Stands of forest inside the field (beyond its edge it is all forest anyway). */
+  woods: Rect[];
+  /** The battle's scenery: the clash line, the blue camps and the red camp. */
+  battle: boolean;
+  /** Cache key for textures painted for this field. */
+  key: string;
+}
+
+export const BATTLE_FIELD: FieldLayout = { w: C.WORLD_W, h: C.WORLD_H, woods: [], battle: true, key: 'charge' };
+
+/** How deep inside a rectangle a point lies (negative outside). */
+function rectDepth(x: number, y: number, r: Rect): number {
+  return Math.min(x - r.x, r.x + r.w - x, y - r.y, r.y + r.h - y);
+}
+
 const sharedTextures = new Map<HTMLCanvasElement, Texture>();
 /** One long-lived texture per cached canvas (never destroyed, reused across battles). */
 function sharedTexture(canvas: HTMLCanvasElement): Texture {
@@ -206,12 +227,20 @@ const floorNoise = fbm(57, 4);
  * among the trees. The edge is ragged (noise), so the wood has bays and spurs rather
  * than a ruled line.
  */
-function forestDepth(x: number, y: number): number {
-  const out = Math.max(-x, x - C.WORLD_W, -y, y - C.WORLD_H);
+function forestDepth(x: number, y: number, field: FieldLayout): number {
+  let out = Math.max(-x, x - field.w, -y, y - field.h);
+  for (const r of field.woods) out = Math.max(out, rectDepth(x, y, r));
   return out + (forestNoise(x / 150, y / 150) - 0.5) * 80;
 }
 
-let forestCanvas: HTMLCanvasElement | null = null;
+/** Whether a point is well clear of every wood (no need to work out the ragged edge). */
+function clearOfWoods(x: number, y: number, field: FieldLayout, margin: number): boolean {
+  if (Math.max(-x, x - field.w, -y, y - field.h) >= -margin) return false;
+  for (const r of field.woods) if (rectDepth(x, y, r) >= -margin) return false;
+  return true;
+}
+
+const forestCanvases = new Map<string, HTMLCanvasElement>();
 
 /**
  * The forest round the field, painted once: dappled shade spilling onto the grass at
@@ -219,10 +248,11 @@ let forestCanvas: HTMLCanvasElement | null = null;
  * unbroken canopy of the deep wood (overlapping crowns). The shade and floor are low
  * resolution (3 units a pixel): soft texture, with the trees on top giving detail.
  */
-function paintForest(theme: Theme): HTMLCanvasElement {
-  if (forestCanvas) return forestCanvas;
+function paintForest(theme: Theme, field: FieldLayout): HTMLCanvasElement {
+  const cached = forestCanvases.get(field.key);
+  if (cached) return cached;
   const S = 3, M = FOREST_MARGIN;
-  const w = Math.ceil((C.WORLD_W + M * 2) / S), h = Math.ceil((C.WORLD_H + M * 2) / S);
+  const w = Math.ceil((field.w + M * 2) / S), h = Math.ceil((field.h + M * 2) / S);
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;
   const ctx = cv.getContext('2d')!;
@@ -239,8 +269,8 @@ function paintForest(theme: Theme): HTMLCanvasElement {
       const x = px * S - M, y = py * S - M;
       const i = (py * w + px) * 4;
       // Well inside the meadow: nothing to paint (skip the noise).
-      if (Math.max(-x, x - C.WORLD_W, -y, y - C.WORLD_H) < -112) { d[i + 3] = 0; continue; }
-      const f = forestDepth(x, y);
+      if (clearOfWoods(x, y, field, 112)) { d[i + 3] = 0; continue; }
+      const f = forestDepth(x, y, field);
       if (f < -70) { d[i + 3] = 0; continue; }
       // Dappled shade cast onto the meadow by the trees at its edge.
       const dapple = 0.65 + 0.35 * floorNoise(x / 22, y / 22);
@@ -273,10 +303,10 @@ function paintForest(theme: Theme): HTMLCanvasElement {
   const lit = css(mixColor(mixColor(CANOPY, theme.grassDark, 0.6), theme.grassLight, 0.12)), glint = css(mixColor(theme.grassDark, theme.grassLight, 0.4));
   const step = 15;
   const crowns: [number, number, number][] = [];
-  for (let y = -M; y < C.WORLD_H + M; y += step) {
-    for (let x = -M; x < C.WORLD_W + M; x += step) {
+  for (let y = -M; y < field.h + M; y += step) {
+    for (let x = -M; x < field.w + M; x += step) {
       const cx = x + (rnd() - 0.5) * step, cy = y + (rnd() - 0.5) * step;
-      const f = forestDepth(cx, cy);
+      const f = forestDepth(cx, cy, field);
       if (f < 250 || rnd() > smooth(250, 330, f)) continue;
       crowns.push([cx, cy, 10 + rnd() * 7]);
     }
@@ -291,7 +321,7 @@ function paintForest(theme: Theme): HTMLCanvasElement {
     ctx.globalAlpha = 1;
   }
   ctx.restore();
-  forestCanvas = cv;
+  forestCanvases.set(field.key, cv);
   return cv;
 }
 
@@ -303,58 +333,64 @@ function arcPath(g: Graphics, x: number, y: number, r: number, a0: number, a1: n
 /** Pixi rendering for the cavalry action mode: follow camera, ground, units, arrows, effects. */
 export class ChargeView {
   readonly root = new Container();
-  private readonly world = new Container();
-  private readonly ground = new Graphics();
-  private readonly stainRT: RenderTexture;
-  private readonly stainSprite: Sprite;
-  private readonly stainBatch = new Graphics();
+  protected readonly world = new Container();
+  protected readonly ground = new Graphics();
+  protected readonly stainRT: RenderTexture;
+  protected readonly stainSprite: Sprite;
+  protected readonly stainBatch = new Graphics();
   /** Off-stage container baked into the ground texture: stains plus fallen soldiers. */
-  private readonly bakeRoot = new Container();
-  private stainDirty = false;
-  private readonly telegraph = new Graphics();
-  private readonly route = new Graphics();
-  private readonly aimG = new Graphics();
+  protected readonly bakeRoot = new Container();
+  protected stainDirty = false;
+  protected readonly telegraph = new Graphics();
+  protected readonly route = new Graphics();
+  protected readonly aimG = new Graphics();
   /** A route is being drawn: follow more gently and keep the zoom steady. */
   holdCamera = false;
-  private readonly unitLayer = new Container();
-  private readonly fx = new Graphics();
-  private readonly arrowsG = new Graphics();
-  private readonly overlay = new Graphics();
-  private readonly popupLayer = new Container();
+  protected readonly unitLayer = new Container();
+  protected readonly fx = new Graphics();
+  protected readonly arrowsG = new Graphics();
+  protected readonly overlay = new Graphics();
+  protected readonly popupLayer = new Container();
   /** Screen-space pointers to calls for help that are off screen. */
-  private readonly callG = new Graphics();
+  protected readonly callG = new Graphics();
 
-  private readonly units = new Map<number, UnitGfx>();
-  private unitStamp = 0;
-  private dying: Dying[] = [];
-  private particles: Particle[] = [];
-  private impacts: ImpactFx[] = [];
-  private popups: Popup[] = [];
+  protected readonly units = new Map<number, UnitGfx>();
+  protected unitStamp = 0;
+  protected dying: Dying[] = [];
+  protected particles: Particle[] = [];
+  protected impacts: ImpactFx[] = [];
+  protected popups: Popup[] = [];
   /** Pre-rendered unit art: a body and a weapon texture per unit design. */
-  private readonly unitTextures = new Map<string, { body: Texture; weapon: Texture; bx: number; by: number; wx: number; wy: number }>();
+  protected readonly unitTextures = new Map<string, { body: Texture; weapon: Texture; bx: number; by: number; wx: number; wy: number }>();
   /** Textures this view created and must free. */
-  private readonly ownedTextures: Texture[] = [];
-  private readonly particleLayer = new Container();
-  private readonly particlePool: Sprite[] = [];
-  private dotHard: Texture | null = null;
-  private dotSoft: Texture | null = null;
-  private readonly ink: number;
-  private readonly dust: number;
+  protected readonly ownedTextures: Texture[] = [];
+  protected readonly particleLayer = new Container();
+  protected readonly particlePool: Sprite[] = [];
+  protected dotHard: Texture | null = null;
+  protected dotSoft: Texture | null = null;
+  protected readonly ink: number;
+  protected readonly dust: number;
 
-  private camX: number = C.CAMPS[0].x;
-  private camY: number = C.CAMPS[0].y - 200;
-  private zoom = 2;
-  private viewW = 800;
-  private viewH = 450;
-  private sidePopupCooldown = 0;
-  private hoofTimer = 0;
-  private readonly rand = mulberry32(99);
+  protected camX: number = C.CAMPS[0].x;
+  protected camY: number = C.CAMPS[0].y - 200;
+  protected zoom = 2;
+  protected viewW = 800;
+  protected viewH = 450;
+  protected sidePopupCooldown = 0;
+  protected hoofTimer = 0;
+  protected readonly rand = mulberry32(99);
 
-  private readonly style: ArtStyle;
+  protected readonly style: ArtStyle;
   /** Upright three-quarter-view figures (the classic RTS style) instead of top-down art. */
-  private readonly upright: boolean;
+  protected readonly upright: boolean;
 
-  constructor(private readonly app: Application, private readonly theme: Theme) {
+  /** Field size. */
+  protected readonly W: number;
+  protected readonly H: number;
+
+  constructor(protected readonly app: Application, protected readonly theme: Theme, protected readonly field: FieldLayout = BATTLE_FIELD) {
+    this.W = field.w;
+    this.H = field.h;
     this.style = theme.artStyle ?? 'classic';
     this.upright = this.style === 'rts';
     // Upright figures overlap: whoever stands nearer the camera (lower on screen) is drawn on top.
@@ -362,12 +398,12 @@ export class ChargeView {
     this.ink = theme.labelFill;
     this.dust = theme.grass ? mixColor(theme.dirt, theme.trim, 0.45) : mixColor(theme.bg, theme.obstacleBorder, 0.35);
     // Beyond the field: forest floor on grass, a darker margin otherwise.
-    app.renderer.background.color = this.style === 'mini' ? 0x4e3420 // the wooden table under the felt
-      : this.style === 'ink' ? 0xd6c7a2
+    app.renderer.background.color = this.style === 'ink' ? 0xd6c7a2
       : theme.artStyle === 'rts' ? CANOPY
       : theme.grass ? 0x33441f : mixColor(theme.bg, this.ink, 0.18);
 
-    this.stainRT = RenderTexture.create({ width: C.WORLD_W, height: C.WORLD_H, resolution: 1.25 });
+    // Big fields get a coarser stain layer (GPU memory, and textures over 4096 px).
+    this.stainRT = RenderTexture.create({ width: this.W, height: this.H, resolution: Math.min(1.25, 3600 / Math.max(this.W, this.H)) });
     this.bakeRoot.addChild(this.stainBatch);
     this.stainSprite = new Sprite(this.stainRT);
 
@@ -398,11 +434,11 @@ export class ChargeView {
     this.viewH = h;
   }
 
-  private baseZoom(): number {
+  protected baseZoom(): number {
     const long = Math.max(this.viewW, this.viewH), short = Math.min(this.viewW, this.viewH);
     let zoom = long / 740;
-    // Phones: frame ~260 world units across the short side so units aren't tiny.
-    if (short < 600) zoom = Math.max(zoom, short / 260);
+    // Phones: frame a fixed span of the field across the short side, so units aren't tiny.
+    if (short < 600) zoom = Math.max(zoom, short / C.PHONE_VIEW_SPAN);
     // Dev builds: window.chargeZoom scales the camera (for close-up recordings).
     const devZoom = import.meta.env.DEV ? (window as { chargeZoom?: number }).chargeZoom ?? 1 : 1;
     return Math.max(0.8, Math.min(3, zoom)) * devZoom;
@@ -527,69 +563,48 @@ export class ChargeView {
 
   // --- Static ground -------------------------------------------------------------
 
-  private grassTexture: Texture | null = null;
+  protected grassTexture: Texture | null = null;
 
   /** Amount of bare, trampled earth: where the lines clash and around both camps. */
-  private earthAt = (x: number, y: number): number => {
-    const cx = C.WORLD_W / 2;
+  protected earthAt(x: number, y: number): number {
+    if (!this.field.battle) return 0;
+    const cx = this.W / 2;
     const xFade = Math.max(0, 1 - Math.max(0, Math.abs(x - cx) - 380) / 160);
     const front = Math.max(0, 1 - Math.abs(y - C.FRONT_Y) / 80) * xFade;
     let camp = 0;
     for (const c of C.CAMPS) camp = Math.max(camp, 1 - Math.hypot(x - c.x, y - c.y) / (C.CAMP_R * 1.15));
     const redCamp = y < 200 ? Math.max(0, 1 - Math.max(0, Math.abs(x - cx) - 300) / 120) * (1 - y / 200) * 0.8 : 0;
     return Math.max(front, camp, redCamp);
-  };
+  }
 
   /** Realistic meadow: tiled close-up grass, broad colour patches, trampled earth and scenery sprites. */
-  private drawGrass(): void {
+  protected drawGrass(): void {
     const t = this.theme;
     const rand = mulberry32(4321);
     // The grass tile and its texture live for the whole session (shared by every battle).
-    const tile = this.style === 'mini' ? paintFeltTile(t) : this.style === 'ink' ? paintPaperTile(t) : paintGrassTile(t, 768, 3);
+    const tile = this.style === 'ink' ? paintPaperTile(t) : paintGrassTile(t, 768, 3);
     // Upright style: the meadow runs on under the wood, so the ragged edge has grass in its bays.
     const gm = this.upright ? 120 : 0;
-    const grass = new TilingSprite({ texture: sharedTexture(tile), width: C.WORLD_W + gm * 2, height: C.WORLD_H + gm * 2 });
+    const grass = new TilingSprite({ texture: sharedTexture(tile), width: this.W + gm * 2, height: this.H + gm * 2 });
     grass.position.set(-gm, -gm);
     grass.tilePosition.set(gm, gm);
-    grass.tileScale.set(this.style === 'mini' || this.style === 'ink' ? 0.75 : 0.5);
+    grass.tileScale.set(this.style === 'ink' ? 0.75 : 0.5);
     // The meadow's colour patches run on under the wood too (no seam in its bays).
     const overlay = new Sprite(sharedTexture(gm > 0
-      ? paintGroundOverlay(C.WORLD_W + gm * 2, C.WORLD_H + gm * 2, t, (x, y) => this.earthAt(x - gm, y - gm), 4, 11, 'charge-wide')
-      : paintGroundOverlay(C.WORLD_W, C.WORLD_H, t, this.earthAt, 4, 11, 'charge')));
+      ? paintGroundOverlay(this.W + gm * 2, this.H + gm * 2, t, (x, y) => this.earthAt(x - gm, y - gm), 4, 11, `${this.field.key}-wide`)
+      : paintGroundOverlay(this.W, this.H, t, (x, y) => this.earthAt(x, y), 4, 11, this.field.key)));
     overlay.position.set(-gm, -gm);
-    overlay.width = C.WORLD_W + gm * 2;
-    overlay.height = C.WORLD_H + gm * 2;
+    overlay.width = this.W + gm * 2;
+    overlay.height = this.H + gm * 2;
     if (this.style === 'ink') overlay.alpha = 0.6; // pale washes over the paper
     this.world.addChild(grass, overlay);
     if (this.upright) {
       // The wood round the field: shade at its ragged edge, floor, and deep canopy.
-      const forest = new Sprite(sharedTexture(paintForest(t)));
+      const forest = new Sprite(sharedTexture(paintForest(t, this.field)));
       forest.position.set(-FOREST_MARGIN, -FOREST_MARGIN);
-      forest.width = C.WORLD_W + FOREST_MARGIN * 2;
-      forest.height = C.WORLD_H + FOREST_MARGIN * 2;
+      forest.width = this.W + FOREST_MARGIN * 2;
+      forest.height = this.H + FOREST_MARGIN * 2;
       this.world.addChild(forest);
-    }
-    if (this.style === 'mini') {
-      // Scatter-flock patches, the way terrain is dressed on a wargames table.
-      const flock = new Graphics();
-      const fr = mulberry32(77);
-      const tones = [t.grassLight, t.grassDry, mixColor(t.grassDark, 0x1a2a10, 0.4), t.dirt];
-      for (let i = 0; i < 420; i++) {
-        const x = fr() * C.WORLD_W, y = fr() * C.WORLD_H;
-        const color = tones[Math.floor(fr() * tones.length)];
-        const spread = 8 + fr() * 22;
-        // A patch is a drift of fine grains, denser in the middle.
-        for (let k = 0; k < 40; k++) {
-          const a = fr() * Math.PI * 2, d = Math.pow(fr(), 1.6) * spread;
-          flock.circle(x + Math.cos(a) * d * 1.4, y + Math.sin(a) * d, 0.5 + fr() * 1.1)
-            .fill({ color, alpha: 0.35 + fr() * 0.3 });
-        }
-      }
-      this.world.addChild(flock);
-      // The felt's cut edge, with the table showing beyond.
-      const edge = new Graphics();
-      edge.rect(-6, -6, C.WORLD_W + 12, C.WORLD_H + 12).stroke({ width: 10, color: 0x000000, alpha: 0.25 });
-      this.world.addChild(edge);
     }
 
     // Scenery as sprites baked from a handful of drawings.
@@ -709,9 +724,9 @@ export class ChargeView {
       let placed = 0;
       for (let tries = 0; placed < 2300 && tries < 14000; tries++) {
         const side = Math.floor(rand() * 4), along = rand(), depth = -40 + rand() * span;
-        const x = side === 0 || side === 2 ? along * (C.WORLD_W + span * 2) - span : side === 1 ? C.WORLD_W + depth : -depth;
-        const y = side === 0 ? -depth : side === 2 ? C.WORLD_H + depth : along * (C.WORLD_H + span * 2) - span;
-        const f = forestDepth(x, y);
+        const x = side === 0 || side === 2 ? along * (this.W + span * 2) - span : side === 1 ? this.W + depth : -depth;
+        const y = side === 0 ? -depth : side === 2 ? this.H + depth : along * (this.H + span * 2) - span;
+        const f = forestDepth(x, y, this.field);
         // Densest at the edge, thinning where the painted canopy takes over.
         if (f < 4 || f > 350 || rand() > 1 - f / 420) continue;
         place(treeTex[Math.floor(rand() * treeTex.length)], x, y, 0.8 + rand() * 0.5);
@@ -719,43 +734,63 @@ export class ChargeView {
       }
       for (let tries = 0, n = 0; n < 320 && tries < 6000; tries++) {
         const side = Math.floor(rand() * 4), along = rand(), depth = -60 + rand() * 90;
-        const x = side === 0 || side === 2 ? along * C.WORLD_W : side === 1 ? C.WORLD_W + depth : -depth;
-        const y = side === 0 ? -depth : side === 2 ? C.WORLD_H + depth : along * C.WORLD_H;
-        const f = forestDepth(x, y);
+        const x = side === 0 || side === 2 ? along * this.W : side === 1 ? this.W + depth : -depth;
+        const y = side === 0 ? -depth : side === 2 ? this.H + depth : along * this.H;
+        const f = forestDepth(x, y, this.field);
         if (f < -22 || f > 10 || this.earthAt(x, y) > 0.1) continue;
         place(bushTex[Math.floor(rand() * bushTex.length)], x, y, 0.8 + rand() * 0.7);
         n++;
       }
     }
-    const trees = this.style === 'mini' || this.upright ? 0 : 300;
+    // Woods inside the field: thick at heart, ragged at the edge, undergrowth round it.
+    for (const r of this.field.woods) {
+      const area = r.w * r.h;
+      const dense = this.upright ? 1 / 500 : 1 / 1400;
+      for (let tries = 0, n = 0; n < area * dense && tries < area * dense * 6; tries++) {
+        const x = r.x - 30 + rand() * (r.w + 60), y = r.y - 30 + rand() * (r.h + 60);
+        const f = forestDepth(x, y, this.field);
+        if (f < (this.upright ? 4 : 10) || rand() > Math.min(1, 0.35 + f / 60)) continue;
+        place(treeTex[Math.floor(rand() * treeTex.length)], x, y, this.upright ? 0.8 + rand() * 0.5 : 0.6 + rand() * 0.7);
+        n++;
+      }
+      const edge = 2 * (r.w + r.h);
+      for (let tries = 0, n = 0; n < edge / 30 && tries < edge; tries++) {
+        const x = r.x - 30 + rand() * (r.w + 60), y = r.y - 30 + rand() * (r.h + 60);
+        const f = forestDepth(x, y, this.field);
+        if (f < -22 || f > 10 || this.earthAt(x, y) > 0.1) continue;
+        place(bushTex[Math.floor(rand() * bushTex.length)], x, y, 0.8 + rand() * 0.7);
+        n++;
+      }
+    }
+    const trees = this.upright ? 0 : 300;
     for (let i = 0; i < trees; i++) {
       const side = Math.floor(rand() * 4);
       const along = rand();
       const depth = (this.upright ? 2 : 14) + rand() * band;
-      const x = side === 0 || side === 2 ? along * (C.WORLD_W + band * 2) - band : side === 1 ? C.WORLD_W + depth : -depth;
-      const y = side === 0 ? -depth : side === 2 ? C.WORLD_H + depth : along * (C.WORLD_H + band * 2) - band;
+      const x = side === 0 || side === 2 ? along * (this.W + band * 2) - band : side === 1 ? this.W + depth : -depth;
+      const y = side === 0 ? -depth : side === 2 ? this.H + depth : along * (this.H + band * 2) - band;
       place(treeTex[Math.floor(rand() * treeTex.length)], x, y, this.upright ? 0.8 + rand() * 0.5 : 0.6 + rand() * 0.7);
     }
     for (let i = 0; i < 70; i++) {
       const edge = Math.floor(rand() * 4);
       const inset = 15 + rand() * 90;
-      const x = edge === 1 ? C.WORLD_W - inset : edge === 3 ? inset : rand() * C.WORLD_W;
-      const y = edge === 0 ? inset : edge === 2 ? C.WORLD_H - inset : rand() * C.WORLD_H;
+      const x = edge === 1 ? this.W - inset : edge === 3 ? inset : rand() * this.W;
+      const y = edge === 0 ? inset : edge === 2 ? this.H - inset : rand() * this.H;
       if (this.earthAt(x, y) > 0.1) continue;
       place(bushTex[Math.floor(rand() * bushTex.length)], x, y, 0.7 + rand() * 0.7);
     }
     for (let i = 0; i < 140; i++) {
-      const x = rand() * C.WORLD_W, y = rand() * C.WORLD_H;
+      const x = rand() * this.W, y = rand() * this.H;
       place(stoneTex[Math.floor(rand() * stoneTex.length)], x, y, 0.7 + rand() * 0.6);
     }
     for (let i = 0; i < (this.style === 'classic' || this.style === 'rts' ? 170 : 0); i++) {
-      const x = rand() * C.WORLD_W, y = rand() * C.WORLD_H;
+      const x = rand() * this.W, y = rand() * this.H;
       if (this.earthAt(x, y) > 0.3) continue;
       place(flowerTex[Math.floor(rand() * flowerTex.length)], x, y, 0.8 + rand() * 0.5);
     }
   }
 
-  private drawGround(): void {
+  protected drawGround(): void {
     const g = this.ground;
     const t = this.theme;
     const rand = mulberry32(1234);
@@ -764,12 +799,12 @@ export class ChargeView {
       this.drawCamps(g, rand);
       return;
     }
-    g.rect(0, 0, C.WORLD_W, C.WORLD_H).fill(t.bg);
+    g.rect(0, 0, this.W, this.H).fill(t.bg);
 
-    // Churned earth where the lines meet.
+    // Churned earth where the lines meet (the battle only).
     const mud = mixColor(t.bg, t.obstacleBorder, 0.16);
-    for (let i = 0; i < 40; i++) {
-      const x = C.WORLD_W / 2 + (rand() - 0.5) * 900;
+    for (let i = 0; i < (this.field.battle ? 40 : 0); i++) {
+      const x = this.W / 2 + (rand() - 0.5) * 900;
       const y = C.FRONT_Y + (rand() - 0.5) * 70;
       g.ellipse(x, y, 40 + rand() * 70, 14 + rand() * 20).fill({ color: mud, alpha: 0.18 });
     }
@@ -778,23 +813,35 @@ export class ChargeView {
     const tuft = mixColor(t.bg, t.obstacleBorder, 0.3);
     g.setStrokeStyle({ width: 1, color: tuft, alpha: 0.55 });
     for (let i = 0; i < 2200; i++) {
-      const x = rand() * C.WORLD_W;
-      const y = rand() * C.WORLD_H;
+      const x = rand() * this.W;
+      const y = rand() * this.H;
       const s = 2 + rand() * 2.5;
       g.moveTo(x - s, y - s * 0.2).lineTo(x - s * 0.2, y + s * 0.5).lineTo(x + s * 0.4, y - s * 0.6);
     }
     g.stroke();
     for (let i = 0; i < 260; i++) {
-      g.circle(rand() * C.WORLD_W, rand() * C.WORLD_H, 0.8 + rand() * 1.8)
+      g.circle(rand() * this.W, rand() * this.H, 0.8 + rand() * 1.8)
         .fill({ color: t.obstacleBorder, alpha: 0.18 + rand() * 0.15 });
     }
 
+    // Woods inside the field: a mass of tree crowns.
+    const crown = mixColor(t.bg, t.obstacleBorder, 0.22), crownEdge = mixColor(t.bg, t.obstacleBorder, 0.45);
+    for (const r of this.field.woods) {
+      for (let y = r.y; y < r.y + r.h; y += 22) {
+        for (let x = r.x; x < r.x + r.w; x += 22) {
+          const cx = x + (rand() - 0.5) * 18, cy = y + (rand() - 0.5) * 18;
+          if (forestDepth(cx, cy, this.field) < 6) continue;
+          g.circle(cx, cy, 11 + rand() * 6).fill({ color: crown, alpha: 0.8 }).stroke({ width: 1, color: crownEdge, alpha: 0.5 });
+        }
+      }
+    }
+
     // Field edge.
-    g.rect(0, 0, C.WORLD_W, C.WORLD_H).stroke({ width: 4, color: t.obstacleBorder, alpha: 0.5 });
+    g.rect(0, 0, this.W, this.H).stroke({ width: 4, color: t.obstacleBorder, alpha: 0.5 });
     this.drawCamps(g, rand);
   }
 
-  private drawCamps(g: Graphics, rand: () => number): void {
+  protected drawCamps(g: Graphics, rand: () => number): void {
     const t = this.theme;
     // Blue rally camps behind each wing.
     const blue = t.blue;
@@ -815,9 +862,9 @@ export class ChargeView {
 
     // Red camp along the far edge (scenery).
     for (let i = 0; i < 9; i++) {
-      this.drawTent(g, C.WORLD_W / 2 + (i - 4) * 70 + (rand() - 0.5) * 20, 70 + rand() * 40, t.red);
+      this.drawTent(g, this.W / 2 + (i - 4) * 70 + (rand() - 0.5) * 20, 70 + rand() * 40, t.red);
     }
-    this.drawBanner(g, C.WORLD_W / 2, 150, t.red);
+    this.drawBanner(g, this.W / 2, 150, t.red);
 
     for (const c of C.CAMPS) {
       const label = new Text({
@@ -832,7 +879,7 @@ export class ChargeView {
     }
   }
 
-  private drawTent(g: Graphics, x: number, y: number, color: number): void {
+  protected drawTent(g: Graphics, x: number, y: number, color: number): void {
     if (this.upright) {
       // A round pavilion seen from the side: striped wall, conical roof, pennant on the pole.
       const cloth = mixColor(this.theme.trim, 0xffffff, 0.3), w = 11, wall = 9, roof = 12;
@@ -855,7 +902,7 @@ export class ChargeView {
     g.moveTo(x, y - 9).lineTo(x, y + 8).stroke({ width: 0.8, color, alpha: 0.5 });
   }
 
-  private drawBanner(g: Graphics, x: number, y: number, color: number): void {
+  protected drawBanner(g: Graphics, x: number, y: number, color: number): void {
     g.moveTo(x, y + 10).lineTo(x, y - 24).stroke({ width: 1.5, color: this.theme.obstacleBorder });
     g.poly([x, y - 24, x + 16, y - 19, x, y - 14]).fill(color);
   }
@@ -863,12 +910,12 @@ export class ChargeView {
   // --- Units -----------------------------------------------------------------------
 
   /** Resolution for pre-rendered art: crisp at the closest zoom on dense screens. */
-  private get artResolution(): number {
+  protected get artResolution(): number {
     return Math.min(6, 3 * this.app.renderer.resolution);
   }
 
   /** Render vector art once into a texture; returns it with the anchor that keeps its origin. */
-  private bake(draw: (g: Graphics) => void, resolution = this.artResolution): { tex: Texture; ax: number; ay: number } {
+  protected bake(draw: (g: Graphics) => void, resolution = this.artResolution): { tex: Texture; ax: number; ay: number } {
     const g = new Graphics();
     draw(g);
     const b = g.getLocalBounds();
@@ -882,7 +929,7 @@ export class ChargeView {
    * Bake every unit design up front: baking on first sight (the first knights, a new
    * horse coat) would hitch the game mid-battle.
    */
-  private prewarm(): void {
+  protected prewarm(): void {
     ensureCombatFont();
     this.dotTextures();
     for (const team of ['blue', 'red'] as const) {
@@ -901,20 +948,21 @@ export class ChargeView {
    * Bake every facing and frame of an upright unit design into one texture: rows of
    * facings, columns of frames. Frames are sub-rectangles anchored at the feet.
    */
-  private sheetFor(type: UnitType, team: Team, r: number, variant: number): FigureSheet {
+  protected sheetFor(type: UnitType, team: Team, r: number, variant: number, gear: RiderGear = 'lance'): FigureSheet {
     const res = Math.min(2.5, this.artResolution);
     const t = this.theme;
-    const key = `${type}:${team}:${r}:${variant}:${res}:${t.blue}:${t.red}:${t.steel}:${t.wood}`;
+    const key = `${type}:${team}:${r}:${variant}:${gear}:${res}:${t.blue}:${t.red}:${t.steel}:${t.wood}`;
     const hit = figureSheets.get(key);
     if (hit) return hit;
     // Shelf-pack every facing and frame into one canvas no wider than a safe texture.
     // Sheets are many and large, so their resolution is capped: units are small on screen.
     const maxW = Math.floor(4096 / res);
     const PAD = 1;
-    const detach = type === 'pikeman' || type === 'cavalry';
+    // Levelled pikes and couched lances are drawn apart; a bow stays in the frames.
+    const detach = type === 'pikeman' || (type === 'cavalry' && gear === 'lance');
     const figs = [];
     for (let d = 0; d < DRAWN_DIRS; d++) {
-      for (let f = 0; f < FRAMES; f++) figs.push(buildFigure(type, team, r, this.theme, variant, dirAngle(d), f, detach));
+      for (let f = 0; f < FRAMES; f++) figs.push(buildFigure(type, team, r, this.theme, variant, dirAngle(d), f, detach, gear));
     }
     const cells: { x: number; y: number; w: number; h: number }[] = [];
     let x = 0, y = 0, rowH = 0, width = 0;
@@ -969,15 +1017,15 @@ export class ChargeView {
     return sheet;
   }
 
-  private texturesFor(type: UnitType, team: Team, r: number, variant: number) {
-    const key = `${type}:${team}:${r}:${variant}`;
+  protected texturesFor(type: UnitType, team: Team, r: number, variant: number, gear: RiderGear = 'lance') {
+    const key = `${type}:${team}:${r}:${variant}:${gear}`;
     let t = this.unitTextures.get(key);
     if (!t) {
       // Body and weapon are baked separately so the weapon can still swing and thrust.
       const scratch = new Graphics();
-      const body = this.bake(g => drawStyledUnit(this.style, g, scratch, type, team, r, this.theme, variant));
+      const body = this.bake(g => drawStyledUnit(this.style, g, scratch, type, team, r, this.theme, variant, gear));
       scratch.clear();
-      const weapon = this.bake(g => drawStyledUnit(this.style, scratch, g, type, team, r, this.theme, variant));
+      const weapon = this.bake(g => drawStyledUnit(this.style, scratch, g, type, team, r, this.theme, variant, gear));
       scratch.destroy();
       t = { body: body.tex, weapon: weapon.tex, bx: body.ax, by: body.ay, wx: weapon.ax, wy: weapon.ay };
       this.unitTextures.set(key, t);
@@ -985,15 +1033,21 @@ export class ChargeView {
     return t;
   }
 
-  private gfxFor(s: Soldier): UnitGfx {
+  /** What a horseman carries (in the battle, every rider has a lance). */
+  protected riderGear(_s: Soldier): RiderGear {
+    return 'lance';
+  }
+
+  protected gfxFor(s: Soldier): UnitGfx {
     let u = this.units.get(s.id);
     if (u) return u;
     const variant = s.type === 'cavalry' ? s.id % HORSE_VARIANTS : this.upright ? s.id % INFANTRY_LOOKS : 0;
+    const gear = s.type === 'cavalry' ? this.riderGear(s) : 'lance';
     const root = new Container();
     let body: Sprite, weapon: Sprite, sheet: FigureSheet | null = null;
     if (this.upright) {
       // The weapon is part of each frame; the spare sprite stays hidden.
-      sheet = this.sheetFor(s.type, s.team, s.radius, variant);
+      sheet = this.sheetFor(s.type, s.team, s.radius, variant, gear);
       body = new Sprite(sheet.frames[0]);
       body.anchor.set(sheet.ax[0], sheet.ay[0]);
       // No two men quite alike: a touch lighter or darker each (plus the size jitter).
@@ -1005,7 +1059,7 @@ export class ChargeView {
       // The weapon goes in front of the body or behind it, depending on where it points.
       root.sortableChildren = true;
     } else {
-      const t = this.texturesFor(s.type, s.team, s.radius, variant);
+      const t = this.texturesFor(s.type, s.team, s.radius, variant, gear);
       body = new Sprite(t.body);
       body.anchor.set(t.bx, t.by);
       weapon = new Sprite(t.weapon);
@@ -1019,7 +1073,7 @@ export class ChargeView {
   }
 
   /** The fallen stay on the field: bake the body, darkened, with its weapon dropped beside it. */
-  private layCorpse(root: Container): void {
+  protected layCorpse(root: Container): void {
     root.removeFromParent();
     root.alpha = 0.78;
     root.scale.set(0.95);
@@ -1035,12 +1089,7 @@ export class ChargeView {
       this.stainDirty = true;
       return;
     }
-    if (this.style === 'mini') {
-      // A toppled miniature: knocked flat on its side, paint intact.
-      root.alpha = 1;
-      root.scale.set(1, 0.62);
-      if (body) body.tint = 0xd6d6d6;
-    } else if (this.style === 'ink') {
+    if (this.style === 'ink') {
       root.alpha = 0.55;
       if (body) body.tint = 0xffffff;
     }
@@ -1054,7 +1103,7 @@ export class ChargeView {
     this.stainDirty = true;
   }
 
-  private killUnit(id: number, angle: number, speed: number, lift: number): void {
+  protected killUnit(id: number, angle: number, speed: number, lift: number): void {
     const u = this.units.get(id);
     if (!u) return;
     this.units.delete(id);
@@ -1073,7 +1122,7 @@ export class ChargeView {
   }
 
   /** Slash, shockwave and flying earth where a charge connects. */
-  private impactFx(x: number, y: number, angle: number, side: 'front' | 'flank' | 'rear', pike: boolean): void {
+  protected impactFx(x: number, y: number, angle: number, side: 'front' | 'flank' | 'rear', pike: boolean): void {
     const strength = side === 'rear' ? 1.7 : side === 'flank' ? 1.35 : 0.8;
     if (this.impacts.length > 40) this.impacts.shift();
     this.impacts.push({ x, y, angle, age: 0, strength, rear: side === 'rear', pike });
@@ -1115,7 +1164,7 @@ export class ChargeView {
     }
   }
 
-  private drawImpacts(dt: number): void {
+  protected drawImpacts(dt: number): void {
     const g = this.fx;
     g.clear();
     const t = this.theme;
@@ -1168,7 +1217,7 @@ export class ChargeView {
     this.flushStains(dt);
   }
 
-  private handleEvents(sim: ChargeSim, events: SimEvent[], dt: number): void {
+  protected handleEvents(sim: ChargeSim, events: SimEvent[], dt: number): void {
     const t = this.theme;
     this.sidePopupCooldown -= dt;
     for (const e of events) {
@@ -1272,17 +1321,18 @@ export class ChargeView {
     }
   }
 
-  private pulse(id: number): void {
+  protected pulse(id: number): void {
     const u = this.units.get(id);
     if (u) u.pulse = 0.12;
   }
 
-  private syncUnits(sim: ChargeSim, dt: number): void {
+  protected syncUnits(sim: ChargeSim, dt: number): void {
     const stamp = ++this.unitStamp;
     for (const s of sim.soldiers) {
       if (!s.alive) continue;
       const u = this.gfxFor(s);
       u.stamp = stamp;
+      u.root.visible = !this.hiddenAt(s.team, s.x, s.y);
       u.root.position.set(s.x, s.y);
       // Men in the ranks don't all face exactly the same way.
       const quirk = ((s.id * 0.618034) % 1) - 0.5;
@@ -1358,7 +1408,7 @@ export class ChargeView {
    * Motion that sells each prototype style: toy hops and rocking-horse gallops for
    * miniatures, hand-drawn line boil for ink, sprite bobbing for the painted RTS look.
    */
-  private styleMotion(u: UnitGfx, s: Soldier, time: number, dt: number, scale: number, sx: number, sy: number, down: boolean) {
+  protected styleMotion(u: UnitGfx, s: Soldier, time: number, dt: number, scale: number, sx: number, sy: number, down: boolean) {
     const dist = Math.hypot(s.x - u.px, s.y - u.py);
     u.px = s.x;
     u.py = s.y;
@@ -1366,29 +1416,7 @@ export class ChargeView {
     u.speed += (speed - u.speed) * Math.min(1, dt * 10);
     // Upright figures stride further per cycle: a full gallop stride is about a horse length and a half.
     u.phase += Math.min(dist, 12) * (this.upright ? (s.type === 'cavalry' ? 0.2 : 0.55) : s.rider ? 0.32 : 0.75);
-    const moving = speed > 6 && !down;
-    if (this.style === 'mini') {
-      if (down) {
-        // Knocked flat: the figure lies on its side, base and all.
-        u.root.rotation += (s.id % 2 === 0 ? 0.25 : -0.25);
-        sy *= 0.8;
-      } else if (s.rider) {
-        // Rocking horse: pitch fore and aft (seen from above it lengthens and shortens)
-        // and a lift on every stride.
-        const rock = Math.sin(u.phase);
-        const k = Math.min(1, speed / C.CANTER_SPEED);
-        sx *= 1 + 0.08 * rock * k;
-        u.root.x += Math.cos(s.facing) * rock * 0.9 * k;
-        u.root.y -= Math.abs(rock) * 1.6 * k;
-        scale *= 1 + Math.abs(rock) * 0.05 * k;
-      } else if (moving) {
-        // Hopping across the table as if moved by hand, with a little wobble.
-        const hop = Math.abs(Math.sin(u.phase));
-        u.root.y -= hop * 1.5;
-        scale *= 1 + hop * 0.06;
-        u.root.rotation += Math.sin(u.phase) * 0.09;
-      }
-    } else if (this.style === 'ink') {
+    if (this.style === 'ink') {
       // Line boil: every few frames each figure is "redrawn" a hair differently.
       const k = Math.floor(time * 8);
       const h = (n: number) => { const x = Math.sin((s.id * 12.9898 + k * 78.233 + n * 37.719)) * 43758.5453; return x - Math.floor(x); };
@@ -1404,7 +1432,7 @@ export class ChargeView {
    * Pick an upright figure's frame: the facing nearest its heading (mirrored for the
    * west half), then an attack, a walk or gallop step, or standing still.
    */
-  private poseFigure(u: UnitGfx, s: Soldier, time: number, down: boolean, quirk: number): void {
+  protected poseFigure(u: UnitGfx, s: Soldier, time: number, down: boolean, quirk: number): void {
     const sheet = u.sheet;
     if (!sheet) return;
     const { dir, mirror } = facingFrame(s.facing + (s.rider || s.fleeing ? 0 : quirk * 0.28));
@@ -1425,7 +1453,7 @@ export class ChargeView {
    * Lay the detached pike or lance from the unit's hands along its exact heading:
    * the body shows one of 16 facings, but the long weapon turns smoothly.
    */
-  private poseWeapon(u: UnitGfx, s: Soldier, frame: number, mirror: boolean, quirk: number): void {
+  protected poseWeapon(u: UnitGfx, s: Soldier, frame: number, mirror: boolean, quirk: number): void {
     const sheet = u.sheet!;
     const seg = sheet.weapons[frame];
     if (!seg || !sheet.weaponTex) { u.weapon.visible = false; return; }
@@ -1443,7 +1471,7 @@ export class ChargeView {
     u.weapon.zIndex = (a.depth + b.depth) / 2 > -0.1 * s.radius ? 1 : -1;
   }
 
-  private showFrame(u: UnitGfx, i: number): void {
+  protected showFrame(u: UnitGfx, i: number): void {
     if (!u.sheet || i === u.frame) return;
     u.frame = i;
     u.body.texture = u.sheet.frames[i];
@@ -1454,7 +1482,7 @@ export class ChargeView {
    * Weapon and body motion for a blow (sword cut, pike thrust, lance thrust) and a
    * restless sway for soldiers locked in the line.
    */
-  private animateFighting(u: UnitGfx, s: Soldier, time: number, dt: number): void {
+  protected animateFighting(u: UnitGfx, s: Soldier, time: number, dt: number): void {
     const r = s.radius;
     let wRot = 0, wX = 0, bX = 0, bY = 0;
     if (!s.fleeing) {
@@ -1485,12 +1513,12 @@ export class ChargeView {
 
   // --- Particles & stains ----------------------------------------------------------------
 
-  private addParticle(p: Particle): void {
+  protected addParticle(p: Particle): void {
     if (this.particles.length >= MAX_PARTICLES) this.particles.shift();
     this.particles.push(p);
   }
 
-  private blood(x: number, y: number, angle: number, count: number, power: number): void {
+  protected blood(x: number, y: number, angle: number, count: number, power: number): void {
     const colors = this.theme.redBlood;
     for (let i = 0; i < count; i++) {
       const a = angle + (this.rand() - 0.5) * 1.3;
@@ -1503,7 +1531,7 @@ export class ChargeView {
     }
   }
 
-  private burstDust(x: number, y: number, angle: number, count: number): void {
+  protected burstDust(x: number, y: number, angle: number, count: number): void {
     for (let i = 0; i < count; i++) {
       const a = angle + Math.PI + (this.rand() - 0.5) * 2.2;
       const sp = 20 + this.rand() * 50;
@@ -1516,7 +1544,7 @@ export class ChargeView {
   }
 
   /** Dust kicked up wherever lines are locked in melee. */
-  private spawnHaze(sim: ChargeSim, dt: number): void {
+  protected spawnHaze(sim: ChargeSim, dt: number): void {
     for (const b of sim.battalions) {
       if (b.routed || b.engagedTimer <= 0 || this.rand() > dt * 2.2) continue;
       const men = b.grid;
@@ -1537,13 +1565,13 @@ export class ChargeView {
     }
   }
 
-  private spawnTrail(sim: ChargeSim, dt: number): void {
+  protected spawnTrail(sim: ChargeSim, dt: number): void {
     if (this.style === 'ink') {
       // Every rider at speed leaves a dry-brush stroke: the page records the charges.
       for (const sq of sim.squadrons) {
         const color = sq.team === 'blue' ? this.theme.blue : this.theme.red;
         for (const r of sq.riders) {
-          if (r.speed < 70) continue;
+          if (r.speed < 70 || this.hiddenAt(r.team, r.x, r.y)) continue;
           const back = r.speed * dt * 1.6;
           this.stainBatch.moveTo(r.x - Math.cos(r.facing) * (6 + back), r.y - Math.sin(r.facing) * (6 + back))
             .lineTo(r.x - Math.cos(r.facing) * 6, r.y - Math.sin(r.facing) * 6)
@@ -1585,10 +1613,10 @@ export class ChargeView {
    * each time a hoof comes down in his gait cycle, so charges leave tracks that build
    * into churned lanes. Galloping hard also tears up the odd clod of earth.
    */
-  private stampHoofPrints(sim: ChargeSim): void {
+  protected stampHoofPrints(sim: ChargeSim): void {
     const print = mixColor(this.theme.dirt, 0x2a1e10, 0.45);
     for (const s of sim.soldiers) {
-      if (!s.alive || s.type !== 'cavalry') continue;
+      if (!s.alive || s.type !== 'cavalry' || this.hiddenAt(s.team, s.x, s.y)) continue;
       const u = this.units.get(s.id);
       if (!u || u.speed < 35) continue;
       // Four hoof falls per stride.
@@ -1615,7 +1643,7 @@ export class ChargeView {
     }
   }
 
-  private stickArrow(x: number, y: number, angle: number): void {
+  protected stickArrow(x: number, y: number, angle: number): void {
     const len = 4;
     const tx = x - Math.cos(angle) * len, ty = y - Math.sin(angle) * len;
     this.stainBatch.moveTo(x, y).lineTo(tx, ty).stroke({ width: 0.7, color: this.ink, alpha: 0.35 });
@@ -1623,7 +1651,7 @@ export class ChargeView {
     this.stainDirty = true;
   }
 
-  private dotTextures(): { hard: Texture; soft: Texture } {
+  protected dotTextures(): { hard: Texture; soft: Texture } {
     if (!this.dotHard || !this.dotSoft) {
       this.dotHard = this.bake(g => g.circle(0, 0, 8).fill(0xffffff), 1).tex;
       this.dotSoft = this.bake(g => {
@@ -1634,7 +1662,7 @@ export class ChargeView {
   }
 
   /** Particles are pooled sprites (blood and earth crisp, dust and haze soft). */
-  private updateParticles(dt: number): void {
+  protected updateParticles(dt: number): void {
     const t = this.theme;
     const stainAlpha = t.bloodAlpha * (1 - t.bloodFade * 0.7);
     const dots = this.dotTextures();
@@ -1678,10 +1706,10 @@ export class ChargeView {
     for (let i = n; i < this.particlePool.length; i++) this.particlePool[i].visible = false;
   }
 
-  private stainTimer = 0;
+  protected stainTimer = 0;
 
   /** Bake pending stains into the ground texture a few times a second (one extra GPU pass each). */
-  private flushStains(dt: number): void {
+  protected flushStains(dt: number): void {
     this.stainTimer += dt;
     if (!this.stainDirty || this.stainTimer < 0.2) return;
     this.stainTimer = 0;
@@ -1695,7 +1723,7 @@ export class ChargeView {
 
   // --- Arrows, telegraphs, overlays ----------------------------------------------------------
 
-  private drawArrows(sim: ChargeSim): void {
+  protected drawArrows(sim: ChargeSim): void {
     const g = this.arrowsG;
     g.clear();
     const t = this.theme;
@@ -1713,13 +1741,20 @@ export class ChargeView {
       g.circle(gx, gy, 1.2).fill({ color: 0x000000, alpha: 0.08 + 0.12 * (1 - h) });
       // The arrow itself, lifted toward the viewer at the top of its arc.
       const ax = gx, ay = gy - lift;
-      const len = 5 * (1 + h * 0.5);
       const color = a.team === 'blue' ? t.blueProjectile : t.redProjectile;
+      if (a.volley === -1) {
+        // Loosed from the saddle: a flat, fast shot with a short streak behind it.
+        const fy = gy - lift * 0.35;
+        g.moveTo(gx - nx * 12, fy - ny * 12).lineTo(gx, fy).stroke({ width: 1.6, color, alpha: 0.25 });
+        g.moveTo(gx - nx * 7, fy - ny * 7).lineTo(gx, fy).stroke({ width: 1.3, color, alpha: 0.95 });
+        continue;
+      }
+      const len = 5 * (1 + h * 0.5);
       g.moveTo(ax - nx * len, ay - ny * len).lineTo(ax, ay).stroke({ width: 0.8 + h * 0.4, color, alpha: 0.95 });
     }
   }
 
-  private drawTelegraphs(sim: ChargeSim): void {
+  protected drawTelegraphs(sim: ChargeSim): void {
     const g = this.telegraph;
     g.clear();
     const warn = this.theme.labelWarn;
@@ -1738,7 +1773,7 @@ export class ChargeView {
     }
   }
 
-  private drawOverlay(sim: ChargeSim): void {
+  protected drawOverlay(sim: ChargeSim): void {
     const g = this.overlay;
     g.clear();
     const t = this.theme;
@@ -1747,7 +1782,7 @@ export class ChargeView {
     // Battalion standards: a waving team flag over every formed battalion, with a
     // slim morale bar under red flags near the action.
     for (const b of sim.battalions) {
-      if (b.routed) continue;
+      if (b.routed || this.hiddenAt(b.team, b.x, b.y)) continue;
       const color = b.team === 'blue' ? t.blue : t.red;
       const dark = b.team === 'blue' ? t.blueDark : t.redDark;
       const px = b.x - Math.cos(b.facing) * b.spacing * 0.6;
@@ -1755,7 +1790,8 @@ export class ChargeView {
       const wave = sim.time * 5 + b.id;
       if (this.upright) {
         paintStandard(g, px, py, 24, color, mixColor(color, t.trim, 0.75), wave);
-        if (b.team !== 'red' || !L || Math.hypot(b.x - L.x, b.y - L.y) > 200) continue;
+        // Morale shows near your squadron, and on any foot you've just shot or charged.
+        if (b.team !== 'red' || !L || (Math.hypot(b.x - L.x, b.y - L.y) > 200 && sim.time - b.lastPlayerHit > 3)) continue;
         // A slim morale bar at the foot of the staff.
         const w = 16, h = 1.6, x = px - w / 2, y = py + 2.5;
         const m = Math.max(0, Math.min(1, b.morale / 100));
@@ -1775,7 +1811,7 @@ export class ChargeView {
       g.circle(px, top - 0.8, 0.9).fill(t.steel);
 
       if (b.team !== 'red') continue;
-      if (!L || Math.hypot(b.x - L.x, b.y - L.y) > 200) continue;
+      if (!L || (Math.hypot(b.x - L.x, b.y - L.y) > 200 && sim.time - b.lastPlayerHit > 3)) continue;
       const w = 22, h = 2.4;
       const x = px - w / 2, y = py + 3;
       const m = Math.max(0, Math.min(1, b.morale / 100));
@@ -1789,17 +1825,17 @@ export class ChargeView {
     // Banners on other squadrons' leaders (allied troops also get a JOIN tag).
     for (const sq of sim.squadrons) {
       const SL = sq.riders[0];
-      if (sq === sim.player || !SL) continue;
+      if (sq === sim.player || !SL || this.hiddenAt(sq.team, SL.x, SL.y)) continue;
       const color = sq.team === 'blue' ? t.blue : t.red;
       const bx = SL.x - Math.cos(SL.facing) * 3, by = SL.y - Math.sin(SL.facing) * 3;
       const wave = Math.sin(sim.time * 9 + sq.id) * 1.2;
       if (this.upright) {
         // Standards over riding squadrons: the general's tall and gilt.
-        const general = sq.ai === 'general';
+        const general = this.chief(sq);
         paintStandard(g, bx, by, general ? 30 : 22, color, general ? 0xd8b050 : mixColor(color, t.trim, 0.75), sim.time * 9 + sq.id, general ? 1.15 : 0.8, general);
         continue;
       }
-      if (sq.ai === 'general') {
+      if (this.chief(sq)) {
         // The general: a tall gold-edged standard — hunt him down.
 
         g.moveTo(bx, by).lineTo(bx, by - 22).stroke({ width: 1.3, color: t.wood });
@@ -1848,11 +1884,21 @@ export class ChargeView {
     g.poly([bx, by - 14, bx + 9, by - 12 + wave, bx, by - 9]).fill(t.blue);
   }
 
+  /** Is something of `team` at this point hidden from you (fog of war)? Never in the battle. */
+  protected hiddenAt(_team: Team, _x: number, _y: number): boolean {
+    return false;
+  }
+
+  /** Squadrons led by someone who matters (tall, gilt standard): the general. */
+  protected chief(sq: Squadron): boolean {
+    return sq.ai === 'general';
+  }
+
   /**
    * Calls for help: nothing is drawn on the enemy battalion itself (the banner says
    * where); off screen, an arrow at the screen's edge points the way (red when time is short).
    */
-  private drawCalls(sim: ChargeSim): void {
+  protected drawCalls(sim: ChargeSim): void {
     const t = this.theme;
     const sg = this.callG;
     sg.clear();
@@ -1882,7 +1928,7 @@ export class ChargeView {
    * Open side: only the enemy formation you are riding at lights up the edge you
    * would hit — amber for a flank (x2), red for the rear (x3), nothing head-on.
    */
-  private drawExposed(g: Graphics, sim: ChargeSim, L: Soldier): void {
+  protected drawExposed(g: Graphics, sim: ChargeSim, L: Soldier): void {
     const t = this.theme;
     // The nearest enemy formation roughly ahead of the leader.
     let best: Battalion | Squadron | null = null;
@@ -1893,9 +1939,9 @@ export class ChargeView {
       if (Math.abs(angleDiff(L.facing, Math.atan2(y - L.y, x - L.x))) > EXPOSE_CONE) return;
       best = o; bestD = d;
     };
-    for (const b of sim.battalions) if (b.team !== L.team && !b.routed) consider(b, b.x, b.y, EXPOSE_RANGE);
+    for (const b of sim.battalions) if (b.team !== L.team && !b.routed && !this.hiddenAt(b.team, b.x, b.y)) consider(b, b.x, b.y, EXPOSE_RANGE);
     for (const sq of sim.squadrons) {
-      if (sq.team === L.team || !sq.riders[0]) continue;
+      if (sq.team === L.team || !sq.riders[0] || this.hiddenAt(sq.team, sq.riders[0].x, sq.riders[0].y)) continue;
       const c = sim.squadCenter(sq);
       consider(sq, c.x, c.y, EXPOSE_RANGE_SQUAD);
     }
@@ -1941,7 +1987,7 @@ export class ChargeView {
 
   // --- Camera & popups ---------------------------------------------------------------------
 
-  private updateCamera(sim: ChargeSim, dt: number): void {
+  protected updateCamera(sim: ChargeSim, dt: number): void {
     const L = sim.leader;
     const base = this.baseZoom();
     let targetZoom = base;
@@ -1959,9 +2005,9 @@ export class ChargeView {
   }
 
 
-  private readonly joinTags = new Map<number, BitmapText>();
-  private showText = true;
-  private frameNo = 0;
+  protected readonly joinTags = new Map<number, BitmapText>();
+  protected showText = true;
+  protected frameNo = 0;
 
   /** Turn floating combat text (popups and JOIN tags) on or off. */
   setCombatText(on: boolean): void {
@@ -1973,7 +2019,7 @@ export class ChargeView {
     }
   }
 
-  private makeText(size: number): BitmapText {
+  protected makeText(size: number): BitmapText {
     ensureCombatFont();
     const text = new BitmapText({ text: '', style: { fontFamily: COMBAT_FONT, fontSize: size } });
     this.popupLayer.addChild(text);
@@ -1981,7 +2027,7 @@ export class ChargeView {
   }
 
   /** "JOIN +n" tags over allied troops so it's obvious you can collect them. */
-  private updateJoinTags(sim: ChargeSim): void {
+  protected updateJoinTags(sim: ChargeSim): void {
     if (!this.showText) return;
     const stamp = ++this.frameNo;
     const L = sim.leader;
@@ -2007,7 +2053,7 @@ export class ChargeView {
     }
   }
 
-  private popup(x: number, y: number, msg: string, color: number, size: number, life = 0.9): void {
+  protected popup(x: number, y: number, msg: string, color: number, size: number, life = 0.9): void {
     if (!this.showText) return;
     if (this.popups.length >= MAX_POPUPS) this.releasePopup(this.popups.shift()!.text);
     const text = this.freePopups.pop() ?? this.makeText(size);
@@ -2019,14 +2065,14 @@ export class ChargeView {
     this.popups.push({ text, x, y, age: 0, life });
   }
 
-  private readonly freePopups: BitmapText[] = [];
+  protected readonly freePopups: BitmapText[] = [];
 
-  private releasePopup(text: BitmapText): void {
+  protected releasePopup(text: BitmapText): void {
     text.visible = false;
     this.freePopups.push(text);
   }
 
-  private updatePopups(dt: number): void {
+  protected updatePopups(dt: number): void {
     this.popups = this.popups.filter(p => {
       p.age += dt;
       if (p.age >= p.life) { this.releasePopup(p.text); return false; }

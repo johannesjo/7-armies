@@ -456,7 +456,7 @@ export class ChargeView3D implements ChargeRenderer {
   private baseZoom(): number {
     const long = Math.max(this.viewW, this.viewH), short = Math.min(this.viewW, this.viewH);
     let zoom = long / 740;
-    if (short < 600) zoom = Math.max(zoom, short / 260);
+    if (short < 600) zoom = Math.max(zoom, short / C.PHONE_VIEW_SPAN);
     const devZoom = import.meta.env.DEV ? (window as { chargeZoom?: number }).chargeZoom ?? 1 : 1;
     return Math.max(0.8, Math.min(3, zoom)) * devZoom;
   }

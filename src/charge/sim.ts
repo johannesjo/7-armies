@@ -12,7 +12,29 @@ export interface ChargeInput {
 
 export const NO_INPUT: ChargeInput = { dirX: 0, dirY: 0, gallop: false };
 
-export type Role = 'front' | 'archer' | 'reserve';
+/** 'lane': marches down a lane in the lanes mode (driven by that mode's sim). */
+export type Role = 'front' | 'archer' | 'reserve' | 'lane';
+
+/**
+ * Multipliers on a squadron's strength — neutral for everyone in the battle; the lanes
+ * mode's commanders improve theirs with cards as they level up.
+ */
+export interface RiderMods {
+  /** Canter and gallop speed. */
+  speed: number;
+  /** How sharply the horses turn. */
+  turn: number;
+  /** Trampling and sword damage against infantry. */
+  impact: number;
+  /** Morale shock dealt to infantry by the charge. */
+  shock: number;
+  /** Lance strikes against other horsemen. */
+  strike: number;
+  /** Damage taken from arrows. */
+  arrows: number;
+}
+
+export const NEUTRAL_MODS: Readonly<RiderMods> = { speed: 1, turn: 1, impact: 1, shock: 1, strike: 1, arrows: 1 };
 
 export interface Soldier {
   id: number;
@@ -59,7 +81,8 @@ export interface Soldier {
 }
 
 /** Who controls a squadron: the player, or one of the AI behaviours. */
-export type SquadAI = 'player' | 'raider' | 'guard' | 'hunter' | 'general' | 'garrison';
+/** 'rival': the enemy commander in the lanes mode (driven by that mode's sim). */
+export type SquadAI = 'player' | 'raider' | 'guard' | 'hunter' | 'general' | 'garrison' | 'rival';
 export type SquadPhase = 'muster' | 'approach' | 'charge' | 'retreat' | 'idle' | 'broken';
 /** How an AI squadron fights other horse: heavy knights joust, light horse turn for your rear. */
 export type SquadStyle = 'heavy' | 'nimble';
@@ -204,6 +227,14 @@ export interface Arrow {
   flight: number;
   team: Team;
   volley: number;
+  /** Damage multiplier (tower arrows hit harder than a line of archers'). */
+  power?: number;
+  /** Damage multiplier against horsemen, if different (horse archers' light arrows). */
+  riderPower?: number;
+  /** Shot by your own squadron (its kills count as yours). */
+  byPlayer?: boolean;
+  /** Morale each hit knocks off the victim's battalion (horse archers' harassing fire). */
+  shock?: number;
 }
 
 export interface Volley {
@@ -352,13 +383,13 @@ export class ChargeSim {
   /** Where your army needs you right now. */
   calls: HelpCall[] = [];
   callsAnswered = 0;
-  private callCooldown: number = C.CALL_FIRST;
-  private archerTipGiven = false;
-  private nextCallId = 1;
+  protected callCooldown: number = C.CALL_FIRST;
+  protected archerTipGiven = false;
+  protected nextCallId = 1;
   /** Enemy horsemen on your tail right now: behind your leader, riding at him. */
   onTail: Soldier[] = [];
-  private tailCooldown = 0;
-  private clashCooldown = 0;
+  protected tailCooldown = 0;
+  protected clashCooldown = 0;
   /** The freshly killed, still flying from the blow that felled them — they bowl over the living. */
   flying: { body: Soldier; t: number }[] = [];
   combo = 0;
@@ -366,7 +397,7 @@ export class ChargeSim {
   outcome: Outcome = 'playing';
   outcomeReason = '';
   inCamp = false;
-  private musterCount = 0;
+  protected musterCount = 0;
 
   /** Reinforcement waves not yet on the field. */
   pendingWaves: Wave[] = [];
@@ -375,23 +406,26 @@ export class ChargeSim {
   /** The army's morale has run out and it is collapsing, battalion by battalion. */
   readonly armyBroken: Record<Team, boolean> = { blue: false, red: false };
   /** Morale each battalion of a wavering army loses per second. */
-  private readonly armyDrain: Record<Team, number> = { blue: 0, red: 0 };
-  private readonly armyWavered: Record<Team, boolean> = { blue: false, red: false };
+  protected readonly armyDrain: Record<Team, number> = { blue: 0, red: 0 };
+  protected readonly armyWavered: Record<Team, boolean> = { blue: false, red: false };
   generalFallen = false;
   generalKilledByPlayer = false;
   wavesArrived = 0;
-  private comboTimer = 0;
+  protected comboTimer = 0;
   /** Each camp's garrison troop (null when empty) and the timer to its next fresh rider. */
-  private readonly camps: { x: number; y: number; garrison: Squadron | null; timer: number }[] = [];
-  private musterTimer: number = C.MUSTER_FIRST;
-  private readonly muster: boolean;
-  private redSquadsSpawned = 0;
-  private nextId = 1;
-  private nextVolley = 1;
-  private readonly rand: () => number;
-  private readonly grid = new SpatialGrid<Soldier>(C.WORLD_W, C.WORLD_H, 24);
-  private readonly near: Soldier[] = [];
-  private readonly slots = wedgeSlots(C.MAX_SQUAD);
+  protected readonly camps: { x: number; y: number; garrison: Squadron | null; timer: number }[] = [];
+  protected musterTimer: number = C.MUSTER_FIRST;
+  protected readonly muster: boolean;
+  protected redSquadsSpawned = 0;
+  protected nextId = 1;
+  protected nextVolley = 1;
+  protected readonly rand: () => number;
+  protected readonly grid: SpatialGrid<Soldier>;
+  /** Size of the field (world units). */
+  readonly W: number;
+  readonly H: number;
+  protected readonly near: Soldier[] = [];
+  protected readonly slots = wedgeSlots(C.MAX_SQUAD);
 
   constructor(specs: BattalionSpec[], opts: {
     seed?: number;
@@ -401,7 +435,12 @@ export class ChargeSim {
     squads?: SquadSpec[];
     /** Muster fresh allied troops at the camp over time (default: when there is a player). */
     muster?: boolean;
+    /** Field size (default: the cavalry battle's). */
+    world?: { w: number; h: number };
   } = {}) {
+    this.W = opts.world?.w ?? C.WORLD_W;
+    this.H = opts.world?.h ?? C.WORLD_H;
+    this.grid = new SpatialGrid<Soldier>(this.W, this.H, 24);
     this.rand = mulberry32(opts.seed ?? 1);
     this.muster = opts.muster ?? opts.squad !== null;
     for (const spec of specs) this.addBattalion(spec);
@@ -438,7 +477,7 @@ export class ChargeSim {
       + this.redSquadsSpawned + this.pendingRed;
   }
 
-  private get pendingRed(): number {
+  protected get pendingRed(): number {
     let n = 0;
     for (const w of this.pendingWaves) {
       for (const sp of w.specs) if (sp.team === 'red') n += sp.count;
@@ -482,7 +521,7 @@ export class ChargeSim {
     return out;
   }
 
-  private addBattalion(spec: BattalionSpec): Battalion {
+  protected addBattalion(spec: BattalionSpec): Battalion {
     const spacing = spec.type === 'archer' ? 10 : 11;
     const rows = Math.ceil(spec.count / spec.cols);
     const bat: Battalion = {
@@ -526,7 +565,7 @@ export class ChargeSim {
     return bat;
   }
 
-  private makeSoldier(team: Team, type: UnitType, x: number, y: number, facing: number): Soldier {
+  protected makeSoldier(team: Team, type: UnitType, x: number, y: number, facing: number): Soldier {
     return {
       id: this.nextId++,
       team, type, x, y,
@@ -556,7 +595,7 @@ export class ChargeSim {
     };
   }
 
-  private addSquad(spec: SquadSpec): Squadron {
+  protected addSquad(spec: SquadSpec): Squadron {
     const sq: Squadron = {
       id: this.nextId++,
       team: spec.team,
@@ -594,11 +633,12 @@ export class ChargeSim {
     return sq;
   }
 
-  private addRider(sq: Squadron, x: number, y: number, facing: number): Soldier {
+  protected addRider(sq: Squadron, x: number, y: number, facing: number): Soldier {
     const r = this.makeSoldier(sq.team, 'cavalry', x, y, facing);
     r.rider = true;
-    r.hp = r.maxHp = sq.team === 'red' ? C.KNIGHT_HP : C.RIDER_HP;
-    r.mass = sq.team === 'red' ? C.KNIGHT_MASS : C.MASS.cavalry;
+    const base = this.riderBase(sq);
+    r.hp = r.maxHp = base.hp;
+    r.mass = base.mass;
     r.radius = C.RIDER_RADIUS;
     r.squad = sq;
     sq.riders.push(r);
@@ -621,7 +661,7 @@ export class ChargeSim {
   }
 
   /** Scratch vector reused every step (avoids thousands of short-lived objects). */
-  private readonly tmp: Vec2 = { x: 0, y: 0 };
+  protected readonly tmp: Vec2 = { x: 0, y: 0 };
 
   // ---------------------------------------------------------------------------
 
@@ -630,6 +670,7 @@ export class ChargeSim {
     if (dt <= 0) return;
     this.time += dt;
 
+    this.preStep(dt);
     this.spawnWaves();
     this.updateMuster(dt);
     for (const sq of this.squadrons) {
@@ -661,14 +702,51 @@ export class ChargeSim {
     for (const s of this.soldiers) if (s.alive) this.soldiers[live++] = s;
     this.soldiers.length = live;
     this.squadrons = this.squadrons.filter(sq => sq === this.player || sq.riders.some(r => r.alive));
+    this.postStep(dt);
     this.checkOutcome();
+  }
+
+  // --- Hooks for variants of the battle (the lanes mode) ----------------------------
+
+  /** Runs at the start of every step. */
+  protected preStep(_dt: number): void { /* the battle needs nothing here */ }
+
+  /** Runs after everything has moved and fought, just before the outcome is checked. */
+  protected postStep(_dt: number): void { /* the battle needs nothing here */ }
+
+  /** Drive a battalion this variant controls itself; returns true if it did. */
+  protected customBattalion(_b: Battalion, _dt: number): boolean { return false; }
+
+  /** Squadrons that fight at full strength against infantry and never scatter: commanders. */
+  protected isHero(sq: Squadron | null): boolean {
+    return !!sq && sq === this.player;
+  }
+
+  /** A squadron's strength multipliers. */
+  mods(_sq: Squadron | null): Readonly<RiderMods> {
+    return NEUTRAL_MODS;
+  }
+
+  /** How hard a footman hits other foot (in the battle, the blue line slowly loses alone). */
+  protected meleeMult(s: Soldier): number {
+    return C.TEAM_MELEE_MULT[s.team];
+  }
+
+  /** A new rider's hit points and weight. */
+  protected riderBase(sq: Squadron): { hp: number; mass: number } {
+    return sq.team === 'red' ? { hp: C.KNIGHT_HP, mass: C.KNIGHT_MASS } : { hp: C.RIDER_HP, mass: C.MASS.cavalry };
+  }
+
+  /** Which way a team's routed men run (unit vector): off its own edge of the field. */
+  protected fleeDir(team: Team): Vec2 {
+    return team === 'red' ? { x: 0, y: -1 } : { x: 0, y: 1 };
   }
 
   /**
    * Watch your back: any enemy squadron whose leader sits behind yours, riding at him
    * at a charge, is on your tail. The 'tail' warning fires as such a threat appears.
    */
-  private updateTail(dt: number): void {
+  protected updateTail(dt: number): void {
     this.tailCooldown -= dt;
     const L = this.leader;
     const was = this.onTail.length > 0;
@@ -689,13 +767,13 @@ export class ChargeSim {
   }
 
   /** One 'clash' event per crash of your squadron, not one per rider in it. */
-  private clash(x: number, y: number, angle: number, pike: boolean): void {
+  protected clash(x: number, y: number, angle: number, pike: boolean): void {
     if (this.clashCooldown > 0) return;
     this.clashCooldown = 0.6;
     this.events.push({ type: 'clash', x, y, angle, pike });
   }
 
-  private spawnWaves(): void {
+  protected spawnWaves(): void {
     while (this.pendingWaves.length > 0 && this.pendingWaves[0].time <= this.time) {
       const wave = this.pendingWaves.shift()!;
       this.wavesArrived++;
@@ -716,10 +794,12 @@ export class ChargeSim {
 
   // --- Squadron ---------------------------------------------------------------
 
-  private steerSquad(sq: Squadron, dt: number, input: ChargeInput): void {
+  protected steerSquad(sq: Squadron, dt: number, input: ChargeInput): void {
     const L = sq.riders[0];
     if (!L) return;
 
+    const mods = this.mods(sq);
+    const canter = C.CANTER_SPEED * mods.speed, gallop = C.GALLOP_SPEED * mods.speed;
     let mag = Math.min(1, Math.hypot(input.dirX, input.dirY));
     // Broken knights ride off the field, so they skip the wall-following.
     const leaving = sq.team === 'red' && sq.phase === 'retreat';
@@ -733,10 +813,10 @@ export class ChargeSim {
     let targetSpeed = 0;
     if (mag > 0.2) {
       const diff = angleDiff(desired, L.facing);
-      L.facing = turnToward(L.facing, desired, this.turnRate(L.speed) * dt);
-      targetSpeed = wantsGallop ? C.GALLOP_SPEED : C.CANTER_SPEED * Math.min(1, mag * 1.25);
+      L.facing = turnToward(L.facing, desired, this.turnRate(L.speed / mods.speed) * mods.turn * dt);
+      targetSpeed = wantsGallop ? gallop : canter * Math.min(1, mag * 1.25);
       // Hauling the horse around sheds speed.
-      if (Math.abs(diff) > 1.6) targetSpeed = Math.min(targetSpeed, C.CANTER_SPEED * 0.7);
+      if (Math.abs(diff) > 1.6) targetSpeed = Math.min(targetSpeed, canter * 0.7);
     }
 
     if (L.speed < targetSpeed) {
@@ -745,7 +825,7 @@ export class ChargeSim {
       L.speed = Math.max(targetSpeed, L.speed - C.COAST_DECEL * dt);
     }
 
-    sq.galloping = wantsGallop && L.speed > C.CANTER_SPEED;
+    sq.galloping = wantsGallop && L.speed > canter;
 
     L.vx = Math.cos(L.facing) * L.speed;
     L.vy = Math.sin(L.facing) * L.speed;
@@ -757,9 +837,9 @@ export class ChargeSim {
     // its lane, with its own heading, a turn rate that tightens only as it slows,
     // and little spare speed to regain its place. On a curve the outer lanes are
     // longer, so riders there fall behind; sharp turns string the squadron out.
-    const maxFollow = Math.min(C.GALLOP_SPEED, Math.max(L.speed, C.CANTER_SPEED * 0.6)) * C.FOLLOW_CATCH_UP;
+    const maxFollow = Math.min(gallop, Math.max(L.speed, canter * 0.6)) * C.FOLLOW_CATCH_UP;
     // Spare speed for stragglers: plenty at a walk, none at full gallop.
-    const spareMax = C.FOLLOW_CATCH_UP_SLOW * (1 - Math.min(1, L.speed / C.GALLOP_SPEED));
+    const spareMax = C.FOLLOW_CATCH_UP_SLOW * (1 - Math.min(1, L.speed / gallop));
     let tight = 0;
     for (let i = 1; i < sq.riders.length; i++) {
       const f = sq.riders[i];
@@ -773,12 +853,12 @@ export class ChargeSim {
 
       const desired = Math.hypot(ax, ay) > 3 ? Math.atan2(ay, ax) : aim.h;
       const diff = angleDiff(desired, f.facing);
-      f.facing = turnToward(f.facing, desired, this.turnRate(f.speed) * C.FOLLOWER_AGILITY * dt);
+      f.facing = turnToward(f.facing, desired, this.turnRate(f.speed / mods.speed) * mods.turn * C.FOLLOWER_AGILITY * dt);
 
       // Close the gap along our own heading; ease off if the slot has swung behind us.
       // The further out of place, the more spare speed (when the leader isn't flat out).
       const spare = Math.min(spareMax, dist * C.FOLLOW_GAIN);
-      const maxF = Math.max(maxFollow, Math.min(C.GALLOP_SPEED, L.speed + spare));
+      const maxF = Math.max(maxFollow, Math.min(gallop, L.speed + spare));
       const along = dx * Math.cos(f.facing) + dy * Math.sin(f.facing);
       let target = L.speed + clamp(along * C.FOLLOW_GAIN, -L.speed, maxF - L.speed);
       // A rider that needs a sharp turn reins in to turn tighter — so the inside of a
@@ -787,7 +867,7 @@ export class ChargeSim {
       const pace = Math.max(L.speed, Math.min(maxF, L.speed + spare));
       const sharp = Math.abs(diff);
       if (sharp > 0.35) target = Math.min(target, pace * Math.max(0.45, 1 - (sharp - 0.35) * 0.6));
-      if (sharp > 1.8) target = Math.min(target, Math.max(pace * 0.55, C.CANTER_SPEED * 0.45));
+      if (sharp > 1.8) target = Math.min(target, Math.max(pace * 0.55, canter * 0.45));
       if (dist < 4 && L.speed < 5) target = 0;
       target = clamp(target, 0, maxF);
       if (f.speed < target) f.speed = Math.min(target, f.speed + C.GALLOP_ACCEL * 1.05 * dt);
@@ -803,15 +883,15 @@ export class ChargeSim {
   }
 
   /** Pull a point inside the field, so lanes that run off the edge don't pin riders against it. */
-  private insideField<T extends { x: number; y: number }>(p: T): T {
+  protected insideField<T extends { x: number; y: number }>(p: T): T {
     const m = EDGE + 4;
-    p.x = Math.max(m, Math.min(C.WORLD_W - m, p.x));
-    p.y = Math.max(m, Math.min(C.WORLD_H - m, p.y));
+    p.x = Math.max(m, Math.min(this.W - m, p.x));
+    p.y = Math.max(m, Math.min(this.H - m, p.y));
     return p;
   }
 
   /** Lay a straight trail behind a (new) leader so the wedge forms up behind it. */
-  private resetTrail(sq: Squadron, x: number, y: number, facing: number): void {
+  protected resetTrail(sq: Squadron, x: number, y: number, facing: number): void {
     sq.trail.length = 0;
     sq.trailS = 0;
     const cx = Math.cos(facing), cy = Math.sin(facing);
@@ -821,7 +901,7 @@ export class ChargeSim {
   }
 
   /** Record the leader's path as it rides. */
-  private extendTrail(sq: Squadron): void {
+  protected extendTrail(sq: Squadron): void {
     const L = sq.riders[0];
     const last = sq.trail[sq.trail.length - 1];
     const d = Math.hypot(L.x - last.x, L.y - last.y);
@@ -870,39 +950,39 @@ export class ChargeSim {
   }
 
   /** How sharply a horse can turn (rad/s) at a given speed — wide arcs at a gallop. */
-  private turnRate(speed: number): number {
+  protected turnRate(speed: number): number {
     const k = clamp01((speed - C.CANTER_SPEED * 0.5) / (C.GALLOP_SPEED - C.CANTER_SPEED * 0.5));
     return C.TURN_RATE_SLOW + (C.TURN_RATE_FAST - C.TURN_RATE_SLOW) * k;
   }
 
-  private integrateRider(r: Soldier, dt: number): void {
+  protected integrateRider(r: Soldier, dt: number): void {
     r.x += r.vx * dt;
     r.y += r.vy * dt;
     // Hard edge as a backstop only: riders slide along it without losing speed
     // (steering already turns them along the wall before they reach it).
     const m = EDGE;
     if (r.x < m) r.x = m;
-    if (r.x > C.WORLD_W - m) r.x = C.WORLD_W - m;
+    if (r.x > this.W - m) r.x = this.W - m;
     if (r.y < m) r.y = m;
-    if (r.y > C.WORLD_H - m) r.y = C.WORLD_H - m;
+    if (r.y > this.H - m) r.y = this.H - m;
   }
 
   /**
    * Near the field's edge, fade out the part of a heading that points off the field,
    * so horses wheel round to ride along the border instead of ramming it.
    */
-  private awayFromWalls(L: Soldier, heading: number): number {
+  protected awayFromWalls(L: Soldier, heading: number): number {
     let dx = Math.cos(heading), dy = Math.sin(heading);
     const soft = WALL_SOFT;
     const fade = (dist: number) => clamp01((dist - EDGE) / soft);
     if (dx < 0) dx *= fade(L.x);
-    if (dx > 0) dx *= fade(C.WORLD_W - L.x);
+    if (dx > 0) dx *= fade(this.W - L.x);
     if (dy < 0) dy *= fade(L.y);
-    if (dy > 0) dy *= fade(C.WORLD_H - L.y);
+    if (dy > 0) dy *= fade(this.H - L.y);
     if (Math.hypot(dx, dy) < 0.15) {
       // Pointing straight off the field: turn along the edge, whichever way we already lean.
       const fx = Math.cos(L.facing), fy = Math.sin(L.facing);
-      const nearX = Math.min(L.x, C.WORLD_W - L.x) < Math.min(L.y, C.WORLD_H - L.y);
+      const nearX = Math.min(L.x, this.W - L.x) < Math.min(L.y, this.H - L.y);
       if (nearX) { dx = 0; dy = fy >= 0 ? 1 : -1; } else { dx = fx >= 0 ? 1 : -1; dy = 0; }
     }
     return Math.atan2(dy, dx);
@@ -912,7 +992,7 @@ export class ChargeSim {
   // --- Allied troops & AI squadrons --------------------------------------------------
 
   /** Fresh allied riders muster at the camp from time to time. */
-  private updateMuster(dt: number): void {
+  protected updateMuster(dt: number): void {
     if (!this.muster) return;
     this.musterTimer -= dt;
     if (this.musterTimer > 0) return;
@@ -926,7 +1006,7 @@ export class ChargeSim {
   }
 
   /** Ride into an allied troop and it falls in behind your banner. */
-  private checkJoins(): void {
+  protected checkJoins(): void {
     const P = this.player;
     const L = P?.riders[0];
     if (!P || !L) return;
@@ -946,7 +1026,7 @@ export class ChargeSim {
   }
 
   /** Steering toward a point; slows on the approach and halts on arrival. */
-  private rideTo(L: Soldier, p: Vec2, gallop: boolean): ChargeInput {
+  protected rideTo(L: Soldier, p: Vec2, gallop: boolean): ChargeInput {
     const dx = p.x - L.x, dy = p.y - L.y;
     const d = Math.hypot(dx, dy);
     if (d < 14) return NO_INPUT;
@@ -958,7 +1038,7 @@ export class ChargeSim {
    * The general keeps to his post behind the red army and rides off from any enemy
    * horseman that comes close — at a canter, so a galloping squadron can run him down.
    */
-  private generalInput(sq: Squadron, L: Soldier): ChargeInput {
+  protected generalInput(sq: Squadron, L: Soldier): ChargeInput {
     if (this.armyBroken.red || this.battalions.every(b => b.team !== 'red' || b.routed)) {
       if (L.y < 20) for (const r of sq.riders) r.alive = false;
       return this.rideTo(L, { x: L.x, y: -100 }, true);
@@ -975,12 +1055,12 @@ export class ChargeSim {
     const dx = L.x - tx / n, dy = L.y - ty / n;
     const d = Math.hypot(dx, dy) || 1;
     const m = 80;
-    const fx = Math.max(m, Math.min(C.WORLD_W - m, L.x + (dx / d) * 150));
+    const fx = Math.max(m, Math.min(this.W - m, L.x + (dx / d) * 150));
     const fy = Math.max(m, Math.min(C.FRONT_Y - 220, L.y + (dy / d) * 150));
     return this.rideTo(L, { x: fx, y: fy }, false);
   }
 
-  private pickTarget(sq: Squadron): void {
+  protected pickTarget(sq: Squadron): void {
     const L = sq.riders[0];
     sq.targetBat = null;
     sq.targetSquad = null;
@@ -1023,7 +1103,7 @@ export class ChargeSim {
   }
 
   /** Decide what an AI squadron does this step. */
-  private aiInput(sq: Squadron, dt: number): ChargeInput {
+  protected aiInput(sq: Squadron, dt: number): ChargeInput {
     const L = sq.riders[0];
     sq.phaseTimer -= dt;
     if (sq.ai === 'general') return this.generalInput(sq, L);
@@ -1096,6 +1176,14 @@ export class ChargeSim {
 
     const b = sq.targetBat;
     if (!b) return this.rideTo(L, sq.home, false);
+    return this.chargeBattalionInput(sq, L, b);
+  }
+
+  /**
+   * Charge a battalion as light horse do: ride round to its nearest open side (rear or
+   * a flank), keeping clear of its front, then gallop through and out the far side.
+   */
+  protected chargeBattalionInput(sq: Squadron, L: Soldier, b: Battalion): ChargeInput {
     const fx = Math.cos(b.facing), fy = Math.sin(b.facing);
     if (sq.phase === 'charge') {
       const exit = sq.chargeExit!;
@@ -1148,7 +1236,7 @@ export class ChargeSim {
    * out of his path when he rides at us, pass and come round again. A manoeuvre is held
    * for a moment once chosen so the squadron commits instead of dithering.
    */
-  private dogfightInput(sq: Squadron, L: Soldier, T: Soldier, dt: number): ChargeInput {
+  protected dogfightInput(sq: Squadron, L: Soldier, T: Soldier, dt: number): ChargeInput {
     const g = dogfightGeometry(L, T);
     sq.moveTimer -= dt;
     // Just rode through him: carry on and come round, rather than wheeling in his face.
@@ -1210,7 +1298,7 @@ export class ChargeSim {
 
   // --- Battalions ---------------------------------------------------------------
 
-  private nearestEnemyBattalion(b: Battalion, maxDist = Infinity): Battalion | null {
+  protected nearestEnemyBattalion(b: Battalion, maxDist = Infinity): Battalion | null {
     let best: Battalion | null = null;
     let bestD = maxDist * maxDist;
     for (const o of this.battalions) {
@@ -1222,7 +1310,7 @@ export class ChargeSim {
   }
 
   /** Leader of the nearest enemy squadron within `maxDist` of `p`. */
-  private nearestEnemyRider(team: Team, p: Vec2, maxDist: number): Soldier | null {
+  protected nearestEnemyRider(team: Team, p: Vec2, maxDist: number): Soldier | null {
     let best: Soldier | null = null;
     let bestD = maxDist;
     for (const sq of this.squadrons) {
@@ -1234,12 +1322,13 @@ export class ChargeSim {
     return best;
   }
 
-  private updateBattalions(dt: number): void {
+  protected updateBattalions(dt: number): void {
     for (const b of this.battalions) {
       if (b.routed) continue;
       b.sinceShock += dt;
       b.engagedTimer = Math.max(0, b.engagedTimer - dt);
       const engaged = b.engagedTimer > 0;
+      if (this.customBattalion(b, dt)) continue;
 
       if (b.role === 'archer') {
         this.updateArchers(b, dt);
@@ -1297,7 +1386,7 @@ export class ChargeSim {
    * its open flank and wheels into it — two against one, from the side. Returns false
    * if there's no such enemy within reach (then it marches at the nearest enemy).
    */
-  private seekFlank(b: Battalion, dt: number): boolean {
+  protected seekFlank(b: Battalion, dt: number): boolean {
     let foe: Battalion | null = null;
     let best: number = C.FLANK_SEEK_RANGE;
     for (const o of this.battalions) {
@@ -1330,7 +1419,7 @@ export class ChargeSim {
    * A routed battalion with enough men left re-forms where it has fled to and comes
    * back as a reserve. Returns true if it rallied this step.
    */
-  private tryRally(b: Battalion): boolean {
+  protected tryRally(b: Battalion): boolean {
     if (b.rallied || this.time - b.routedAt < C.RALLY_DELAY) return false;
     if (this.outcome !== 'playing' || this.armyBroken[b.team] || this.armyWavered[b.team]) return false;
     const men = this.members(b);
@@ -1338,8 +1427,8 @@ export class ChargeSim {
     if (men.length < Math.max(C.RALLY_MIN, b.initial * C.RALLY_SHARE)) return false;
     let cx = 0, cy = 0;
     for (const s of men) { cx += s.x; cy += s.y; }
-    cx = clamp(cx / men.length, 120, C.WORLD_W - 120);
-    cy = clamp(cy / men.length, 150, C.WORLD_H - 150);
+    cx = clamp(cx / men.length, 120, this.W - 120);
+    cy = clamp(cy / men.length, 150, this.H - 150);
     b.routed = false;
     b.morale = C.RALLY_MORALE;
     b.sinceShock = 0;
@@ -1358,7 +1447,7 @@ export class ChargeSim {
    * buckling, or an enemy battalion breaking through. Break the battalion named in
    * time and the call is answered. (Their archers only get a one-off tip.)
    */
-  private updateCalls(dt: number): void {
+  protected updateCalls(dt: number): void {
     const P = this.player;
     if (!P) return;
     const enemy: Team = P.team === 'blue' ? 'red' : 'blue';
@@ -1382,7 +1471,7 @@ export class ChargeSim {
     this.callCooldown -= dt;
     if (this.outcome !== 'playing' || this.calls.length >= C.CALL_MAX || this.callCooldown > 0) return;
     const named = (b: Battalion) => this.calls.some(c => c.target === b || c.ally === b);
-    const sideOf = (x: number): HelpCall['side'] => x < C.WORLD_W * 0.38 ? 'left' : x > C.WORLD_W * 0.62 ? 'right' : 'centre';
+    const sideOf = (x: number): HelpCall['side'] => x < this.W * 0.38 ? 'left' : x > this.W * 0.62 ? 'right' : 'centre';
     // Which way is "into our side of the field"?
     const ours = P.team === 'blue' ? 1 : -1;
     let pick: { kind: CallKind; target: Battalion; ally: Battalion | null } | null = null;
@@ -1417,7 +1506,7 @@ export class ChargeSim {
     this.events.push({ type: 'call', x: call.target.x, y: call.target.y, kind: call.kind, side: call.side });
   }
 
-  private lineStrength(b: Battalion): number {
+  protected lineStrength(b: Battalion): number {
     return this.members(b).length * (0.3 + 0.7 * clamp01(b.morale / 100)) * C.PUSH_WEIGHT[b.type];
   }
 
@@ -1426,7 +1515,7 @@ export class ChargeSim {
    * better heart slowly drives the other back, so the front bends and shifts and a
    * losing battalion gives ground before it breaks.
    */
-  private pressLine(b: Battalion, dt: number): void {
+  protected pressLine(b: Battalion, dt: number): void {
     const foe = this.nearestEnemyBattalion(b, C.PUSH_RANGE);
     if (!foe) return;
     const mine = this.lineStrength(b), theirs = this.lineStrength(foe);
@@ -1441,7 +1530,7 @@ export class ChargeSim {
     return 1 + C.LOOSEN * (1 - clamp01(b.morale / 100));
   }
 
-  private updateArchers(b: Battalion, dt: number): void {
+  protected updateArchers(b: Battalion, dt: number): void {
     // Skirmishers: fall back from enemy foot closing in rather than stand and be cut down.
     if (b.engagedTimer <= 0) {
       let threat: Battalion | null = null;
@@ -1456,8 +1545,8 @@ export class ChargeSim {
         const d = Math.hypot(dx, dy) || 1;
         b.x += (dx / d) * C.ARCHER_RETREAT_SPEED * dt;
         b.y += (dy / d) * C.ARCHER_RETREAT_SPEED * dt;
-        b.x = Math.max(60, Math.min(C.WORLD_W - 60, b.x));
-        b.y = Math.max(60, Math.min(C.WORLD_H - 60, b.y));
+        b.x = Math.max(60, Math.min(this.W - 60, b.x));
+        b.y = Math.max(60, Math.min(this.H - 60, b.y));
       }
     }
     let aim: Vec2 | null = null;
@@ -1551,7 +1640,7 @@ export class ChargeSim {
 
   /** Close ranks: survivors step forward into gaps of their file. */
   /** Badly wounded men in the front rank swap places with fresh men behind them. */
-  private rotateWounded(b: Battalion): void {
+  protected rotateWounded(b: Battalion): void {
     for (let col = 0; col < b.cols; col++) {
       const front = b.grid[col];
       const behind = b.grid[b.cols + col];
@@ -1563,7 +1652,7 @@ export class ChargeSim {
     }
   }
 
-  private closeRanks(b: Battalion): void {
+  protected closeRanks(b: Battalion): void {
     const rows = Math.ceil(b.grid.length / b.cols);
     for (let col = 0; col < b.cols; col++) {
       let write = 0;
@@ -1580,7 +1669,7 @@ export class ChargeSim {
     }
   }
 
-  private moveInfantry(dt: number): void {
+  protected moveInfantry(dt: number): void {
     const slide = Math.exp(-C.GROUND_FRICTION * dt);
     for (const b of this.battalions) {
       if (b.routed) continue;
@@ -1599,9 +1688,10 @@ export class ChargeSim {
       let dvx = 0, dvy = 0;
 
       if (s.fleeing) {
-        const dir = s.team === 'red' ? -1 : 1;
-        dvx = s.fleeDrift * C.FLEE_SPEED;
-        dvy = dir * C.FLEE_SPEED;
+        const dir = this.fleeDir(s.team);
+        // Straight off their own edge, fanning out sideways.
+        dvx = (dir.x + Math.abs(dir.y) * s.fleeDrift) * C.FLEE_SPEED;
+        dvy = (dir.y + Math.abs(dir.x) * s.fleeDrift) * C.FLEE_SPEED;
         if (s.down <= 0) s.facing = turnToward(s.facing, Math.atan2(dvy, dvx), 6 * dt);
       } else if (s.bat) {
         const idx = s.bat.grid.indexOf(s);
@@ -1630,20 +1720,20 @@ export class ChargeSim {
       s.x += s.vx * dt;
       s.y += s.vy * dt;
 
-      if (s.fleeing && (s.y < -30 || s.y > C.WORLD_H + 30 || s.x < -30 || s.x > C.WORLD_W + 30)) {
+      if (s.fleeing && (s.y < -30 || s.y > this.H + 30 || s.x < -30 || s.x > this.W + 30)) {
         s.alive = false; // escaped the field
       }
     }
   }
 
 
-  private rebuildGrid(): void {
+  protected rebuildGrid(): void {
     this.grid.clear();
     for (const s of this.soldiers) if (s.alive) this.grid.insert(s);
   }
 
   /** A few times a second, everyone notes the nearest enemy so weapons can point at it. */
-  private updateAim(dt: number): void {
+  protected updateAim(dt: number): void {
     for (const s of this.soldiers) {
       if (!s.alive) continue;
       s.aimTimer -= dt;
@@ -1666,16 +1756,17 @@ export class ChargeSim {
 
   // --- Combat -------------------------------------------------------------------
 
-  private victimFacing(s: Soldier): number {
+  protected victimFacing(s: Soldier): number {
     return s.fleeing || !s.bat ? s.facing : s.bat.facing;
   }
 
-  private riderCombat(dt: number): void {
+  protected riderCombat(dt: number): void {
     const riders: Soldier[] = [];
     for (const sq of this.squadrons) for (const r of sq.riders) riders.push(r);
     for (const r of riders) {
       if (!r.alive) continue;
       const mine = r.squad === this.player;
+      const hero = this.isHero(r.squad);
       r.attackTimer -= dt;
       const near = this.grid.query(r.x, r.y, r.radius + 8 + C.RIDER_REACH, this.near);
       let meleeTarget: Soldier | null = null;
@@ -1702,7 +1793,7 @@ export class ChargeSim {
         const ang = Math.atan2(meleeTarget.y - r.y, meleeTarget.x - r.x);
         const side = attackSide(ang, this.victimFacing(meleeTarget));
         if (meleeTarget.bat && mine) meleeTarget.bat.lastPlayerHit = this.time;
-        const aiK = mine || meleeTarget.rider ? 1 : C.AI_INFANTRY_MULT;
+        const aiK = meleeTarget.rider ? 1 : hero ? this.mods(r.squad).impact : C.AI_INFANTRY_MULT;
         this.damageSoldier(meleeTarget, C.RIDER_MELEE_DAMAGE * sideMultiplier(side) * aiK, ang, mine, side);
       }
     }
@@ -1713,7 +1804,7 @@ export class ChargeSim {
    * reaches the men: each pike in reach strikes him, and his horse balks, losing its
    * speed — so a frontal charge stalls on the hedge, where the pikes keep stabbing.
    */
-  private pikeHedge(r: Soldier): void {
+  protected pikeHedge(r: Soldier): void {
     const reach = C.PIKE_REACH + r.radius + C.INFANTRY_RADIUS.pikeman;
     const near = this.grid.query(r.x, r.y, reach, this.near);
     for (const s of near) {
@@ -1748,7 +1839,7 @@ export class ChargeSim {
     }
   }
 
-  private infantryCombat(dt: number): void {
+  protected infantryCombat(dt: number): void {
     for (const s of this.soldiers) {
       if (s.rider || !s.alive || s.fleeing || s.down > 0) continue;
 
@@ -1796,13 +1887,13 @@ export class ChargeSim {
       if (this.rand() > C.MELEE_HIT_CHANCE) continue;
       // Blows to the flank or rear land harder (x2 / x3), and the victim can't answer them.
       const side = attackSide(ang, this.victimFacing(target));
-      const dmg = C.MELEE_DAMAGE[s.type] * C.TEAM_MELEE_MULT[s.team] * sideMultiplier(side);
+      const dmg = C.MELEE_DAMAGE[s.type] * this.meleeMult(s) * sideMultiplier(side);
       this.damageSoldier(target, dmg, ang, false, side);
     }
   }
 
 
-  private damageSoldier(s: Soldier, dmg: number, angle: number, byPlayer: boolean, side: AttackSide): void {
+  protected damageSoldier(s: Soldier, dmg: number, angle: number, byPlayer: boolean, side: AttackSide): void {
     if (!s.alive) return;
     if (s.rider) { this.damageRider(s, dmg, angle, byPlayer, side); return; }
     s.hp -= dmg;
@@ -1828,7 +1919,7 @@ export class ChargeSim {
   }
 
   /** Score a kill made by your squadron; returns the points awarded. */
-  private scoreKill(side: AttackSide, worth: number): number {
+  protected scoreKill(side: AttackSide, worth: number): number {
     this.kills++;
     this.combo++;
     this.bestCombo = Math.max(this.bestCombo, this.combo);
@@ -1840,7 +1931,7 @@ export class ChargeSim {
     return points;
   }
 
-  private damageRider(r: Soldier, dmg: number, angle: number, byPlayer: boolean, side: AttackSide): void {
+  protected damageRider(r: Soldier, dmg: number, angle: number, byPlayer: boolean, side: AttackSide): void {
     if (!r.alive) return;
     const sq = r.squad!;
     const mine = sq === this.player;
@@ -1872,7 +1963,7 @@ export class ChargeSim {
   }
 
   /** The general falls: every red battalion is shaken and the whole army's heart sinks. */
-  private generalDown(r: Soldier, byPlayer: boolean): void {
+  protected generalDown(r: Soldier, byPlayer: boolean): void {
     this.generalFallen = true;
     this.generalKilledByPlayer = byPlayer;
     const points = byPlayer ? C.GENERAL_SCORE : 0;
@@ -1890,7 +1981,7 @@ export class ChargeSim {
    * behind shield or pike and absorb it like a much heavier mass; hit in the flank or
    * rear, or lying on the ground, they go flying.
    */
-  private effectiveMass(victim: Soldier, rammer: Soldier): number {
+  protected effectiveMass(victim: Soldier, rammer: Soldier): number {
     if (victim.rider) {
       // Against other horsemen, a tight wedge hits (and holds) as one body.
       const wedge = rammer.rider && victim.squad ? 1 + C.COHESION_WEIGHT * victim.squad.cohesion : 1;
@@ -1916,7 +2007,7 @@ export class ChargeSim {
    * and lance driving forward), so it loses far less momentum per man and ploughs on.
    * No bonus at a canter or slower — a slow charge bogs down.
    */
-  private chargeWeight(r: Soldier): number {
+  protected chargeWeight(r: Soldier): number {
     const k = clamp01((r.speed - C.CANTER_SPEED) / (C.GALLOP_SPEED - C.CANTER_SPEED));
     return 1 + C.CHARGE_WEIGHT_BONUS * k;
   }
@@ -1927,7 +2018,7 @@ export class ChargeSim {
    * velocity is changed — a charge ploughs through, loses speed with every man it hits,
    * and sends men crashing into their comrades.
    */
-  private collide(): void {
+  protected collide(): void {
     for (const a of this.soldiers) {
       if (!a.alive) continue;
       const near = this.grid.query(a.x, a.y, a.radius + 8, this.near);
@@ -1963,7 +2054,7 @@ export class ChargeSim {
   }
 
   /** Damage and knockdown for `victim`, whose velocity just changed by `dv` in a collision with `other`. */
-  private impactDamage(victim: Soldier, other: Soldier, dv: number, closing: number, angle: number, impulse: number): void {
+  protected impactDamage(victim: Soldier, other: Soldier, dv: number, closing: number, angle: number, impulse: number): void {
     // Both sides of a collision take their share, even if the other fell in it.
     if (!victim.alive) return;
     const enemies = victim.team !== other.team;
@@ -1976,9 +2067,11 @@ export class ChargeSim {
       const side = attackSide(heading, this.victimFacing(victim));
       const braced = victim.type === 'pikeman' && side === 'front' && !victim.fleeing && victim.down <= 0;
       if (this.time - other.lastAttack > 0.3) other.lastAttack = this.time;
-      const aiK = mine ? 1 : C.AI_INFANTRY_MULT;
+      const hero = this.isHero(other.squad);
+      const m = this.mods(other.squad);
+      const aiK = hero ? 1 : C.AI_INFANTRY_MULT;
       if (victim.bat) {
-        victim.bat.morale -= C.IMPACT_SHOCK[side] * aiK;
+        victim.bat.morale -= C.IMPACT_SHOCK[side] * aiK * m.shock;
         victim.bat.sinceShock = 0;
         if (mine) victim.bat.lastPlayerHit = this.time;
       }
@@ -1987,7 +2080,7 @@ export class ChargeSim {
       this.events.push({ type: 'impact', x: victim.x, y: victim.y, angle: heading, side, pike: braced });
       // Pike wounds scale with the real blow, not the gallop bonus.
       if (braced) this.damageRider(other, impulse / this.chargeWeight(other) * C.PIKE_RIDER_DAMAGE, heading + Math.PI, false, 'front');
-      this.damageSoldier(victim, Math.max(0, dv - C.IMPACT_DV0) * C.IMPACT_DAMAGE_K * aiK, heading, mine, side);
+      this.damageSoldier(victim, Math.max(0, dv - C.IMPACT_DV0) * C.IMPACT_DAMAGE_K * aiK * m.impact, heading, mine, side);
       return;
     }
 
@@ -2007,7 +2100,7 @@ export class ChargeSim {
       const speedK = Math.min(1.1, other.speed / C.GALLOP_SPEED);
       if ((mine || victim.squad === this.player) && speedK > 0.6) this.clash(victim.x, victim.y, approach, false);
       const wedge = 1 + C.STRIKE_WEDGE_BONUS * (other.squad?.cohesion ?? 0);
-      this.damageRider(victim, C.RIDER_STRIKE * speedK * wedge * sideMultiplier(side), approach, mine, side);
+      this.damageRider(victim, C.RIDER_STRIKE * speedK * wedge * sideMultiplier(side) * this.mods(other.squad).strike, approach, mine, side);
       return;
     }
 
@@ -2025,7 +2118,7 @@ export class ChargeSim {
   }
 
   /** Flying bodies slide on and crash into the living. */
-  private updateFlying(dt: number): void {
+  protected updateFlying(dt: number): void {
     const slide = Math.exp(-C.GROUND_FRICTION * dt);
     let live = 0;
     for (const f of this.flying) {
@@ -2061,7 +2154,7 @@ export class ChargeSim {
   }
 
   /** A rider strikes another if he's charging and has him in front of his lance. */
-  private canStrike(attacker: Soldier, target: Soldier): boolean {
+  protected canStrike(attacker: Soldier, target: Soldier): boolean {
     if (attacker.speed < C.CHARGE_MIN_SPEED || attacker.attackTimer > 0) return false;
     const toTarget = Math.atan2(target.y - attacker.y, target.x - attacker.x);
     return Math.abs(angleDiff(toTarget, attacker.facing)) < C.STRIKE_CONE;
@@ -2073,8 +2166,8 @@ export class ChargeSim {
   }
 
   /** Add clash shock to an AI squadron; past the threshold it breaks and scatters. */
-  private shockSquad(sq: Squadron, amount: number, from: Soldier, byPlayer: boolean): void {
-    if (sq === this.player) return;
+  protected shockSquad(sq: Squadron, amount: number, from: Soldier, byPlayer: boolean): void {
+    if (this.isHero(sq)) return;
     sq.shock += amount;
     if (sq.shock < C.SQUAD_BREAK_SHOCK || sq.phase === 'broken' || sq.phase === 'retreat') return;
     const L = sq.riders[0];
@@ -2088,7 +2181,7 @@ export class ChargeSim {
   }
 
   /** Riders keep the momentum collisions left them (their steering builds on it next step). */
-  private syncRiderSpeeds(): void {
+  protected syncRiderSpeeds(): void {
     for (const sq of this.squadrons) {
       for (const r of sq.riders) {
         r.speed = Math.max(0, r.vx * Math.cos(r.facing) + r.vy * Math.sin(r.facing));
@@ -2099,7 +2192,7 @@ export class ChargeSim {
 
   // --- Arrows ---------------------------------------------------------------------
 
-  private updateArrows(dt: number): void {
+  protected updateArrows(dt: number): void {
     const remaining: Arrow[] = [];
     for (const a of this.arrows) {
       a.t += dt;
@@ -2114,8 +2207,17 @@ export class ChargeSim {
       }
       const angle = Math.atan2(a.ty - a.sy, a.tx - a.sx);
       if (victim) {
-        if (victim.rider) this.damageRider(victim, C.ARROW_DAMAGE_RIDER, angle, false, 'front');
-        else this.damageSoldier(victim, C.ARROW_DAMAGE_INFANTRY, angle, false, 'front');
+        const power = a.power ?? 1;
+        const mine = a.byPlayer ?? false;
+        if (victim.rider) this.damageRider(victim, C.ARROW_DAMAGE_RIDER * (a.riderPower ?? power) * this.mods(victim.squad).arrows, angle, mine, 'front');
+        else {
+          if (mine && victim.bat) victim.bat.lastPlayerHit = this.time;
+          if (a.shock && victim.bat && !victim.bat.routed) {
+            victim.bat.morale -= a.shock;
+            victim.bat.sinceShock = 0;
+          }
+          this.damageSoldier(victim, C.ARROW_DAMAGE_INFANTRY * power, angle, mine, 'front');
+        }
       }
       this.events.push({ type: 'arrow-land', x: a.tx, y: a.ty, angle, hit: !!victim, team: a.team });
     }
@@ -2125,7 +2227,7 @@ export class ChargeSim {
 
   // --- Camp, morale, outcome --------------------------------------------------------
 
-  private nearestCamp(p: Vec2): { x: number; y: number } {
+  protected nearestCamp(p: Vec2): { x: number; y: number } {
     let best = C.CAMPS[0], bestD = Infinity;
     for (const c of C.CAMPS) {
       const d = Math.hypot(c.x - p.x, c.y - p.y);
@@ -2135,7 +2237,7 @@ export class ChargeSim {
   }
 
   /** A fresh rider joins the camp's garrison troop (forming one if it is empty). */
-  private growGarrison(camp: { x: number; y: number; garrison: Squadron | null }): void {
+  protected growGarrison(camp: { x: number; y: number; garrison: Squadron | null }): void {
     const g = camp.garrison;
     let r: Soldier;
     if (!g || g.riders.length === 0 || !this.squadrons.includes(g)) {
@@ -2153,7 +2255,7 @@ export class ChargeSim {
    * whole troop falls in behind you (see checkJoins). Entering a camp heals every
    * rider to full at once — no waiting about.
    */
-  private updateCamp(dt: number): void {
+  protected updateCamp(dt: number): void {
     for (const camp of this.camps) {
       if (!this.muster || this.outcome !== 'playing') break;
       const g = camp.garrison;
@@ -2188,7 +2290,7 @@ export class ChargeSim {
     this.inCamp = inCamp;
   }
 
-  private updateMorale(dt: number): void {
+  protected updateMorale(dt: number): void {
     const lost = { blue: 0, red: 0 }, total = { blue: 0, red: 0 };
     for (const b of this.battalions) {
       total[b.team] += b.initial;
@@ -2215,7 +2317,7 @@ export class ChargeSim {
    * and its battalions slowly lose heart; out, it collapses — the rest break one by
    * one, the shakiest first. One giant battle, and when it's won it's won.
    */
-  private updateArmies(lost: Record<Team, number>, total: Record<Team, number>): void {
+  protected updateArmies(lost: Record<Team, number>, total: Record<Team, number>): void {
     if (this.outcome !== 'playing') return;
     for (const team of ['red', 'blue'] as const) {
       if (this.armyBroken[team] || total[team] === 0) continue;
@@ -2235,7 +2337,7 @@ export class ChargeSim {
   }
 
   /** Morale is gone: the remaining battalions give up one after another, shakiest first. */
-  private breakArmy(team: Team): void {
+  protected breakArmy(team: Team): void {
     this.armyBroken[team] = true;
     this.armyLoss[team] = C.ARMY_BREAK[team];
     const standing = this.battalions.filter(b => b.team === team && !b.routed).sort((a, b) => a.morale - b.morale);
@@ -2246,11 +2348,11 @@ export class ChargeSim {
       x += b.x; y += b.y;
     });
     const n = Math.max(1, standing.length);
-    if (standing.length === 0) { x = C.WORLD_W / 2; y = C.FRONT_Y; }
+    if (standing.length === 0) { x = this.W / 2; y = C.FRONT_Y; }
     this.events.push({ type: 'army-break', team, x: x / n, y: y / n });
   }
 
-  private rout(b: Battalion): void {
+  protected rout(b: Battalion): void {
     b.routed = true;
     b.morale = 0;
     b.routedAt = this.time;
@@ -2285,7 +2387,7 @@ export class ChargeSim {
     }
   }
 
-  private checkOutcome(): void {
+  protected checkOutcome(): void {
     if (this.outcome !== 'playing') return;
     const redGone = this.battalions.every(b => b.team !== 'red' || b.routed);
     if (this.pendingWaves.length === 0 && redGone

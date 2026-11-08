@@ -112,15 +112,15 @@ export const LANES = {
   STORM_COOLDOWN: 16,
 
   // --- Horse archers ---
-  HA_RANGE: 260,
+  HA_RANGE: 290,
   /** Arrow damage multipliers against foot and against horsemen. */
-  HA_POWER_FOOT: 3.2,
+  HA_POWER_FOOT: 4.5,
   HA_POWER_RIDER: 0.6,
   /**
    * Morale each arrow hit knocks off a battalion: steady fire breaks foot from a safe
    * distance (slowly), where knights break it in one crash (and take the pikes).
    */
-  HA_SHOCK: 0.8,
+  HA_SHOCK: 1.3,
 
   // --- Fog of war ---
   /** Vision is worked out on a grid of this cell size, this often (s). */

@@ -74,7 +74,7 @@ export const COMMANDERS: Record<CommanderKind, Commander> = {
     apply: m => {
       // A charge from them barely dents a battalion: light horses, little trample, little terror.
       m.maxRiders = 12; m.hp = 0.7; m.mass = 0.7; m.impact = 0.15; m.strike = 0.4; m.shock = 0.2;
-      m.speed = 1.1; m.turn = 1.2; m.siege = 0.5; m.archery = 0.55;
+      m.speed = 1.1; m.turn = 1.2; m.siege = 0.5; m.archery = 0.65;
     },
   },
 };

@@ -1742,8 +1742,15 @@ export class ChargeView {
       g.circle(gx, gy, 1.2).fill({ color: 0x000000, alpha: 0.08 + 0.12 * (1 - h) });
       // The arrow itself, lifted toward the viewer at the top of its arc.
       const ax = gx, ay = gy - lift;
-      const len = 5 * (1 + h * 0.5);
       const color = a.team === 'blue' ? t.blueProjectile : t.redProjectile;
+      if (a.volley === -1) {
+        // Loosed from the saddle: a flat, fast shot with a short streak behind it.
+        const fy = gy - lift * 0.35;
+        g.moveTo(gx - nx * 12, fy - ny * 12).lineTo(gx, fy).stroke({ width: 1.6, color, alpha: 0.25 });
+        g.moveTo(gx - nx * 7, fy - ny * 7).lineTo(gx, fy).stroke({ width: 1.3, color, alpha: 0.95 });
+        continue;
+      }
+      const len = 5 * (1 + h * 0.5);
       g.moveTo(ax - nx * len, ay - ny * len).lineTo(ax, ay).stroke({ width: 0.8 + h * 0.4, color, alpha: 0.95 });
     }
   }
@@ -1784,7 +1791,8 @@ export class ChargeView {
       const wave = sim.time * 5 + b.id;
       if (this.upright) {
         paintStandard(g, px, py, 24, color, mixColor(color, t.trim, 0.75), wave);
-        if (b.team !== 'red' || !L || Math.hypot(b.x - L.x, b.y - L.y) > 200) continue;
+        // Morale shows near your squadron, and on any foot you've just shot or charged.
+        if (b.team !== 'red' || !L || (Math.hypot(b.x - L.x, b.y - L.y) > 200 && sim.time - b.lastPlayerHit > 3)) continue;
         // A slim morale bar at the foot of the staff.
         const w = 16, h = 1.6, x = px - w / 2, y = py + 2.5;
         const m = Math.max(0, Math.min(1, b.morale / 100));
@@ -1804,7 +1812,7 @@ export class ChargeView {
       g.circle(px, top - 0.8, 0.9).fill(t.steel);
 
       if (b.team !== 'red') continue;
-      if (!L || Math.hypot(b.x - L.x, b.y - L.y) > 200) continue;
+      if (!L || (Math.hypot(b.x - L.x, b.y - L.y) > 200 && sim.time - b.lastPlayerHit > 3)) continue;
       const w = 22, h = 2.4;
       const x = px - w / 2, y = py + 3;
       const m = Math.max(0, Math.min(1, b.morale / 100));

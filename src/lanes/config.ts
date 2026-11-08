@@ -60,6 +60,13 @@ export const LANES = {
   SIEGE_DPS_RIDER: 4,
   /** Riders this close to a wall (and slower than a charge) are hacking at it. */
   SIEGE_REACH_RIDER: 46,
+  /**
+   * Late game: from this many seconds the siege engines arrive and walls crumble ever
+   * faster (siege damage +100% every SIEGE_LATE_DOUBLE s), so an even match still ends
+   * soon — without flooding the field with ever bigger waves.
+   */
+  SIEGE_LATE_START: 600,
+  SIEGE_LATE_DOUBLE: 240,
 
   // --- Waves ---
   SPAWN_X: { blue: 540, red: 2460 } as Record<Team, number>,
@@ -70,7 +77,7 @@ export const LANES = {
   /** Every this many waves each battalion grows by WAVE_GROWTH men, up to WAVE_GROWTH_MAX. */
   WAVE_GROWTH_EVERY: 3,
   WAVE_GROWTH: 3,
-  WAVE_GROWTH_MAX: 24,
+  WAVE_GROWTH_MAX: 12,
   LANE_MARCH: 32,
   /** A lane battalion turns on enemy foot this close, in its lane. */
   AGGRO: 270,

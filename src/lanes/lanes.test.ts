@@ -15,7 +15,10 @@ function bench(sim: LaneSim, team: 'blue' | 'red'): void {
 }
 
 function teleport(sim: LaneSim, team: 'blue' | 'red', x: number, y: number): void {
-  for (const r of sim.heroes[team].sq.riders) { r.x = x + (Math.random() - 0.5) * 20; r.y = y + (Math.random() - 0.5) * 20; r.vx = r.vy = r.speed = 0; }
+  // A small fixed scatter (tests stay deterministic).
+  sim.heroes[team].sq.riders.forEach((r, i) => {
+    r.x = x + ((i * 7) % 5 - 2) * 5; r.y = y + ((i * 3) % 5 - 2) * 5; r.vx = r.vy = r.speed = 0;
+  });
 }
 
 describe('lanes map', () => {
@@ -213,7 +216,41 @@ describe('lanes commanders, abilities and fog', () => {
     expect(sim.useAbility('blue', 'rally')).toBe(true);
     expect(b.morale).toBe(100);
     expect(sim.isRallied(b)).toBe(true);
+    // Used between steps (from the UI): its event arrives with the next step.
+    sim.step(1 / 60, NO_INPUT);
     expect(sim.laneEvents.some(e => e.type === 'ability' && e.ability === 'rally' && e.count >= 1)).toBe(true);
+  });
+
+  it('a card picked between steps is reported with the next step', () => {
+    const sim = new LaneSim({ seed: 3 });
+    sim['gainXp'](sim.me, xpToNext(1));
+    sim.chooseCard('blue', 0);
+    sim.step(1 / 60, NO_INPUT);
+    expect(sim.laneEvents.some(e => e.type === 'card' && e.team === 'blue')).toBe(true);
+  });
+
+  it('queued level-ups never let a card pass its maximum', () => {
+    const sim = new LaneSim({ seed: 1 });
+    bench(sim, 'red');
+    let xp = 0;
+    for (let l = 1; l < 40; l++) xp += xpToNext(l);
+    sim['gainXp'](sim.me, xp);
+    expect(sim.me.offers.length).toBeGreaterThan(10);
+    // Greedy: always take Kite Shields when offered, else the first card.
+    while (sim.me.offers.length > 0) {
+      const hand = sim.me.offers[0];
+      const i = hand.indexOf('shields');
+      sim.chooseCard('blue', i >= 0 ? i : 0);
+    }
+    for (const id of CARD_IDS) expect(sim.me.picks.filter(p => p === id).length).toBeLessThanOrEqual(CARDS[id].max);
+  });
+
+  it('levels never stop at a cap', () => {
+    const sim = new LaneSim({ seed: 2 });
+    let xp = 0;
+    for (let l = 1; l < 30; l++) xp += xpToNext(l);
+    sim['gainXp'](sim.me, xp);
+    expect(sim.me.level).toBe(30);
   });
 
   it('horse archers shoot from the saddle', () => {

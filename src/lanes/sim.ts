@@ -80,6 +80,8 @@ export type LaneEvent =
   | { type: 'hero-down'; team: Team; x: number; y: number; respawn: number }
   | { type: 'hero-up'; team: Team; x: number; y: number }
   | { type: 'lane-wave'; index: number }
+  /** The siege engines have arrived: walls crumble faster from now on. */
+  | { type: 'late-game' }
   | { type: 'under-attack'; team: Team; kind: 'tower' | 'keep'; x: number; y: number }
   /** A commander's riders are hacking at a wall of `team` (alone: with only a quarter of the effect). */
   | { type: 'siege'; team: Team; x: number; y: number; angle: number; alone: boolean }
@@ -115,7 +117,11 @@ function turnToward(current: number, desired: number, maxStep: number): number {
 export class LaneSim extends ChargeSim {
   readonly structures: Structure[] = [];
   readonly heroes: Record<Team, Hero>;
+  /** The mode's own events from the last step (plus anything done between steps). */
   laneEvents: LaneEvent[] = [];
+  /** Events raised between steps (an ability or card picked from the UI), delivered with the next step. */
+  private pendingEvents: LaneEvent[] = [];
+  private stepping = false;
   waveIndex = 0;
   winner: Team | null = null;
   readonly towersDown: Record<Team, number> = { blue: 0, red: 0 };
@@ -250,8 +256,15 @@ export class LaneSim extends ChargeSim {
     return null;
   }
 
+  private emit(e: LaneEvent): void {
+    (this.stepping ? this.laneEvents : this.pendingEvents).push(e);
+  }
+
   protected override preStep(dt: number): void {
     this.laneEvents.length = 0;
+    for (const e of this.pendingEvents) this.laneEvents.push(e);
+    this.pendingEvents.length = 0;
+    this.stepping = true;
     this.spawnLaneWaves();
     for (const team of ['blue', 'red'] as const) this.refreshEff(this.heroes[team]);
     void dt;
@@ -264,12 +277,13 @@ export class LaneSim extends ChargeSim {
     this.siege(dt);
     this.shootFromSaddle();
     this.updateHeroes(dt);
-    this.clearField();
+    this.clearField(dt);
     this.fogTimer -= dt;
     if (this.fogTimer <= 0) {
       this.fogTimer = L.FOG_INTERVAL;
       this.updateVision();
     }
+    this.stepping = false;
   }
 
   // --- Abilities -----------------------------------------------------------------------
@@ -305,7 +319,7 @@ export class LaneSim extends ChargeSim {
       h.chargeUntil = this.time + L.CHARGE_TIME;
       h.ready.charge = this.time + L.CHARGE_COOLDOWN;
       this.refreshEff(h);
-      this.laneEvents.push({ type: 'ability', team, ability: id, x: HL.x, y: HL.y, count: h.sq.riders.length });
+      this.emit({ type: 'ability', team, ability: id, x: HL.x, y: HL.y, count: h.sq.riders.length });
       return true;
     }
     // Rally: every battalion of ours near the commander takes heart.
@@ -318,7 +332,7 @@ export class LaneSim extends ChargeSim {
       count++;
     }
     h.ready.rally = this.time + L.RALLY_COOLDOWN;
-    this.laneEvents.push({ type: 'ability', team, ability: id, x: HL.x, y: HL.y, count });
+    this.emit({ type: 'ability', team, ability: id, x: HL.x, y: HL.y, count });
     return true;
   }
 
@@ -349,7 +363,7 @@ export class LaneSim extends ChargeSim {
         const flight = Math.max(0.35, Math.min(0.9, bestD / 320));
         const tx = best.x + best.vx * flight + (this.rand() - 0.5) * 8;
         const ty = best.y + best.vy * flight + (this.rand() - 0.5) * 8;
-        this.arrows.push({ sx: r.x, sy: r.y, tx, ty, t: 0, flight, team, volley: -1, power: L.HA_POWER_FOOT, riderPower: L.HA_POWER_RIDER });
+        this.arrows.push({ sx: r.x, sy: r.y, tx, ty, t: 0, flight, team, volley: -1, power: L.HA_POWER_FOOT, riderPower: L.HA_POWER_RIDER, byPlayer: h.sq === this.player });
         r.lastAttack = this.time;
       }
     }
@@ -429,7 +443,7 @@ export class LaneSim extends ChargeSim {
         for (const b of [swords, pikes]) this.laneInfo.set(b.id, { lane, path: this.paths[team][lane], wp: 1 });
       });
     }
-    this.laneEvents.push({ type: 'lane-wave', index: this.waveIndex });
+    this.emit({ type: 'lane-wave', index: this.waveIndex });
   }
 
   /** Lane foot: march down the road, fight enemy foot in the lane, besiege towers. */
@@ -652,8 +666,15 @@ export class LaneSim extends ChargeSim {
     this.events.push({ type: 'volley', id, team: st.team, x: aim.x, y: aim.y, radius: spread + 10, flight, atPlayer });
   }
 
+  /** Siege damage multiplier: 1 until the engines arrive, then rising steadily. */
+  get siegeLate(): number {
+    return 1 + Math.max(0, this.time - L.SIEGE_LATE_START) / L.SIEGE_LATE_DOUBLE;
+  }
+
   /** Foot and horsemen at the walls wear a tower down; at zero it falls. */
   private siege(dt: number): void {
+    if (this.time >= L.SIEGE_LATE_START && this.time - dt < L.SIEGE_LATE_START) this.emit({ type: 'late-game' });
+    const late = this.siegeLate;
     for (const st of this.structures) {
       if (!st.alive || !this.vulnerable(st)) continue;
       const enemy = enemyOf(st.team);
@@ -686,15 +707,15 @@ export class LaneSim extends ChargeSim {
         // Chips fly from the wall facing the riders.
         this.siegeFxAt.set(st.id, this.time);
         const a = Math.atan2(hy / hacking - st.y, hx / hacking - st.x);
-        this.laneEvents.push({ type: 'siege', team: st.team, x: st.x + Math.cos(a) * st.r, y: st.y + Math.sin(a) * st.r, angle: a, alone: !escorted });
+        this.emit({ type: 'siege', team: st.team, x: st.x + Math.cos(a) * st.r, y: st.y + Math.sin(a) * st.r, angle: a, alone: !escorted });
       }
       if (dmg <= 0) continue;
-      st.hp -= dmg;
+      st.hp -= dmg * late;
       st.lastHit = this.time;
       const last = this.underAttackAt.get(st.id) ?? -99;
       if (this.time - last > 15) {
         this.underAttackAt.set(st.id, this.time);
-        this.laneEvents.push({ type: 'under-attack', team: st.team, kind: st.kind, x: st.x, y: st.y });
+        this.emit({ type: 'under-attack', team: st.team, kind: st.kind, x: st.x, y: st.y });
       }
       if (st.hp <= 0) this.destroy(st);
     }
@@ -704,9 +725,9 @@ export class LaneSim extends ChargeSim {
     st.hp = 0;
     st.alive = false;
     const enemy = enemyOf(st.team);
-    this.towersDown[enemy]++;
+    if (st.kind === 'tower') this.towersDown[enemy]++;
     this.gainXp(this.heroes[enemy], L.XP_TOWER);
-    this.laneEvents.push({ type: 'tower-down', team: st.team, kind: st.kind, lane: st.lane, x: st.x, y: st.y });
+    this.emit({ type: 'tower-down', team: st.team, kind: st.kind, lane: st.lane, x: st.x, y: st.y });
   }
 
   // --- Commanders -----------------------------------------------------------------------
@@ -741,7 +762,7 @@ export class LaneSim extends ChargeSim {
         foe.kills++;
         this.gainXp(foe, L.XP_HERO_KILL);
         const last = sq.trail[sq.trail.length - 1];
-        this.laneEvents.push({ type: 'hero-down', team, x: last?.x ?? keep.x, y: last?.y ?? keep.y, respawn: wait });
+        this.emit({ type: 'hero-down', team, x: last?.x ?? keep.x, y: last?.y ?? keep.y, respawn: wait });
         if (h.ai) h.ai.mode = 'lane';
       }
       if (h.dead) {
@@ -796,7 +817,7 @@ export class LaneSim extends ChargeSim {
       h.level++;
       const offer = drawOffer(h.picks, this.rand);
       if (offer.length > 0) h.offers.push(offer);
-      this.laneEvents.push({ type: 'level', team: h.team, level: h.level });
+      this.emit({ type: 'level', team: h.team, level: h.level });
     }
   }
 
@@ -811,6 +832,9 @@ export class LaneSim extends ChargeSim {
     h.picks.push(id);
     h.mods = modsFromPicks(h.picks, h.kind);
     this.refreshEff(h);
+    // Hands still waiting were dealt before this pick: deal them afresh, so none offers
+    // a card that is now maxed.
+    h.offers = h.offers.map(() => drawOffer(h.picks, this.rand)).filter(o => o.length > 0);
     // Tougher riders: everyone's wounds scale with the new strength.
     if (h.mods.hp !== before.hp) {
       for (const r of h.sq.riders) {
@@ -827,7 +851,7 @@ export class LaneSim extends ChargeSim {
         this.remount(h, tail.x - Math.cos(tail.facing) * 14, tail.y - Math.sin(tail.facing) * 14);
       }
     }
-    this.laneEvents.push({ type: 'card', team, card: id });
+    this.emit({ type: 'card', team, card: id });
   }
 
   private remount(h: Hero, x: number, y: number): void {
@@ -854,22 +878,29 @@ export class LaneSim extends ChargeSim {
     if (!this.squadrons.includes(sq)) this.squadrons.push(sq);
     h.dead = false;
     h.lastHurt = -99;
-    this.laneEvents.push({ type: 'hero-up', team: h.team, x: p.x, y: p.y });
+    this.emit({ type: 'hero-up', team: h.team, x: p.x, y: p.y });
   }
 
   /** Routed men who have run home leave the field; emptied battalions are struck off. */
-  private clearField(): void {
+  private clearField(dt: number): void {
     for (const s of this.soldiers) {
       if (!s.alive || !s.fleeing || !s.bat) continue;
       const home = s.team === 'blue' ? s.x < L.WOODS_X0 - 40 : s.x > L.WOODS_X1 + 40;
       if (home || this.time - s.bat.routedAt > L.FLEE_TIME) s.alive = false;
     }
-    if (this.battalions.length > 0 && Math.floor(this.time * 2) !== Math.floor((this.time - 1 / 60) * 2)) {
+    if (this.battalions.length > 0 && Math.floor(this.time * 2) !== Math.floor((this.time - dt) * 2)) {
       this.battalions = this.battalions.filter(b => {
         if (!b.routed || b.grid.some(s => s && s.alive)) return true;
         this.laneInfo.delete(b.id);
+        this.rallied.delete(b.id);
         return false;
       });
+      // Horse archers who have fallen no longer need their reload timers.
+      if (this.shotReady.size > 0) {
+        const alive = new Set<number>();
+        for (const team of ['blue', 'red'] as const) for (const r of this.heroes[team].sq.riders) alive.add(r.id);
+        for (const id of this.shotReady.keys()) if (!alive.has(id)) this.shotReady.delete(id);
+      }
     }
   }
 
@@ -1133,7 +1164,8 @@ export class LaneSim extends ChargeSim {
     const foe = this.heroes[enemy];
     const F0 = foe.sq.riders[0];
     const F = F0 && this.visible(h.team, F0.x, F0.y) ? F0 : null;
-    const odds = this.strength(h) / Math.max(1, this.strength(foe));
+    // Unseen, his strength is a guess: assume an even match.
+    const odds = F ? this.strength(h) / Math.max(1, this.strength(foe)) : 1;
     let best = 1, bestScore = -Infinity;
     L.LANE_Y.forEach((y, lane) => {
       // Riding between lanes costs time: stay put unless another lane matters more.

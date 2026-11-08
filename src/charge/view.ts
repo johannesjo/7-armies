@@ -824,9 +824,9 @@ export class ChargeView {
     }
     g.rect(0, 0, this.W, this.H).fill(t.bg);
 
-    // Churned earth where the lines meet.
+    // Churned earth where the lines meet (the battle only).
     const mud = mixColor(t.bg, t.obstacleBorder, 0.16);
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < (this.field.battle ? 40 : 0); i++) {
       const x = this.W / 2 + (rand() - 0.5) * 900;
       const y = C.FRONT_Y + (rand() - 0.5) * 70;
       g.ellipse(x, y, 40 + rand() * 70, 14 + rand() * 20).fill({ color: mud, alpha: 0.18 });
@@ -1614,7 +1614,7 @@ export class ChargeView {
       for (const sq of sim.squadrons) {
         const color = sq.team === 'blue' ? this.theme.blue : this.theme.red;
         for (const r of sq.riders) {
-          if (r.speed < 70) continue;
+          if (r.speed < 70 || this.hiddenAt(r.team, r.x, r.y)) continue;
           const back = r.speed * dt * 1.6;
           this.stainBatch.moveTo(r.x - Math.cos(r.facing) * (6 + back), r.y - Math.sin(r.facing) * (6 + back))
             .lineTo(r.x - Math.cos(r.facing) * 6, r.y - Math.sin(r.facing) * 6)
@@ -1659,7 +1659,7 @@ export class ChargeView {
   protected stampHoofPrints(sim: ChargeSim): void {
     const print = mixColor(this.theme.dirt, 0x2a1e10, 0.45);
     for (const s of sim.soldiers) {
-      if (!s.alive || s.type !== 'cavalry') continue;
+      if (!s.alive || s.type !== 'cavalry' || this.hiddenAt(s.team, s.x, s.y)) continue;
       const u = this.units.get(s.id);
       if (!u || u.speed < 35) continue;
       // Four hoof falls per stride.

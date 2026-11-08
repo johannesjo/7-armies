@@ -179,6 +179,7 @@ export class ChargeMode {
     });
     this.updateTextBtn();
     this.qualityBtn.addEventListener('click', () => {
+      if (!this.active) return;
       const order: QualitySetting[] = ['auto', 'high', 'low'];
       writeQuality(order[(order.indexOf(readQuality()) + 1) % order.length]);
       this.updateQualityBtn();

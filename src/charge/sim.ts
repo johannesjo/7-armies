@@ -231,6 +231,8 @@ export interface Arrow {
   power?: number;
   /** Damage multiplier against horsemen, if different (horse archers' light arrows). */
   riderPower?: number;
+  /** Shot by your own squadron (its kills count as yours). */
+  byPlayer?: boolean;
 }
 
 export interface Volley {
@@ -2204,8 +2206,12 @@ export class ChargeSim {
       const angle = Math.atan2(a.ty - a.sy, a.tx - a.sx);
       if (victim) {
         const power = a.power ?? 1;
-        if (victim.rider) this.damageRider(victim, C.ARROW_DAMAGE_RIDER * (a.riderPower ?? power) * this.mods(victim.squad).arrows, angle, false, 'front');
-        else this.damageSoldier(victim, C.ARROW_DAMAGE_INFANTRY * power, angle, false, 'front');
+        const mine = a.byPlayer ?? false;
+        if (victim.rider) this.damageRider(victim, C.ARROW_DAMAGE_RIDER * (a.riderPower ?? power) * this.mods(victim.squad).arrows, angle, mine, 'front');
+        else {
+          if (mine && victim.bat) victim.bat.lastPlayerHit = this.time;
+          this.damageSoldier(victim, C.ARROW_DAMAGE_INFANTRY * power, angle, mine, 'front');
+        }
       }
       this.events.push({ type: 'arrow-land', x: a.tx, y: a.ty, angle, hit: !!victim, team: a.team });
     }

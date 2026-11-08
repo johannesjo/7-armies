@@ -485,10 +485,11 @@
       max-width: calc(100% - 460px);
       min-width: 300px;
       opacity: 0;
+      visibility: hidden;
       pointer-events: none;
-      transition: opacity 0.2s, transform 0.2s;
+      transition: opacity 0.2s, transform 0.2s, visibility 0s 0.2s;
     }
-    #ln-cards.active { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+    #ln-cards.active { opacity: 1; visibility: visible; transform: translate(-50%, 0); pointer-events: auto; transition: opacity 0.2s, transform 0.2s; }
     #ln-cards-title {
       font-size: 12px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
       color: #f6f0dc; text-shadow: 0 1px 4px rgba(0,0,0,0.8);
@@ -535,6 +536,20 @@
       #ln-xp-bar { width: 80px; }
     }
     #charge-screen[data-mode="lanes"][data-controls="joystick"] #ln-cards { max-width: calc(100% - 2 * 236px); }
+    /* Small phones with the stick: the tray keeps clear of it (over the minimap instead). */
+    @media (max-width: 760px) {
+      #charge-screen[data-mode="lanes"][data-controls="joystick"] #ln-cards,
+      #charge-screen[data-mode="lanes"][data-controls="joystick"] #ln-cards.active {
+        left: max(8px, env(safe-area-inset-left, 0px));
+        right: calc(228px + env(safe-area-inset-right, 0px));
+        transform: none;
+        max-width: none;
+        min-width: 0;
+      }
+      #charge-screen[data-mode="lanes"][data-controls="joystick"] #ln-cards .ln-text { display: none; }
+    }
+    /* Never let a card swallow a thumb meant for the stick. */
+    #ch-joy-zone { z-index: 3; }
     /* Abilities: two round buttons above the minimap (left thumb), keys Q and E. */
     #ln-abilities {
       position: absolute;
@@ -713,7 +728,7 @@
       <button id="ch-resume-btn">Resume</button>
       <button id="ch-controls-btn">Controls: point &amp; ride</button>
       <button id="ch-text-btn" aria-pressed="false">Combat text: off</button>
-      <button id="ch-quality-btn">Graphics (3D): auto</button>
+      <button id="ch-quality-btn" class="ch-only">Graphics (3D): auto</button>
       <button id="ch-quit-btn">Quit to menu</button>
     </div>
   </div>

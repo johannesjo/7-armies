@@ -136,6 +136,12 @@ document.getElementById('ln-pick-back')!.addEventListener('click', () => {
   promptScreen.classList.remove('picking');
   lanesBtn.focus();
 });
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && promptScreen.classList.contains('picking')) {
+    promptScreen.classList.remove('picking');
+    lanesBtn.focus();
+  }
+});
 
 let laneKind: CommanderKind = 'knights';
 

@@ -74,6 +74,8 @@ export class LaneMode extends ChargeMode {
     for (const id of ['charge', 'rally'] as const) {
       // pointerdown, not click: a thumb on the stick shouldn't have to let go first.
       this.abilityBtns[id].addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); this.ability(id); });
+      // Enter / Space and assistive tech send a click with no pointer behind it.
+      this.abilityBtns[id].addEventListener('click', e => { if (e.detail === 0) this.ability(id); });
     }
     window.addEventListener('keydown', e => {
       if (!this.active || this.paused) return;
@@ -181,11 +183,14 @@ export class LaneMode extends ChargeMode {
         if (e.team === 'red') { this.banner('You slew the rival commander!', 2600, true); this.triggerHitStop(0.5, 0.3); }
         else this.banner('Your squadron has fallen', 2200, true);
         break;
+      case 'late-game':
+        this.banner('Siege engines arrive — the walls crumble faster', 3000, true);
+        break;
       case 'hero-up':
         if (e.team === 'blue') this.banner('Back in the saddle!', 1500, true);
         break;
       case 'under-attack':
-        if (e.team === 'blue') this.banner(e.kind === 'keep' ? 'Our keep is under attack!' : 'A tower is under attack', 2000);
+        if (e.team === 'blue') this.banner(e.kind === 'keep' ? 'Our keep is under attack!' : 'A tower is under attack', 2000, true);
         break;
       case 'siege':
         // Your riders at their walls (only commanders' riders raise these).
@@ -195,7 +200,7 @@ export class LaneMode extends ChargeMode {
         this.hackedOnce = true;
         break;
       case 'ability':
-        if (e.team === 'red') this.banner(e.ability === 'charge' ? 'The rival sounds the charge!' : 'The rival rallies his foot!', 1600);
+        if (e.team === 'red' && sim.visible('blue', e.x, e.y)) this.banner(e.ability === 'charge' ? 'The rival sounds the charge!' : 'The rival rallies his foot!', 1600, true);
         break;
     }
   }

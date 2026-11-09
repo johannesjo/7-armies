@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>7 Armies</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; scrollbar-width: none; }
+    *::-webkit-scrollbar { display: none; }
+    html { overflow: clip; height: 100%; }
+    body {
+      position: fixed;
+      inset: 0;
+      overflow: clip;
+      background: #111;
+      color: #eee;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    .screen { display: none; width: 100%; height: 100%; }
+    .screen.active { display: flex; }
+    button { min-width: 44px; min-height: 44px; }
+    button:focus-visible { outline: 3px solid #4a9eff; outline-offset: 3px; }
+
+    /* Start Screen — overlay on top of battlefield */
+    #prompt-screen {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      flex-direction: column;
+      align-items: center;
+      justify-content: safe center;
+      gap: 24px;
+      padding: 32px;
+      background: rgba(0,0,0,0.7);
+      z-index: 15;
+      overflow: clip;
+    }
+    #prompt-screen h1 {
+      font-size: 48px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+    }
+    #prompt-screen p {
+      font-size: 16px;
+      opacity: 0.7;
+      max-width: 500px;
+      text-align: center;
+      line-height: 1.5;
+    }
+    #battle-btn, #ai-btn {
+      padding: 16px 48px;
+      font-size: 20px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 4px;
+      background: #2a2a4a;
+      color: #eee;
+      border: 2px solid #555;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #battle-btn:hover, #ai-btn:hover { background: #3a3a5a; border-color: #777; }
+
+    /* Battle Screen */
+    #battle-screen {
+      position: relative;
+      flex-direction: column;
+      align-items: center;
+      padding-top: calc(52px + env(safe-area-inset-top, 0px));
+    }
+    #pixi-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex: 1;
+      width: 100%;
+      min-height: 0;
+      overflow: hidden;
+    }
+    #pixi-container canvas {
+      display: block;
+      touch-action: none;
+    }
+    #battle-hud {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      min-height: 52px;
+      padding: calc(4px + env(safe-area-inset-top, 0px)) 16px 4px;
+      background: rgba(0,0,0,0.6);
+      z-index: 10;
+      font-size: 14px;
+    }
+    #round-timer {
+      font-size: 32px;
+      font-weight: bold;
+      font-variant-numeric: tabular-nums;
+      text-shadow: 0 0 10px rgba(255,255,255,0.4);
+    }
+    #blue-count { color: #4a9eff; }
+    #red-count { color: #ff4a4a; }
+    .speed-controls button {
+      background: #2a2a4a;
+      color: #eee;
+      border: 1px solid #444;
+      padding: 4px 12px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .speed-controls button.active { background: #4a4a7a; border-color: #88f; }
+
+    /* Planning overlay */
+    #planning-overlay {
+      display: none;
+      position: fixed;
+      top: calc(4px + env(safe-area-inset-top, 0px));
+      left: 50%;
+      transform: translateX(-50%);
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      width: calc(100% - 192px);
+      text-align: center;
+      z-index: 12;
+      pointer-events: none;
+    }
+    #planning-overlay.active { display: flex; }
+    #planning-label {
+      font-size: 24px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+    }
+    #planning-instructions {
+      font-size: 12px;
+      opacity: 0.85;
+    }
+    #confirm-btn {
+      display: none;
+      position: fixed;
+      top: calc(4px + env(safe-area-inset-top, 0px));
+      right: max(12px, env(safe-area-inset-right, 0px));
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      background: #2a2a4a;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 3px;
+      cursor: pointer;
+      z-index: 12;
+    }
+    #confirm-btn.active { display: block; }
+    #confirm-btn:hover { background: #3a3a5a; border-color: #777; opacity: 1; }
+    #leave-battle-btn {
+      display: none;
+      position: fixed;
+      bottom: max(12px, env(safe-area-inset-bottom, 0px));
+      left: max(12px, env(safe-area-inset-left, 0px));
+      padding: 8px 16px;
+      background: #2a2a4a;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 4px;
+      cursor: pointer;
+      z-index: 17;
+    }
+    #leave-battle-btn.active { display: block; }
+
+    /* Cover screen */
+    #cover-screen {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      width: 100%; height: 100%;
+      border: 0;
+      color: inherit;
+      font-family: inherit;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.85);
+      z-index: 16;
+      font-size: 36px;
+      font-weight: bold;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+    #cover-screen.active { display: flex; }
+
+    /* Result Screen */
+    #result-screen {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      background: rgba(0,0,0,0.75);
+      z-index: 20;
+    }
+    #result-screen h2 { font-size: 64px; letter-spacing: 4px; }
+    #result-screen .stats { font-size: 18px; opacity: 0.8; text-align: center; }
+    #result-screen .buttons { display: flex; flex-direction: column; align-items: center; gap: 16px; margin-top: 16px; }
+    #result-screen button {
+      padding: 12px 32px;
+      font-size: 16px;
+      background: #2a2a4a;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #result-screen button:hover { background: #3a3a5a; }
+
+    /* Replay overlay */
+    #replay-overlay {
+      display: none;
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 8px 12px max(8px, env(safe-area-inset-bottom, 0px));
+      background: rgba(0,0,0,0.7);
+      z-index: 14;
+    }
+    #replay-overlay.active { display: flex; }
+    #replay-overlay button {
+      background: #2a2a4a;
+      color: #eee;
+      border: 1px solid #555;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      border-radius: 3px;
+    }
+    #replay-overlay button:hover { background: #3a3a5a; border-color: #777; }
+    #replay-overlay button.active { background: #4a4a7a; border-color: #88f; }
+    #replay-progress {
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      opacity: 0.7;
+      min-width: 100px;
+      text-align: center;
+    }
+
+    /* Mobile */
+    @media (max-width: 900px) {
+      #prompt-screen { padding: 24px 16px; gap: 16px; }
+      #prompt-screen h1 { font-size: 28px; letter-spacing: 2px; }
+      #prompt-screen p { font-size: 13px; padding: 0 8px; }
+      #prompt-screen .btn-row { flex-wrap: wrap; justify-content: center; }
+      #prompt-screen .btn-row button {
+        padding: 12px 24px;
+        font-size: 16px;
+        letter-spacing: 2px;
+      }
+      #battle-hud { font-size: 11px; padding: calc(4px + env(safe-area-inset-top, 0px)) 8px 4px; gap: 4px; }
+      #battle-hud > div { gap: 6px; }
+      #round-timer { font-size: 22px; }
+      #round-counter { font-size: 11px; }
+      #planning-label { font-size: 16px; letter-spacing: 1px; }
+      #planning-instructions { font-size: 11px; }
+      #confirm-btn { padding: 4px 14px; font-size: 12px; letter-spacing: 1px; }
+      #cover-screen { font-size: 24px; letter-spacing: 2px; padding: 0 16px; text-align: center; }
+      #result-screen { padding: 0 16px; }
+      #result-screen h2 { font-size: 32px; letter-spacing: 2px; }
+      #result-screen .stats { font-size: 15px; }
+      #result-screen .buttons { flex-wrap: wrap; justify-content: center; }
+      #result-screen button { min-height: 48px; padding: 10px 20px; font-size: 14px; }
+      .speed-controls button { padding: 6px 10px; font-size: 12px; }
+    }
+
+    @media (max-width: 480px) {
+      #planning-overlay { width: calc(100% - 160px); }
+      #replay-progress { order: -1; flex-basis: 100%; }
+    }
+    @media (max-height: 440px) {
+      #result-screen { gap: 8px; }
+      #result-screen .buttons { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
+    }
+
+    /* Day-mode parchment aesthetic */
+    body.day-mode { color: #443322; background: #e8e0cc; }
+    body.day-mode #battle-hud { background: rgba(245,240,224,0.7); }
+    body.day-mode #blue-count { color: #2266aa; }
+    body.day-mode #red-count { color: #aa3333; }
+    body.day-mode #confirm-btn, body.day-mode #leave-battle-btn { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+    body.day-mode #planning-label { text-shadow: none; }
+    body.day-mode #cover-screen { background: rgba(245,240,224,0.85); color: #443322; }
+    body.day-mode .speed-controls button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+    body.day-mode .speed-controls button.active { background: #d8d0bc; border-color: #886633; }
+    body.day-mode #prompt-screen { background: rgba(245,240,224,0.7); }
+    body.day-mode #result-screen { background: rgba(245,240,224,0.75); }
+    body.day-mode #result-screen button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+    body.day-mode #replay-overlay { background: rgba(245,240,224,0.7); }
+    body.day-mode #replay-overlay button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+    body.day-mode #battle-btn, body.day-mode #ai-btn { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+
+    /* Cavalry Charge mode */
+    #charge-btn {
+      padding: 16px 40px;
+      font-size: 20px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 4px;
+      background: #4a2a2a;
+      color: #eee;
+      border: 2px solid #a55;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #charge-btn:hover { background: #5a3434; border-color: #c66; }
+    #charge-btn small { display: block; font-size: 11px; letter-spacing: 1px; text-transform: none; font-weight: normal; opacity: 0.75; margin-top: 4px; }
+    .menu-divider { font-size: 11px; letter-spacing: 3px; text-transform: uppercase; opacity: 0.45; margin-top: 6px; }
+
+    #charge-screen {
+      --ch-blue: #4a9eff; --ch-red: #ff4a4a; --ch-warn: #ff4444; --ch-good: #66ff88; --ch-bg: #222;
+      position: absolute;
+      inset: 0;
+      z-index: 13;
+      background: var(--ch-bg);
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #charge-canvas { position: absolute; inset: 0; }
+    #charge-canvas canvas { display: block; touch-action: none; }
+    #charge-hud {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      padding: calc(8px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px));
+      pointer-events: none;
+      font-size: 13px;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    }
+    #charge-hud .ch-col { display: flex; flex-direction: column; gap: 5px; min-width: 130px; }
+    #charge-hud .ch-col.right { align-items: flex-end; }
+    #ch-riders { font-size: 20px; font-weight: 800; color: var(--ch-blue); font-variant-numeric: tabular-nums; }
+    #ch-riders.low { color: var(--ch-warn); }
+    .ch-bar { width: 140px; height: 7px; border-radius: 4px; background: rgba(0,0,0,0.3); overflow: hidden; }
+    .ch-bar > div { height: 100%; width: 100%; border-radius: 4px; transition: width 0.12s linear; }
+    #ch-speed { background: var(--ch-blue-light, #8fb6f0); transition: width 0.1s linear, background 0.2s; }
+    #ch-speed.charging { background: var(--ch-gallop, #e6b03a); }
+    #ch-form { background: var(--ch-blue-light, #8fb6f0); transition: width 0.15s linear, background 0.2s; }
+    #ch-form.loose { background: var(--ch-warn, #d8402e); }
+    #ch-red { background: var(--ch-red); }
+    #ch-blue { background: var(--ch-blue); }
+    #ch-red.wavering, #ch-blue.wavering { animation: ch-waver 0.8s ease-in-out infinite alternate; }
+    @keyframes ch-waver { from { opacity: 1; } to { opacity: 0.35; } }
+    .ch-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.7; }
+    .ch-center { text-align: center; }
+    #ch-score { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+    #ch-combo { font-size: 13px; font-weight: 700; color: var(--ch-good); min-height: 18px; }
+    #ch-time { font-size: 12px; opacity: 0.6; font-variant-numeric: tabular-nums; }
+    #ch-minimap {
+      position: absolute;
+      left: max(12px, env(safe-area-inset-left, 0px));
+      bottom: max(12px, env(safe-area-inset-bottom, 0px));
+      width: 192px;
+      height: 120px;
+      border: 1px solid rgba(128,128,128,0.6);
+      border-radius: 4px;
+      opacity: 0.9;
+      pointer-events: none;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+    }
+    #ch-banner {
+      position: absolute;
+      /* Near the top, under the HUD, clear of the squadron at the centre of the screen. */
+      top: calc(96px + env(safe-area-inset-top, 0px));
+      left: 50%;
+      transform: translate(-50%, 0) scale(0.9);
+      transform-origin: 50% 0;
+      /* Fits any screen: scales with its width and wraps (balanced) rather than overflowing. */
+      font-size: clamp(16px, 3.4vw, 34px);
+      font-weight: 800;
+      letter-spacing: clamp(0.5px, 0.25vw, 3px);
+      line-height: 1.15;
+      text-transform: uppercase;
+      text-align: center;
+      width: max-content;
+      max-width: calc(100vw - 32px);
+      text-wrap: balance;
+      opacity: 0;
+      transition: opacity 0.25s, transform 0.25s;
+      pointer-events: none;
+      text-shadow: 0 2px 12px rgba(0,0,0,0.5);
+    }
+    #ch-banner.active { opacity: 1; transform: translate(-50%, 0) scale(1); }
+    /* Victory and defeat: mid-screen. */
+    #ch-banner.center { top: 40%; transform: translate(-50%, -50%) scale(0.9); transform-origin: 50% 50%; }
+    #ch-banner.center.active { transform: translate(-50%, -50%) scale(1); }
+    #ch-end-btn {
+      display: none;
+      position: absolute;
+      left: 50%;
+      bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+      transform: translateX(-50%);
+      padding: 10px 22px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: #f6f0dc;
+      background: rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(255, 255, 255, 0.45);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #ch-end-btn.active { display: block; }
+    #ch-hint {
+      position: absolute;
+      top: calc(96px + env(safe-area-inset-top, 0px));
+      left: 50%;
+      transform: translateX(-50%);
+      max-width: min(560px, calc(100% - 32px));
+      padding: 10px 16px;
+      border-radius: 6px;
+      background: rgba(0,0,0,0.55);
+      color: #eee;
+      font-size: 13px;
+      line-height: 1.6;
+      text-align: center;
+      opacity: 0;
+      transition: opacity 0.6s;
+      pointer-events: none;
+    }
+    #ch-hint.active { opacity: 1; }
+    #ch-hint kbd { display: inline-block; padding: 0 5px; border: 1px solid rgba(255,255,255,0.4); border-radius: 3px; font-family: inherit; font-size: 12px; }
+    #ch-hint .touch-only { display: none; }
+    #ch-hint .legend { display: inline-block; width: 26px; height: 0; vertical-align: middle; margin-right: 4px; }
+    #ch-hint .legend.canter { border-top: 2px dashed var(--ch-blue); }
+    #ch-hint .legend.gallop { border-top: 4px solid var(--ch-gallop, #e0a030); border-radius: 2px; }
+    #ch-drawing-tag {
+      position: absolute;
+      bottom: max(16px, env(safe-area-inset-bottom, 0px));
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 4px 12px;
+      border-radius: 12px;
+      background: rgba(0,0,0,0.45);
+      color: #eee;
+      font-size: 12px;
+      letter-spacing: 1px;
+      opacity: 0;
+      transition: opacity 0.15s;
+      pointer-events: none;
+    }
+    #charge-screen.drawing #ch-drawing-tag { opacity: 1; }
+    #charge-canvas { cursor: crosshair; }
+    #charge-screen[data-controls="direct"] .ctl-route,
+    #charge-screen[data-controls="direct"] .ctl-joystick,
+    #charge-screen[data-controls="route"] .ctl-direct,
+    #charge-screen[data-controls="route"] .ctl-joystick,
+    #charge-screen[data-controls="joystick"] .ctl-direct,
+    #charge-screen[data-controls="joystick"] .ctl-route { display: none; }
+    /* Steering stick (bottom right) — its hit zone is larger than the stick itself. */
+    #ch-joy-zone {
+      display: none;
+      position: absolute;
+      right: max(0px, env(safe-area-inset-right, 0px));
+      bottom: max(0px, env(safe-area-inset-bottom, 0px));
+      width: 220px;
+      height: 220px;
+      touch-action: none;
+    }
+    #charge-screen[data-controls="joystick"] #ch-joy-zone { display: block; }
+    #ch-joy {
+      position: absolute;
+      right: 34px;
+      bottom: 34px;
+      width: 124px;
+      height: 124px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(14, 18, 10, 0.35) 0 60%, transparent 61%),
+        radial-gradient(circle, transparent 0 82%, rgba(230, 176, 58, 0.55) 83% 100%);
+      border: 2px solid rgba(255, 255, 255, 0.28);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+      pointer-events: none;
+    }
+    #ch-joy.held { border-color: rgba(255, 255, 255, 0.55); }
+    #ch-joy-knob {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: rgba(242, 238, 226, 0.85);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+      transform: translate(-50%, -50%);
+    }
+    @media (max-height: 420px) {
+      #ch-joy { width: 108px; height: 108px; right: 24px; bottom: 20px; }
+      #ch-joy-knob { width: 46px; height: 46px; }
+    }
+    #ch-damage {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      box-shadow: inset 0 0 120px var(--ch-warn);
+      opacity: 0;
+    }
+    #ch-damage.flash { animation: ch-hurt 0.45s ease-out; }
+    @keyframes ch-hurt { from { opacity: 0.4; } to { opacity: 0; } }
+    #ch-buttons {
+      position: absolute;
+      top: calc(64px + env(safe-area-inset-top, 0px));
+      right: max(12px, env(safe-area-inset-right, 0px));
+      display: flex;
+      gap: 8px;
+    }
+    #ch-buttons button {
+      padding: 4px 12px;
+      background: rgba(0,0,0,0.35);
+      color: #eee;
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    #ch-pause {
+      display: none;
+      position: absolute;
+      inset: 0;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      background: rgba(0,0,0,0.6);
+      color: #eee;
+      z-index: 2;
+    }
+    #ch-pause.active { display: flex; }
+    #ch-pause h2 { font-size: 40px; letter-spacing: 4px; text-transform: uppercase; }
+    #ch-pause button {
+      padding: 12px 32px; font-size: 16px; background: #2a2a4a; color: #eee;
+      border: 1px solid #555; border-radius: 4px; cursor: pointer; min-width: 180px;
+    }
+    #ch-pause button:hover { background: #3a3a5a; }
+    #ch-pause .ch-help { font-size: 13px; opacity: 0.75; max-width: 420px; text-align: center; line-height: 1.6; padding: 0 16px; }
+
+    /* Cavalry Charge HUD panels and framing */
+    #ch-vignette {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(ellipse at center, transparent 55%, rgba(8, 12, 4, 0.42) 100%);
+    }
+    body.day-mode #ch-vignette { background: radial-gradient(ellipse at center, transparent 60%, rgba(90, 70, 40, 0.18) 100%); }
+    #charge-hud .ch-col, #charge-hud .ch-center {
+      background: rgba(14, 18, 10, 0.62);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 8px 12px;
+      color: #f2eee2;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+    }
+    #charge-hud .ch-center { min-width: 110px; }
+    #ch-riders { color: #f2eee2; }
+    #ch-riders::first-letter { color: var(--ch-blue-light, #8fb6f0); }
+    #ch-riders.low { color: var(--ch-warn); }
+    #charge-hud .ch-bar { background: rgba(255, 255, 255, 0.14); }
+    #ch-minimap { border-color: rgba(255, 255, 255, 0.18); border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); }
+    #ch-buttons button { border-radius: 8px; background: rgba(14, 18, 10, 0.5); }
+    #ch-banner { color: #f6f0dc; text-shadow: 0 2px 14px rgba(0, 0, 0, 0.7), 0 0 2px rgba(0, 0, 0, 0.8); }
+    body.day-mode #charge-hud .ch-col, body.day-mode #charge-hud .ch-center {
+      background: rgba(250, 245, 230, 0.7);
+      border-color: rgba(120, 100, 70, 0.2);
+      color: #443322;
+      text-shadow: none;
+    }
+    body.day-mode #ch-riders { color: #443322; }
+    body.day-mode #charge-hud .ch-bar { background: rgba(68, 51, 34, 0.15); }
+    body.day-mode #ch-banner { color: #3a2a1a; text-shadow: 0 1px 8px rgba(255, 255, 255, 0.85); }
+    @media (pointer: coarse) {
+      #ch-hint .touch-only { display: inline; }
+      #ch-hint .mouse-only { display: none; }
+    }
+    @media (max-width: 700px) {
+      #charge-hud { font-size: 11px; }
+      #charge-hud .ch-col { min-width: 0; }
+      .ch-bar { width: 90px; }
+      #ch-riders { font-size: 16px; }
+      #ch-score { font-size: 20px; }
+      #ch-minimap { width: 128px; height: 80px; }
+      #ch-banner { font-size: clamp(15px, 4.6vw, 22px); letter-spacing: 1px; top: calc(140px + env(safe-area-inset-top, 0px)); }
+      #ch-buttons { top: calc(84px + env(safe-area-inset-top, 0px)); }
+      /* Small screens: just how to ride, below the buttons; the tactics tips are in the pause menu. */
+      #ch-hint { font-size: 11px; padding: 6px 10px; line-height: 1.45; top: calc(140px + env(safe-area-inset-top, 0px)); }
+      #ch-hint .hint-more { display: none; }
+    }
+    @media (max-height: 500px) {
+      #charge-hud { font-size: 11px; }
+      #ch-riders { font-size: 16px; }
+      #ch-score { font-size: 20px; }
+      .ch-bar { width: 100px; }
+      #ch-minimap { width: 128px; height: 80px; }
+      #ch-hint { top: calc(70px + env(safe-area-inset-top, 0px)); font-size: 11px; padding: 6px 12px; line-height: 1.5; max-width: min(460px, calc(100% - 220px)); }
+      #ch-hint .hint-more { display: none; }
+      #ch-banner { font-size: clamp(15px, 3vw, 22px); top: calc(78px + env(safe-area-inset-top, 0px)); }
+    }
+    body.day-mode #charge-hud { text-shadow: 0 1px 2px rgba(255,255,255,0.6); }
+    body.day-mode .ch-bar { background: rgba(68,51,34,0.18); }
+    /* Classic RTS: no vignette (an even, sunlit field) and a slimmer, warmer HUD. */
+    body.style-rts #ch-vignette { display: none; }
+    body.style-rts #charge-hud .ch-col, body.style-rts #charge-hud .ch-center {
+      background: rgba(34, 26, 14, 0.5);
+      border: 1px solid rgba(232, 214, 170, 0.2);
+      border-radius: 5px;
+      padding: 4px 9px;
+      color: #f4ead2;
+    }
+    body.style-rts #charge-hud .ch-col { gap: 2px; min-width: 0; }
+    body.style-rts #charge-hud .ch-center { min-width: 84px; }
+    body.style-rts .ch-bar { height: 4px; border-radius: 2px; }
+    body.style-rts .ch-bar > div { border-radius: 2px; }
+    body.style-rts .ch-label { font-size: 9px; letter-spacing: 1.5px; }
+    body.style-rts #ch-score { font-size: 22px; }
+    body.style-rts #ch-minimap { border-color: rgba(232, 214, 170, 0.25); border-radius: 4px; }
+    body.day-mode #ch-buttons button { background: rgba(245,240,224,0.7); color: #443322; border-color: #aa9977; }
+    body.day-mode #ch-banner { text-shadow: 0 1px 6px rgba(255,255,255,0.8); }
+    body.day-mode #ch-pause { background: rgba(245,240,224,0.85); color: #443322; }
+    body.day-mode #ch-pause button { background: #e8e0cc; color: #443322; border-color: #aa9977; }
+    body.day-mode #charge-btn { background: #ead2c4; color: #5a2222; border-color: #aa5544; }
+  </style>
+  <script type="module" crossorigin src="/7-armies/branches/claude-funny-fermat-ywkn7f-08fb279/assets/index-DNCYHRMG.js"></script>
+</head>
+<body>
+  <div id="prompt-screen" class="screen active">
+    <h1>7 Armies</h1>
+    <p>Lead a cavalry squadron through a raging battle — or command a whole army, drawing paths for each battalion.</p>
+    <div class="btn-row" style="display:flex;flex-direction:column;align-items:center;gap:12px">
+      <button id="charge-btn">Cavalry Charge<small>Ride into their flanks &amp; rear</small></button>
+      <span class="menu-divider">Tactics</span>
+      <button id="ai-btn">vs AI</button>
+      <button id="battle-btn">vs Player</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;opacity:0.8;cursor:pointer">
+        Style
+        <select id="theme-select" style="font:inherit;padding:4px 8px;border-radius:4px;cursor:pointer">
+          <option value="rts">Classic RTS</option>
+          <option value="field">Field</option>
+          <option value="parchment">Parchment</option>
+          <option value="night">Night</option>
+          <option value="mini">Miniatures (prototype)</option>
+          <option value="ink">Ink &amp; watercolour (prototype)</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <div id="battle-screen" class="screen" inert>
+    <div id="battle-hud" style="display:none">
+      <span id="blue-count">Blue</span>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span id="round-counter" style="opacity:0.7">Round 1</span>
+        <span id="round-timer"></span>
+        <div class="speed-controls">
+          <button id="speed-toggle" data-speed="1" title="Switch to 3× speed">1×</button>
+        </div>
+      </div>
+      <span id="red-count">Red</span>
+    </div>
+    <div id="pixi-container"></div>
+
+    <div id="planning-overlay">
+      <span id="planning-label" aria-live="polite">Blue Planning</span>
+      <span id="planning-instructions">Drag to draw a route.</span>
+    </div>
+    <button id="confirm-btn">Done</button>
+
+    <div id="replay-overlay">
+      <button id="replay-restart-btn" title="Restart replay" aria-label="Restart replay">&#x23EE;</button>
+      <button id="replay-pause-btn" title="Pause replay" aria-label="Pause replay">&#x23F8;</button>
+      <button id="replay-speed-toggle" title="Switch to 3× speed">1×</button>
+      <span id="replay-progress">0.0s / 0.0s</span>
+      <button id="replay-exit-btn" title="Back to results" aria-label="Back to results">&#x2715;</button>
+    </div>
+  </div>
+
+  <div id="charge-screen" class="screen" aria-label="Cavalry Charge">
+    <div id="charge-canvas"></div>
+    <div id="ch-vignette"></div>
+    <div id="ch-damage"></div>
+    <div id="charge-hud">
+      <div class="ch-col">
+        <span id="ch-riders">♞ 12/12</span>
+        <span class="ch-label">Speed</span>
+        <div class="ch-bar"><div id="ch-speed"></div></div>
+        <span class="ch-label">Formation</span>
+        <div class="ch-bar"><div id="ch-form"></div></div>
+      </div>
+      <div class="ch-center">
+        <div id="ch-score">0</div>
+        <div id="ch-combo"></div>
+        <div id="ch-time">0:00</div>
+      </div>
+      <div class="ch-col right">
+        <span class="ch-label">Enemy morale</span>
+        <div class="ch-bar"><div id="ch-red"></div></div>
+        <span class="ch-label">Our morale</span>
+        <div class="ch-bar"><div id="ch-blue"></div></div>
+      </div>
+    </div>
+    <canvas id="ch-minimap" aria-hidden="true"></canvas>
+    <div id="ch-banner" aria-live="polite"></div>
+    <button id="ch-end-btn" type="button">End battle ▸</button>
+    <div id="ch-hint">
+      <span class="ctl-joystick"><b>Steer with the stick</b> at the bottom right — push further to ride faster, into the outer ring to <b>gallop</b>. Let go to rein in.<br></span>
+      <span class="ctl-direct"><b>Point where to ride</b> — keep <span class="touch-only">your finger</span><span class="mouse-only">the mouse button held</span> on the field and your squadron rides toward it. Closer = slower, further = faster, far out = <b>gallop</b>.<br></span>
+      <span class="ctl-route"><b>Draw your route</b> — <span class="mouse-only">drag with the mouse</span><span class="touch-only">drag your finger</span> and your squadron rides it.<br>
+      <span class="legend canter"></span> draw slowly to canter · <span class="legend gallop"></span> flick quickly to gallop<br></span>
+      <span class="hint-more">Hit flanks <b>×2</b> and rears <b>×3</b> — <b>glowing edges</b> show an open side · dodge the red circles · ride into <b>allied troops</b> to take command of them<br>
+      Break the enemy's <b>morale</b> and their whole army flees · cut down their <b>general</b> (gold on the map) to shake it</span>
+      <span class="mouse-only"><br>Keyboard reins: <kbd>W</kbd> ride on · <kbd>A</kbd>/<kbd>D</kbd> turn · <kbd>S</kbd> rein in · <kbd>Space</kbd> gallop</span>
+    </div>
+    <div id="ch-joy-zone" aria-label="Steering stick"><div id="ch-joy"><div id="ch-joy-knob"></div></div></div>
+    <div id="ch-drawing-tag" aria-hidden="true">Drawing route — flick fast to gallop</div>
+    <div id="ch-buttons">
+      <button id="ch-mute-btn" title="Mute sound" aria-label="Mute sound">🔊</button>
+      <button id="ch-pause-btn" title="Pause (Esc)" aria-label="Pause">❚❚</button>
+    </div>
+    <div id="ch-pause" role="dialog" aria-modal="true" aria-label="Paused">
+      <h2>Paused</h2>
+      <p class="ch-help"><span class="ctl-joystick">Steer with the stick at the bottom right — push further to ride faster, into the outer ring to gallop.</span><span class="ctl-direct">Hold your finger or the mouse button where you want to ride — the further from your squadron, the faster it goes, and far out it gallops.</span><span class="ctl-route">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it.</span> Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Wheel wide: on a sharp turn the riders on the outside of your wedge fall behind, and a loose wedge loses to a tight one. Hit enemy horsemen in the flank or rear to scatter them — or lead pursuing knights onto our pikes and archers. Pikes facing you will stop a charge, and enemy knights will hunt you. Keep moving — riders that stall in the crowd get pulled down. Ride into allied cavalry troops to take them under your command (up to 45 riders, a full wedge); the two blue camps behind our wings are pit stops — ride through one and its waiting riders fall in behind you, and your wounded are healed at once. The longer you stay away, the more riders gather there. A full gallop hits hardest but turns wide; slow down to turn tight.</p>
+      <button id="ch-resume-btn">Resume</button>
+      <button id="ch-controls-btn">Controls: point &amp; ride</button>
+      <button id="ch-text-btn" aria-pressed="false">Combat text: off</button>
+      <button id="ch-quit-btn">Quit to menu</button>
+    </div>
+  </div>
+
+  <button id="leave-battle-btn" title="Leave battle">Menu</button>
+
+  <button id="cover-screen">
+    <span style="display:flex;flex-direction:column;align-items:center;gap:16px">
+      <span>Pass device to Red</span>
+      <span style="font-size:16px;opacity:0.5;letter-spacing:1px">Tap to continue</span>
+    </span>
+  </button>
+
+  <div id="result-screen" class="screen" role="dialog" aria-modal="true" aria-labelledby="winner-text" aria-describedby="result-stats">
+    <h2 id="winner-text">Blue Wins!</h2>
+    <div class="stats" id="result-stats"></div>
+    <div class="buttons">
+      <button id="rematch-btn" style="font-weight:bold;letter-spacing:2px;text-transform:uppercase">Rematch</button>
+      <button id="new-battle-btn" style="opacity:0.7">Back</button>
+      <button id="reload-btn" hidden>Reload game</button>
+      <button id="replay-btn" style="display:none;background:transparent;border:1px solid #555;color:inherit;padding:6px 20px;font-size:13px;border-radius:4px;cursor:pointer;opacity:0.5">Watch Replay</button>
+    </div>
+  </div>
+
+</body>
+</html>

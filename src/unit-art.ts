@@ -36,7 +36,7 @@ function helmet(g: Canvas, x: number, r: number, color: number, dark: number): v
  * Local +X is the facing direction and +Y the unit's right-hand side.
  * Shared by the tactics renderer and the cavalry action mode so both look identical.
  */
-export function drawUnitArt(shape: Canvas, weapon: Canvas, type: UnitType, team: Team, r: number, theme: Theme, variant = 0): void {
+export function drawUnitArt(shape: Canvas, weapon: Canvas, type: UnitType, team: Team, r: number, theme: Theme, variant = 0, gear: 'lance' | 'bow' = 'lance'): void {
   const color = team === 'blue' ? theme.blue : theme.red;
   const dark = team === 'blue' ? theme.blueDark : theme.redDark;
 
@@ -57,8 +57,18 @@ export function drawUnitArt(shape: Canvas, weapon: Canvas, type: UnitType, team:
       // Team saddle cloth with a trim.
       shape.roundRect(-r * 0.85, -r * 0.56, r * 1.2, r * 1.12, r * 0.26).fill(color).stroke({ width: 0.7, color: dark });
       shape.roundRect(-r * 0.7, -r * 0.42, r * 0.9, r * 0.84, r * 0.18).stroke({ width: 0.5, color: theme.trim, alpha: 0.6 });
-      // Rider: shoulders, shield on the left arm, helmet.
+      // Rider: shoulders, helmet, and a shield on the left arm (horse archers: a quiver instead).
       shape.ellipse(-r * 0.15, 0, r * 0.27, r * 0.48).fill(color).stroke({ width: 0.5, color: dark });
+      if (gear === 'bow') {
+        shape.roundRect(-r * 0.75, r * 0.32, r * 0.55, r * 0.22, r * 0.08).fill(theme.leather);
+        for (let i = 0; i < 3; i++) shape.circle(-r * 0.78, r * (0.36 + i * 0.07), r * 0.05).fill(theme.trim);
+        helmet(shape, -r * 0.08, r * 0.2, color, dark);
+        // Recurve bow held out to the front, string drawn across it.
+        weapon.moveTo(r * 0.35, -r * 0.95).quadraticCurveTo(r * 0.95, -r * 0.4, r * 0.55, 0).quadraticCurveTo(r * 0.95, r * 0.4, r * 0.35, r * 0.95)
+          .stroke({ width: Math.max(0.6, r * 0.12), color: theme.wood, cap: 'round' });
+        weapon.moveTo(r * 0.35, -r * 0.95).lineTo(r * 0.2, 0).lineTo(r * 0.35, r * 0.95).stroke({ width: Math.max(0.3, r * 0.04), color: theme.trim, alpha: 0.85 });
+        break;
+      }
       shape.ellipse(-r * 0.05, -r * 0.52, r * 0.3, r * 0.22).fill(color).stroke({ width: 0.6, color: dark });
       helmet(shape, -r * 0.08, r * 0.22, color, dark);
       // Lance couched on the right, with a team pennant below the tip.

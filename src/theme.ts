@@ -1,5 +1,5 @@
 /** How the cavalry mode draws units, ground and effects (prototype styles besides classic). */
-export type ArtStyle = 'classic' | 'mini' | 'ink' | 'rts' | '3d';
+export type ArtStyle = 'classic' | 'ink' | 'rts' | '3d';
 
 export interface Theme {
   /** Cavalry-mode art style (default classic). */
@@ -85,72 +85,6 @@ export interface Theme {
   bloodFade: number;
   elevationAlpha: number;
 }
-
-export const NIGHT_THEME: Theme = {
-  bg: 0x1a1a2e,
-  grid: 0x1a1a2e,
-  gridAlpha: 0,
-
-  elevationOuter: 0x2e2e48,
-  elevationMid: 0x333358,
-  elevationInner: 0x3a3a68,
-  elevationLabel: '#66ff88',
-
-  obstacleBorder: 0x8888aa,
-  obstacleFill: 0x4a4a6e,
-  obstacleHighlight: 0x9999bb,
-
-  blue: 0x4a9eff,
-  blueDark: 0x2a5a8a,
-  red: 0xff4a4a,
-  redDark: 0x8a2a2a,
-
-  blueProjectile: 0x88ccff,
-  redProjectile: 0xff8888,
-
-  blueBlood: [0x3377dd, 0x2255bb, 0x5599ee],
-  redBlood: [0xdd3333, 0xbb2222, 0xee4444],
-  blueStain: 0x1a3366,
-  redStain: 0x661a1a,
-
-  muzzleFlash: 0xffffaa,
-  muzzleCore: 0xffffff,
-
-  barrel: 0xffffff,
-  barrelAlpha: 0.6,
-
-  steel: 0xbdbab4,
-  steelDark: 0x6c6964,
-  wood: 0x8a7c6a,
-  leather: 0x5e5246,
-  trim: 0xf2ead8,
-
-  grass: false,
-  grassDark: 0x1a1a2e,
-  grassLight: 0x1a1a2e,
-  grassDry: 0x1a1a2e,
-  dirt: 0x6a6a90,
-  textOutline: 0x1a1a2e,
-
-  hpBg: 0x333333,
-  hpHigh: 0x44ff44,
-  hpMid: 0xffaa00,
-  hpLow: 0xff4444,
-
-  bluePath: 0x4a9eff,
-  redPath: 0xff4a4a,
-  bluePathBright: 0x8ac4ff,
-  redPathBright: 0xff8a8a,
-  labelFill: 0xffffff,
-  labelWarn: 0xff4444,
-  elevationBonus: 0x66ff88,
-  hoverLabelFill: 0xffffff,
-  paperNoise: false,
-  sketchyObstacles: false,
-  bloodAlpha: 1,
-  bloodFade: 0.6,
-  elevationAlpha: 1,
-};
 
 export const DAY_THEME: Theme = {
   bg: 0xf5f0e0,
@@ -285,18 +219,6 @@ export const FIELD_THEME: Theme = {
   textOutline: 0x1c2412,
 };
 
-/** Prototype: painted tabletop miniatures on a felt table. */
-export const MINI_THEME: Theme = {
-  ...FIELD_THEME,
-  artStyle: 'mini',
-  blue: 0x2a5bc4, blueDark: 0x13306f, red: 0xc42a1f, redDark: 0x6a120c,
-  steel: 0xc8c8c4, steelDark: 0x55534e, wood: 0x9a7448, trim: 0xf4ecd6,
-  grassDark: 0x3d6230, grassLight: 0x5a8240, grassDry: 0x8e9450, dirt: 0xa88f60,
-  // No gore on the table: knocks chip paint and scuff the felt.
-  blueBlood: [0x3a3226, 0x5a4a36, 0x2a241c], redBlood: [0x3a3226, 0x5a4a36, 0x2a241c],
-  blueStain: 0x3a3424, redStain: 0x3a3424, bloodAlpha: 0.6, bloodFade: 0.3,
-};
-
 /** Prototype: ink and watercolour on paper. */
 export const INK_THEME: Theme = {
   ...DAY_THEME,
@@ -323,13 +245,10 @@ export const RTS_THEME: Theme = {
 /** Prototype: real-time 3D battlefield (the charge mode only; tactics uses the field look). */
 export const THREE_D_THEME: Theme = { ...FIELD_THEME, artStyle: '3d' };
 
-export type ThemeName = 'field' | 'parchment' | 'night' | 'mini' | 'ink' | 'rts' | '3d';
+/** The styles on offer. (DAY_THEME and FIELD_THEME are the palettes the others build on.) */
+export type ThemeName = 'ink' | 'rts' | '3d';
 
 export const THEMES: Record<ThemeName, Theme> = {
-  field: FIELD_THEME,
-  parchment: DAY_THEME,
-  night: NIGHT_THEME,
-  mini: MINI_THEME,
   ink: INK_THEME,
   rts: RTS_THEME,
   '3d': THREE_D_THEME,

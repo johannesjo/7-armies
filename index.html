@@ -452,8 +452,31 @@
     #lanes-btn:hover { background: #34405a; border-color: #7a9ad0; }
     #lanes-btn small { display: block; font-size: 11px; letter-spacing: 1px; text-transform: none; font-weight: normal; opacity: 0.75; margin-top: 4px; }
     body.day-mode #lanes-btn { background: #d4dcea; color: #22324a; border-color: #5a7ab0; }
-    #charge-screen[data-mode="lanes"] .ch-only,
-    #charge-screen:not([data-mode="lanes"]) .ln-only { display: none !important; }
+    /* Which HUD pieces each mode shows: ch = the battle, cmd = both commander modes, ln = lanes, fr = front. */
+    #charge-screen:not([data-mode="battle"]) .ch-only,
+    #charge-screen[data-mode="battle"] .cmd-only,
+    #charge-screen:not([data-mode="lanes"]) .ln-only,
+    #charge-screen:not([data-mode="front"]) .fr-only,
+    #charge-screen[data-mode="lanes"] .no-lanes { display: none !important; }
+    #front-btn {
+      padding: 14px 36px;
+      font-size: 18px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      background: #3a3424;
+      color: #eee;
+      border: 2px solid #b0904a;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #front-btn:hover { background: #4a422c; border-color: #d0b06a; }
+    #front-btn small { display: block; font-size: 11px; letter-spacing: 1px; text-transform: none; font-weight: normal; opacity: 0.75; margin-top: 4px; }
+    body.day-mode #front-btn { background: #eadfc4; color: #3a2e14; border-color: #a08040; }
+    /* Front: who is winning each sector of the line (blue share of the fighting there). */
+    #fr-sectors { display: flex; gap: 4px; justify-content: center; margin: 3px auto 1px; }
+    #fr-sectors .fr-sec { width: 34px; height: 5px; border-radius: 3px; background: var(--ch-red); overflow: hidden; opacity: 0.9; }
+    #fr-sectors .fr-sec > div { height: 100%; width: 50%; background: var(--ch-blue); transition: width 0.3s linear; }
     #ln-level { font-size: 20px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
     #ln-xp { background: var(--ch-gallop, #e6b03a); }
     #ln-xp-bar { width: 100px; margin: 3px auto 2px; }
@@ -538,21 +561,21 @@
       #ln-level { font-size: 16px; }
       #ln-xp-bar { width: 80px; }
     }
-    #charge-screen[data-mode="lanes"][data-controls="joystick"] #ln-cards { max-width: calc(100% - 2 * 236px); }
+    #charge-screen:not([data-mode="battle"])[data-controls="joystick"] #ln-cards { max-width: calc(100% - 2 * 236px); }
     /* Small phones with the stick: the tray keeps clear of it (over the minimap instead). */
     @media (max-width: 760px) {
-      #charge-screen[data-mode="lanes"][data-controls="joystick"] #ln-cards,
-      #charge-screen[data-mode="lanes"][data-controls="joystick"] #ln-cards.active {
+      #charge-screen:not([data-mode="battle"])[data-controls="joystick"] #ln-cards,
+      #charge-screen:not([data-mode="battle"])[data-controls="joystick"] #ln-cards.active {
         left: max(8px, env(safe-area-inset-left, 0px));
         right: calc(228px + env(safe-area-inset-right, 0px));
         transform: none;
         max-width: none;
         min-width: 0;
       }
-      #charge-screen[data-mode="lanes"][data-controls="joystick"] #ln-cards .ln-text { display: none; }
+      #charge-screen:not([data-mode="battle"])[data-controls="joystick"] #ln-cards .ln-text { display: none; }
     }
-    /* Lanes: never let a card swallow a thumb meant for the stick (buttons and pause stay on top). */
-    #charge-screen[data-mode="lanes"] #ch-joy-zone { z-index: 3; }
+    /* Commander modes: never let a card swallow a thumb meant for the stick (buttons and pause stay on top). */
+    #charge-screen:not([data-mode="battle"]) #ch-joy-zone { z-index: 3; }
     /* The ability: one round button above the minimap (left thumb), key Q. */
     #ln-abilities {
       position: absolute;
@@ -626,11 +649,11 @@
       #ln-pick .ln-cmd .ln-cmd-icon { font-size: 20px; }
     }
 
-    /* The lanes HUD's right panel has an extra line: the buttons sit lower. */
-    #charge-screen[data-mode="lanes"] #ch-buttons { top: calc(92px + env(safe-area-inset-top, 0px)); }
-    body.style-rts #charge-screen[data-mode="lanes"] #ch-buttons { top: calc(76px + env(safe-area-inset-top, 0px)); }
+    /* The commander HUD's right panel has an extra line: the buttons sit lower. */
+    #charge-screen:not([data-mode="battle"]) #ch-buttons { top: calc(92px + env(safe-area-inset-top, 0px)); }
+    body.style-rts #charge-screen:not([data-mode="battle"]) #ch-buttons { top: calc(76px + env(safe-area-inset-top, 0px)); }
     @media (max-width: 700px) {
-      #charge-screen[data-mode="lanes"] #ch-buttons { top: calc(100px + env(safe-area-inset-top, 0px)); }
+      #charge-screen:not([data-mode="battle"]) #ch-buttons { top: calc(100px + env(safe-area-inset-top, 0px)); }
     }
   </style>
 </head>
@@ -640,6 +663,7 @@
     <p>Lead a cavalry squadron through a raging battle. Ride into their flanks and rear, break their morale, and cut down their general.</p>
     <div class="btn-row" style="display:flex;flex-direction:column;align-items:center;gap:12px">
       <button id="charge-btn">Ride</button>
+      <button id="front-btn">Front<small>1v1 commanders over one great battle: break their army</small></button>
       <button id="lanes-btn">Lanes<small>1v1 against a rival commander: push three lanes, break their keep</small></button>
     </div>
     <div id="ln-pick" role="group" aria-label="Choose your horse">
@@ -677,24 +701,25 @@
       <div class="ch-center">
         <div id="ch-score" class="ch-only">0</div>
         <div id="ch-combo" class="ch-only"></div>
-        <div id="ln-level" class="ln-only">Level 1</div>
-        <div id="ln-xp-bar" class="ch-bar ln-only"><div id="ln-xp"></div></div>
+        <div id="ln-level" class="cmd-only">Level 1</div>
+        <div id="ln-xp-bar" class="ch-bar cmd-only"><div id="ln-xp"></div></div>
+        <div id="fr-sectors" class="fr-only" title="Each sector of the line: blue is our share"><div class="fr-sec"><div></div></div><div class="fr-sec"><div></div></div><div class="fr-sec"><div></div></div></div>
         <div id="ch-time">0:00</div>
       </div>
       <div class="ch-col right">
-        <span id="ln-rival" class="ln-only">Rival Lv 1</span>
-        <span class="ch-label"><span class="ch-only">Enemy morale</span><span class="ln-only">Their keep</span></span>
+        <span id="ln-rival" class="cmd-only">Rival Lv 1</span>
+        <span class="ch-label"><span class="no-lanes">Enemy morale</span><span class="ln-only">Their keep</span></span>
         <div class="ch-bar"><div id="ch-red"></div></div>
-        <span class="ch-label"><span class="ch-only">Our morale</span><span class="ln-only">Our keep</span></span>
+        <span class="ch-label"><span class="no-lanes">Our morale</span><span class="ln-only">Our keep</span></span>
         <div class="ch-bar"><div id="ch-blue"></div></div>
       </div>
     </div>
     <canvas id="ch-minimap" aria-hidden="true"></canvas>
-    <div id="ln-respawn" class="ln-only" aria-live="polite"></div>
-    <div id="ln-abilities" class="ln-only">
+    <div id="ln-respawn" class="cmd-only" aria-live="polite"></div>
+    <div id="ln-abilities" class="cmd-only">
       <button id="ln-ability" type="button" title="Ability (Q)" aria-label="Ability"><span class="ln-ab-key">Q</span><span class="ln-ab-icon">📯</span><span class="ln-ab-name">Ability</span><span class="ln-cd"></span></button>
     </div>
-    <div id="ln-cards" class="ln-only" role="group" aria-label="Level up: choose a card">
+    <div id="ln-cards" class="cmd-only" role="group" aria-label="Level up: choose a card">
       <div id="ln-cards-title">Choose a card</div>
       <div class="ln-row">
         <button class="ln-card" type="button"></button>
@@ -710,6 +735,7 @@
       <span class="ctl-route"><b>Draw your route</b> — <span class="mouse-only">drag with the mouse</span><span class="touch-only">drag your finger</span> and your squadron rides it.<br>
       <span class="legend canter"></span> draw slowly to canter · <span class="legend gallop"></span> flick quickly to gallop<br></span>
       <span class="hint-more ln-only">Ride with your <b>foot</b> down the lanes: break their battalions, then help your foot pull down the <b>towers</b> — alone, the walls shrug you off. Stay out of an enemy tower's <b>red ring</b> unless it has your foot to shoot at. Ride home to the keep to <b>heal and remount</b>. Each level, <b>choose a card</b>. Your horse's <b>ability</b>: Q or the round button. You only see what your troops see. Break their <b>keep</b> to win.<br></span>
+      <span class="hint-more fr-only">One great battle, and a commander a side. Charge enemy battalions in the <b>flank</b> and <b>rear</b> to break them — wherever our line is <b>buckling</b>. Catch their <b>reinforcement columns</b> on the march. Ride home to <b>heal and remount</b>. Each level, <b>choose a card</b>; your <b>ability</b>: Q or the round button. You only see what your troops see. Break their army's <b>morale</b> to win.<br></span>
       <span class="hint-more ch-only">Hit flanks <b>×2</b> and rears <b>×3</b> — <b>glowing edges</b> show an open side · dodge the red circles · ride into <b>allied troops</b> to take command of them<br>
       Break the enemy's <b>morale</b> and their whole army flees · cut down their <b>general</b> (gold on the map) to shake it</span>
       <span class="mouse-only"><br>Keyboard reins: <kbd>W</kbd> ride on · <kbd>A</kbd>/<kbd>D</kbd> turn · <kbd>S</kbd> rein in · <kbd>Space</kbd> gallop</span>
@@ -723,6 +749,7 @@
     <div id="ch-pause" role="dialog" aria-modal="true" aria-label="Paused">
       <h2>Paused</h2>
       <p class="ch-help ln-only">Lanes: one commander a side. Waves of foot march down all three lanes every 25 seconds. Charge enemy battalions in the flank (×2) or rear (×3) to break them, and help your own foot pull down the enemy towers — outer, then inner, then the keep. Towers shoot your foot first, but they turn on you if you ride in alone or attack their commander under the walls: dodge the red circles. Ride home into the ring round your keep to heal and to fill your squadron back up. Every enemy that falls near you gives experience; each level, choose one of three cards (keys 1–3). Knights break foot by charging its flank or rear; horse archers by circling at bowshot — their arrows shake morale, but their charge barely dents a battalion. Each kind of horse has one ability (Q or the round button): Knights' Thunder Charge (4 s faster, trampling twice as hard), Horse Archers' Arrow Storm (every rider looses three arrows at once). You only see what your foot, your squadron and your towers see — and only a little way into the woods. Lose all your riders and you're out until you can ride again. Break their keep to win.</p>
+      <p class="ch-help fr-only">Front: one great battle, and a commander a side. Both armies stand in one long line; every 30 seconds each sends a column of fresh foot from its rear edge to whichever sector of the line is weakest (the three bars under the level show who is winning the left, centre and right). Charge enemy battalions in the flank (×2) or rear (×3) to break them, and help wherever our line is buckling — or catch their columns on the march, before they reach the line. Pikes facing you will stop a charge. Every battalion that breaks and every man that falls wears down his army's morale; slay the rival commander to shake his whole army. An army breaks when four in five of all the foot it has fielded are dead or fled — and after nine minutes both armies tire, so every battle ends. Ride home into the ring behind your army to heal and to fill your squadron back up. Every enemy that falls near you gives experience; each level, choose one of three cards (keys 1–3). Knights break foot by charging its flank or rear; horse archers by circling at bowshot — their arrows shake morale, but their charge barely dents a battalion. Each kind of horse has one ability (Q or the round button). You only see what your troops and your squadron see. Lose all your riders and you're out until you can ride again.</p>
       <p class="ch-help ch-only"><span class="ctl-joystick">Steer with the stick at the bottom right — push further to ride faster, into the outer ring to gallop.</span><span class="ctl-direct">Hold your finger or the mouse button where you want to ride — the further from your squadron, the faster it goes, and far out it gallops.</span><span class="ctl-route">Drag to draw the squadron's route — draw slowly for a canter, flick quickly for a gallop. Start a stroke at the end of your route to extend it.</span> Charge into the flanks (×2) and rear (×3) of enemy battalions to break their morale. Wheel wide: on a sharp turn the riders on the outside of your wedge fall behind, and a loose wedge loses to a tight one. Hit enemy horsemen in the flank or rear to scatter them — or lead pursuing knights onto our pikes and archers. Pikes facing you will stop a charge, and enemy knights will hunt you. Keep moving — riders that stall in the crowd get pulled down. Ride into allied cavalry troops to take them under your command (up to 45 riders, a full wedge); the two blue camps behind our wings are pit stops — ride through one and its waiting riders fall in behind you, and your wounded are healed at once. The longer you stay away, the more riders gather there. A full gallop hits hardest but turns wide; slow down to turn tight.</p>
       <button id="ch-resume-btn">Resume</button>
       <button id="ch-controls-btn">Controls: point &amp; ride</button>

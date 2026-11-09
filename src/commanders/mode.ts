@@ -284,9 +284,10 @@ export abstract class CommanderMode extends ChargeMode {
     this.levelEl.textContent = `Level ${me.level}`;
     this.xpEl.style.width = `${Math.min(1, me.xp / xpToNext(me.level)) * 100}%`;
     const rk = COMMANDERS[rival.kind];
-    this.rivalEl.textContent = rival.dead
-      ? `${rk.icon} Rival slain (${Math.ceil(rival.respawnAt - sim.time)})`
-      : `${rk.icon} Rival ${rk.title} Lv ${rival.level} · ♞ ${rival.sq.riders.length}`;
+    this.rivalEl.title = `Rival ${rk.title}`;
+    this.rivalEl.textContent = !rival.dead
+      ? `${rk.icon} Rival Lv ${rival.level} · ♞ ${rival.sq.riders.length}`
+      : Number.isFinite(rival.respawnAt) ? `${rk.icon} Rival slain (${Math.ceil(rival.respawnAt - sim.time)})` : `${rk.icon} Rival fled`;
     this.updateAbilities();
     this.hudExtra(sim);
     const t = Math.floor(sim.time);

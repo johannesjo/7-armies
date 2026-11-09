@@ -163,6 +163,10 @@ export abstract class CommanderSim<E extends { type: string } = { type: string }
   protected navTo(_from: Vec2, to: Vec2): Vec2 { return to; }
   /** Obstacles the rival swerves round. */
   protected obstacles(): readonly Obstacle[] { return []; }
+  /** Experience multiplier (a great battle has far more men falling near you than a lane). */
+  protected xpScale(): number { return 1; }
+  /** Horse archers' arrows against foot, as a share of their full force. */
+  protected arrowScale(): number { return 1; }
   /** How hard foot hits foot before banners (the battle's pace, or faster). */
   protected baseMelee(s: Soldier): number { return super.meleeMult(s); }
 
@@ -316,8 +320,8 @@ export abstract class CommanderSim<E extends { type: string } = { type: string }
     const ty = best.y + best.vy * flight + (this.rand() - 0.5) * 10;
     this.arrows.push({
       sx: r.x, sy: r.y, tx, ty, t: delay, flight, team: h.team, volley: -1,
-      power: L.HA_POWER_FOOT, riderPower: L.HA_POWER_RIDER, byPlayer: h.sq === this.player,
-      shock: L.HA_SHOCK * h.mods.volleyShock,
+      power: L.HA_POWER_FOOT * this.arrowScale(), riderPower: L.HA_POWER_RIDER, byPlayer: h.sq === this.player,
+      shock: L.HA_SHOCK * h.mods.volleyShock * this.arrowScale(),
     });
     return true;
   }
@@ -464,7 +468,7 @@ export abstract class CommanderSim<E extends { type: string } = { type: string }
     const h = this.heroes[team];
     const HL = h.sq.riders[0];
     if (!HL || Math.hypot(HL.x - x, HL.y - y) > L.XP_RANGE) return;
-    this.gainXp(h, amount);
+    this.gainXp(h, amount * this.xpScale());
   }
 
   protected gainXp(h: Hero, amount: number): void {
